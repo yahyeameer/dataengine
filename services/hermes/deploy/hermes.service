@@ -10,11 +10,11 @@
 #   sudo systemctl enable --now hermes
 #
 # Watch:  journalctl -u hermes -f
-# Reload: sudo systemctl restart hermes    (after editing /etc/hermes/hermes.env)
+# Reload: sudo systemctl restart hermes    (after editing /etc/dataengine/hermes.env)
 
 [Unit]
 Description=Hermes data-operations agent
-Documentation=https://github.com/yahyeameer/AI-Data-Operations-Platform
+Documentation=https://github.com/yahyeameer/dataengine
 # Wants= rather than Requires=: Supabase being unreachable at boot is a
 # condition the worker already handles by backing off and retrying, so it must
 # not be a reason to refuse to start.
@@ -25,13 +25,13 @@ After=network-online.target
 Type=simple
 User=hermes
 Group=hermes
-WorkingDirectory=/opt/hermes
+WorkingDirectory=/opt/dataengine
 
 # Secrets live in a root-owned file readable only by the service user, not in
 # the unit -- systemd units are world-readable and land in `systemctl cat`.
-EnvironmentFile=/etc/hermes/hermes.env
+EnvironmentFile=/etc/dataengine/hermes.env
 
-ExecStart=/opt/hermes/.venv/bin/python -m hermes
+ExecStart=/opt/dataengine/.venv/bin/python -m hermes
 
 Restart=always
 RestartSec=10
@@ -59,7 +59,7 @@ RestrictSUIDSGID=true
 LockPersonality=true
 MemoryDenyWriteExecute=false
 # The only writable path it needs.
-ReadWritePaths=/var/lib/hermes
+ReadWritePaths=/var/lib/dataengine
 # Outbound HTTPS only. No listening socket, ever.
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 

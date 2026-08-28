@@ -119,8 +119,8 @@ usermod -aG docker hermes
 
 ```bash
 su - hermes
-git clone https://github.com/yahyeameer/AI-Data-Operations-Platform.git
-cd AI-Data-Operations-Platform/services/hermes
+git clone https://github.com/yahyeameer/dataengine.git
+cd dataengine/services/hermes
 
 cp .env.example .env
 nano .env      # SUPABASE_URL, SUPABASE_SECRET_KEY, optionally a model key
@@ -157,24 +157,24 @@ skip it:
 
 ```bash
 sudo apt install -y python3.12-venv
-sudo mkdir -p /opt/hermes /etc/hermes /var/lib/hermes
-sudo chown -R hermes:hermes /opt/hermes /var/lib/hermes
+sudo mkdir -p /opt/dataengine /etc/dataengine /var/lib/dataengine
+sudo chown -R hermes:hermes /opt/dataengine /var/lib/dataengine
 
 su - hermes
-cd /opt/hermes
-git clone https://github.com/yahyeameer/AI-Data-Operations-Platform.git repo
-cp -r repo/services/hermes/hermes repo/services/hermes/requirements.txt /opt/hermes/
+cd /opt/dataengine
+git clone https://github.com/yahyeameer/dataengine.git repo
+cp -r repo/services/hermes/hermes repo/services/hermes/requirements.txt /opt/dataengine/
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 exit
 
 # Secrets in a root-owned file, not in the unit -- units are world-readable.
-sudo cp /opt/hermes/repo/services/hermes/.env.example /etc/hermes/hermes.env
-sudo nano /etc/hermes/hermes.env
-sudo chmod 600 /etc/hermes/hermes.env
-sudo chown root:hermes /etc/hermes/hermes.env
+sudo cp /opt/dataengine/repo/services/hermes/.env.example /etc/dataengine/hermes.env
+sudo nano /etc/dataengine/hermes.env
+sudo chmod 600 /etc/dataengine/hermes.env
+sudo chown root:hermes /etc/dataengine/hermes.env
 
-sudo cp /opt/hermes/repo/services/hermes/deploy/hermes.service /etc/systemd/system/
+sudo cp /opt/dataengine/repo/services/hermes/deploy/hermes.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now hermes
 journalctl -u hermes -f

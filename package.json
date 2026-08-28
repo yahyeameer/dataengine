@@ -1,5 +1,5 @@
 {
-  "name": "ai-data-operations-platform",
+  "name": "dataengine",
   "private": true,
   "description": "Workflow-learning data-operations copilot for accounting practices.",
   "scripts": {
