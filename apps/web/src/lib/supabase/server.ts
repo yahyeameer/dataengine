@@ -48,7 +48,11 @@ export function createAdminSupabase() {
   const secret = process.env.SUPABASE_SECRET_KEY;
 
   if (!secret) {
-    throw new Error('SUPABASE_SECRET_KEY is not set; refusing to build an admin client');
+    throw new Error(
+      'SUPABASE_SECRET_KEY is not set. The write paths need the service role: ' +
+        'the datasets and raw_uploads tables grant only SELECT to authenticated, ' +
+        'so falling back to the publishable key fails with an RLS violation.',
+    );
   }
 
   return createClient<Database>(SUPABASE_URL, secret, {

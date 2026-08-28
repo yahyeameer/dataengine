@@ -15,6 +15,29 @@ import { NextResponse, type NextRequest } from 'next/server';
 const PROTECTED_PREFIXES = ['/app', '/onboarding'];
 const AUTH_ROUTES = ['/login', '/signup'];
 
+// The Supabase auth call in the proxy runs on EVERY request. If the session
+// cookie has drifted into a bad-refresh state (a rotated/"already used" refresh
+// token, common with SSR across tabs), getUser() can stall for tens of seconds
+// -- and because this runs before every route, it hangs the whole app, not one
+// page. We bound the TOTAL getUser() time with a hard deadline (a per-fetch
+// abort is worse: the auth library treats an aborted fetch as a retryable
+// network error and retries it with backoff, summing to ~30s). On timeout or
+// error we fail safe: treat the request as signed-out.
+const AUTH_DEADLINE_MS = 5000;
+
+async function getUserBounded(
+  supabase: ReturnType<typeof createServerClient>,
+): Promise<Awaited<ReturnType<typeof supabase.auth.getUser>>['data']['user']> {
+  const deadline = new Promise<null>((resolve) =>
+    setTimeout(() => resolve(null), AUTH_DEADLINE_MS),
+  );
+  const lookup = supabase.auth
+    .getUser()
+    .then((r: Awaited<ReturnType<typeof supabase.auth.getUser>>) => r.data.user)
+    .catch(() => null);
+  return Promise.race([lookup, deadline]);
+}
+
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
 
@@ -40,10 +63,12 @@ export async function proxy(request: NextRequest) {
   );
 
   // getUser() rather than getSession(): it revalidates the token with the auth
-  // server instead of trusting whatever the cookie claims.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // server instead of trusting whatever the cookie claims. Bounded + fail-safe:
+  // if it can't answer within the deadline, we treat the request as signed-out,
+  // so a protected page redirects to /login (minting a clean session) instead
+  // of hanging, and public/API traffic proceeds unauthenticated as it would for
+  // any logged-out visitor. An auth hiccup must never block the request.
+  const user = await getUserBounded(supabase);
 
   const { pathname } = request.nextUrl;
   const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p));
