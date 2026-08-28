@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { handleRouteError } from '@/lib/api';
-import { adminFor, requireWorkspaceAccess } from '@/lib/authz';
+import { adminFor, requireApiUser, requireWorkspaceAccess } from '@/lib/authz';
 import { createServerSupabase } from '@/lib/supabase/server';
 
 /**
@@ -49,6 +49,14 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const { jobId } = querySchema.parse({ jobId: url.searchParams.get('jobId') });
+
+    // Establish the caller before looking anything up. Without this the RLS
+    // read below returns nothing for a signed-out request and the route answers
+    // 404 -- so an expired session tells the user their file does not exist,
+    // which sends them looking for a missing export instead of signing back in.
+    // 404 is reserved for the case it is meant for: a job that exists but
+    // belongs to somebody else.
+    await requireApiUser();
 
     const supabase = await createServerSupabase();
 
