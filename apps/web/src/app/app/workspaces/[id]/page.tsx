@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import {
   AgentPanel,
   AnalyseButton,
+  CategorizeButton,
   DownloadButton,
   type DownloadableJob,
   ExportButton,
@@ -138,6 +139,30 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
     }
   }
 
+  // Column names for the categorise control, from the profile the agent wrote
+  // when it measured this version. Read here rather than from the Parquet
+  // because the page has no business downloading a dataset to draw a dropdown.
+  let profileColumns: string[] = [];
+  if (latestVersion) {
+    const { data: profile } = await supabase
+      .from('dataset_profiles')
+      .select('columns')
+      .eq('dataset_version_id', latestVersion.id)
+      .maybeSingle();
+
+    const raw = (profile?.columns ?? []) as unknown;
+    if (Array.isArray(raw)) {
+      profileColumns = raw
+        .map((entry) =>
+          entry && typeof entry === 'object' && 'name' in entry
+            ? String((entry as { name: unknown }).name)
+            : '',
+        )
+        // __source_row and the __raw_ shadows are machinery; nobody categorises them.
+        .filter((name) => name && !name.startsWith('__'));
+    }
+  }
+
   // Files the agent has already written and nobody has been able to find.
   //
   // Derived from the job list that was fetched anyway rather than a second
@@ -204,6 +229,16 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
             workspaceId={workspace.id}
             run={openRun}
             deviations={runDeviations}
+          />
+        </div>
+      ) : null}
+
+      {latestVersion && profileColumns.length > 0 ? (
+        <div className="mb-6">
+          <CategorizeButton
+            workspaceId={workspace.id}
+            datasetVersionId={latestVersion.id}
+            columns={profileColumns}
           />
         </div>
       ) : null}

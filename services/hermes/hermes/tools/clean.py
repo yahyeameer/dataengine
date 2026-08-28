@@ -220,6 +220,70 @@ def _op_map_values(table: Table, params: dict[str, Any]) -> OperationResult:
     return result
 
 
+def _op_assign_category(table: Table, params: dict[str, Any]) -> OperationResult:
+    """
+    Derive a category column from a source column and an approved mapping.
+
+    The only operation here that *adds* a column rather than correcting one, and
+    the only one whose mapping came from a model rather than from a rule. Both
+    facts argue for the same design: it is exact-match, and the mapping is a
+    parameter.
+
+    Exact-match because the mapping the accountant approved is the mapping that
+    runs. Re-deriving categories at apply time -- asking the model again, or
+    re-running a similarity threshold -- would mean the column written is not
+    the column that was reviewed, which is the one thing this pipeline promises
+    never to do. A value nobody categorised gets the fallback and is counted, so
+    "47 rows went to Uncategorised" is visible rather than silent.
+
+    Writing beside the source rather than over it, because a category is an
+    opinion about the data and the data is not.
+    """
+    column = params["column"]
+    target = params.get("target") or f"{column}_category"
+    mapping: dict[str, str] = params.get("mapping", {})
+    fallback = params.get("fallback", "Uncategorised")
+
+    values = table.columns.get(column)
+    result = OperationResult(op="assign_category", column=target, rows_changed=0)
+
+    if values is None:
+        result.warnings.append(f"column {column!r} is not present; step skipped")
+        return result
+    if not mapping:
+        result.warnings.append("no categories were approved; step skipped")
+        return result
+    if target in table.columns:
+        result.warnings.append(f"column {target!r} already exists; step skipped")
+        return result
+
+    assigned: list[str] = []
+    unmatched = 0
+
+    for index, value in enumerate(values):
+        key = normalize_text(value).lower() if value is not None else ""
+        category = mapping.get(key)
+        if category is None:
+            category = fallback
+            unmatched += 1
+        else:
+            result.rows_changed += 1
+            if len(result.samples) < 5:
+                result.samples.append(
+                    ChangeRecord(table.source_rows[index], target, None, category)
+                )
+        assigned.append(category)
+
+    table.columns[target] = assigned
+
+    if unmatched:
+        result.warnings.append(
+            f"{unmatched} row(s) had no approved category and were set to {fallback!r}"
+        )
+
+    return result
+
+
 def _op_drop_duplicate_rows(table: Table, params: dict[str, Any]) -> OperationResult:
     subset: list[str] | None = params.get("columns")
     keep = params.get("keep", "first")
@@ -369,6 +433,7 @@ _TRANSFORMS: dict[str, Callable[[Table, dict[str, Any]], OperationResult]] = {
     "drop_duplicate_rows": _op_drop_duplicate_rows,
     "coerce_number": _op_coerce_number,
     "normalize_date": _op_normalize_date,
+    "assign_category": _op_assign_category,
 }
 
 # Derived, not hand-listed. A second list of operation names is exactly how the

@@ -1698,6 +1698,7 @@ export type Database = {
         | "generate_report"
         | "replay_recipe"
         | "export_dataset"
+        | "categorize_dataset"
       agent_job_status:
         | "queued"
         | "running"
@@ -1876,6 +1877,7 @@ export const Constants = {
         "generate_report",
         "replay_recipe",
         "export_dataset",
+        "categorize_dataset",
       ],
       agent_job_status: [
         "queued",

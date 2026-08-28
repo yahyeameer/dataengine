@@ -39,6 +39,7 @@ export const JOB_KIND_LABELS: Record<AgentJobKind, string> = {
   reconcile_sources: 'Reconciling two sources',
   generate_report: 'Writing the report',
   export_dataset: 'Preparing the download',
+  categorize_dataset: 'Sorting values into categories',
 };
 
 /**

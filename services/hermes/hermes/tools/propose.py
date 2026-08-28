@@ -49,6 +49,7 @@ KNOWN_OPERATIONS = {
     "drop_duplicate_rows",
     "coerce_number",
     "normalize_date",
+    "assign_category",
     "review_ambiguous_dates",
     "review_key_conflicts",
     "block_totals_mismatch",

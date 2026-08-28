@@ -1620,6 +1620,162 @@ def handle_export_dataset(context: JobContext) -> dict[str, Any]:
     }
 
 
+# -----------------------------------------------------------------------------
+# categorize_dataset
+# -----------------------------------------------------------------------------
+
+
+def handle_categorize_dataset(context: JobContext) -> dict[str, Any]:
+    """
+    Sort one column's values into categories, as a proposal.
+
+    The only job here whose answer is a judgement. Every other finding is
+    decidable from the data -- a duplicate is duplicated, a total reconciles or
+    it does not -- whereas whether a supplier is a utility or a communications
+    cost is a question about how this practice keeps its books.
+
+    That does not earn the model any new authority. It returns a mapping; this
+    writes a proposal; the accountant approves it in the same queue as
+    everything else; apply_cleaning writes the column from the mapping that was
+    approved. The column that appears is the column somebody read.
+
+    Filed at the Review tier deliberately, never Auto. A rule that trims
+    whitespace can be trusted to a confidence score. A judgement about somebody
+    else's accounts cannot, however good the model is on the day.
+    """
+    version_id = context.job.get("dataset_version_id")
+    if not version_id:
+        raise JobError("this job has no dataset version attached")
+
+    column = str(context.payload.get("column") or "").strip()
+    if not column:
+        raise JobError("no column was chosen to categorise")
+
+    if not context.llm.enabled:
+        raise JobError(
+            "Categorising needs a model, and none is configured. Set OPENAI_API_KEY or "
+            "KIMI_API_KEY on the agent host. Every other step runs without one."
+        )
+
+    version = _load_version(context, version_id)
+    parquet_bytes = _load_parquet(context, version)
+
+    context.heartbeat({"stage": "reading"})
+    rows = _rows_from_parquet(parquet_bytes)
+    if not rows:
+        raise JobError("this version has no rows to categorise")
+    if column not in rows[0]:
+        available = ", ".join(sorted(rows[0].keys())[:20])
+        raise JobError(f"there is no column called {column!r} in this version. Columns: {available}")
+
+    # Distinct values and how many rows each covers. The counts are what make
+    # the proposal reviewable -- "312 rows" is the number that decides whether
+    # this is worth anybody's attention.
+    counts: dict[str, int] = {}
+    originals: dict[str, str] = {}
+    for row in rows:
+        value = row.get(column)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        key = text.lower()
+        counts[key] = counts.get(key, 0) + 1
+        originals.setdefault(key, text)
+
+    if not counts:
+        raise JobError(f"column {column!r} is empty, so there is nothing to categorise")
+
+    # Most frequent first: if the column has more distinct values than one
+    # prompt should carry, the ones covering the most rows are the ones worth
+    # spending it on.
+    ordered = sorted(originals.values(), key=lambda text: -counts[text.lower()])
+
+    context.heartbeat({"stage": "categorising", "values": len(ordered)})
+    requested = context.payload.get("categories")
+    categories_in = [str(item) for item in requested] if isinstance(requested, list) else None
+
+    mapping, categories, model_used = context.llm.categorize_values(
+        column,
+        ordered,
+        categories=categories_in,
+        hint=str(context.payload.get("hint") or "") or None,
+    )
+
+    if not mapping:
+        raise JobError(
+            "The model did not return any usable categories for this column. It may be free "
+            "text rather than something with categories in it."
+        )
+
+    target = str(context.payload.get("target") or "").strip() or f"{column}_category"
+    covered = sum(counts.get(key, 0) for key in mapping)
+    uncovered = len(rows) - covered
+
+    examples = [
+        {"value": originals[key], "category": mapping[key], "rows": counts.get(key, 0)}
+        for key in sorted(mapping, key=lambda k: -counts.get(k, 0))[:8]
+    ]
+
+    rationale = (
+        f"{len(mapping)} distinct value(s) in {column!r}, covering {covered} row(s), were sorted "
+        f"into {len(categories)} categor{'y' if len(categories) == 1 else 'ies'}: "
+        f"{', '.join(categories[:8])}"
+        f"{'…' if len(categories) > 8 else ''}. "
+        f"Approving adds a new {target!r} column and leaves {column!r} untouched."
+    )
+    if uncovered:
+        rationale += f" {uncovered} row(s) had no category and would read 'Uncategorised'."
+
+    proposal = {
+        "group_key": f"category:{column}",
+        "step_type": "assign_category",
+        "column_name": column,
+        "title": f"Add {target}: {len(categories)} categories across {covered} rows",
+        "rationale": rationale,
+        "operation": {
+            "op": "assign_category",
+            "column": column,
+            "target": target,
+            "mapping": mapping,
+            "fallback": "Uncategorised",
+        },
+        "evidence": {
+            "categories": categories,
+            "examples": examples,
+            "distinct_values": len(counts),
+            "model_used": model_used,
+        },
+        # Review, never Auto: a model's judgement about somebody else's books is
+        # exactly the thing a person is here to check.
+        "confidence": "medium",
+        "affected_rows": covered,
+    }
+
+    count = context.supabase.rpc(
+        "append_proposed_changes",
+        {
+            "p_dataset_version_id": version_id,
+            "p_job_id": context.job_id,
+            "p_proposals": [proposal],
+        },
+    )
+
+    return {
+        "dataset_version_id": version_id,
+        "column": column,
+        "target": target,
+        "categories": categories,
+        "distinct_values": len(counts),
+        "categorised_values": len(mapping),
+        "rows_covered": covered,
+        "rows_uncovered": uncovered,
+        "model_used": model_used,
+        "proposals": count,
+    }
+
+
 HANDLERS: dict[str, Callable[[JobContext], dict[str, Any]]] = {
     "parse_workbook": handle_parse_workbook,
     "profile_dataset": handle_profile_dataset,
@@ -1630,6 +1786,7 @@ HANDLERS: dict[str, Callable[[JobContext], dict[str, Any]]] = {
     "reconcile_sources": handle_reconcile_sources,
     "generate_report": handle_generate_report,
     "export_dataset": handle_export_dataset,
+    "categorize_dataset": handle_categorize_dataset,
 }
 
 

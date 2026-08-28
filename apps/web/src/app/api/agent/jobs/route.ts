@@ -31,6 +31,7 @@ const KINDS = [
   'reconcile_sources',
   'generate_report',
   'export_dataset',
+  'categorize_dataset',
   // Normally chained by parse_workbook when a recipe matches the file's
   // signature, never asked for directly. It is allowed here for one case: a run
   // that stopped at needs_review has to be re-run once its deviations are

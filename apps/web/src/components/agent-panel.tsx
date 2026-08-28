@@ -12,6 +12,7 @@ import {
   isWorkerOnline,
 } from '@/lib/agent';
 import type { Json } from '@/lib/database.types';
+import { buttonClass } from '@/components/ui';
 
 type Job = {
   id: string;
@@ -415,6 +416,114 @@ export function ExportButton({
       ))}
       {error ? <span className="text-xs text-red-600">{error}</span> : null}
     </span>
+  );
+}
+
+/**
+ * Ask the agent to sort a column's values into categories.
+ *
+ * The one place in the product where the model decides rather than describes,
+ * so it is also the one place where the safety story has to be visible: the job
+ * writes a *proposal*. It lands in the review queue below with everything else,
+ * gets approved by the same click, and is written into a new version by the
+ * same apply. Nothing appears in anyone's data because a model thought it
+ * should.
+ *
+ * The categories box is optional and worth more than it looks. Left empty the
+ * model invents a vocabulary, which is fine for a first look and wrong for a
+ * practice that already has a chart of accounts. Filled in, it is a closed list
+ * -- the worker drops any category outside it rather than quietly adding a
+ * fourteenth.
+ */
+export function CategorizeButton({
+  workspaceId,
+  datasetVersionId,
+  columns,
+}: {
+  workspaceId: string;
+  datasetVersionId: string;
+  columns: string[];
+}) {
+  const router = useRouter();
+  const [column, setColumn] = useState(columns[0] ?? '');
+  const [categories, setCategories] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (columns.length === 0) return null;
+
+  async function categorize() {
+    setBusy(true);
+    setError(null);
+    try {
+      const wanted = categories
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+
+      const response = await fetch('/api/agent/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId,
+          kind: 'categorize_dataset',
+          datasetVersionId,
+          payload: { column, ...(wanted.length > 0 ? { categories: wanted } : {}) },
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? 'Could not start categorising');
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not start categorising');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-black/10 px-4 py-3 dark:border-white/15">
+      <p className="text-sm font-medium">Categorise a column</p>
+      <p className="mt-1 text-xs opacity-60">
+        The agent reads the column&rsquo;s distinct values — never the rows — and proposes a
+        category for each. It arrives in the review queue as a change you approve.
+      </p>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <select
+          value={column}
+          onChange={(event) => setColumn(event.target.value)}
+          disabled={busy}
+          className="rounded border border-black/15 px-2 py-1 text-xs dark:border-white/20 dark:bg-transparent"
+        >
+          {columns.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+
+        <input
+          type="text"
+          value={categories}
+          onChange={(event) => setCategories(event.target.value)}
+          disabled={busy}
+          placeholder="Categories (optional, comma separated)"
+          className="min-w-56 flex-1 rounded border border-black/15 px-2 py-1 text-xs dark:border-white/20 dark:bg-transparent"
+        />
+
+        <button
+          type="button"
+          onClick={categorize}
+          disabled={busy || !column}
+          className={`${buttonClass} px-3 py-1.5 text-xs`}
+        >
+          {busy ? 'Starting…' : 'Categorise'}
+        </button>
+      </div>
+
+      {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
+    </div>
   );
 }
 

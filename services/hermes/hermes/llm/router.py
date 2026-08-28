@@ -37,6 +37,13 @@ log = logging.getLogger("hermes.llm")
 
 MAX_RATIONALE_CHARS = 600
 
+# How many distinct values go to the model in one categorisation. A column with
+# more than this is one where a per-value judgement was never the right tool --
+# 2,000 unique free-text notes is not a category column, and asking anyway costs
+# a large prompt to produce a mapping nobody can review.
+MAX_CATEGORIZE_VALUES = 500
+MAX_CATEGORY_CHARS = 40
+
 
 @dataclass
 class LLMResult:
@@ -210,6 +217,98 @@ class LLMRouter:
             if key in valid_keys and isinstance(value, str) and value.strip()
         }
         return rationales, result.model
+
+    def categorize_values(
+        self,
+        column: str,
+        values: list[str],
+        categories: list[str] | None = None,
+        hint: str | None = None,
+    ) -> tuple[dict[str, str], list[str], str | None]:
+        """
+        Sort a column's distinct values into categories.
+
+        The first thing here the model is asked to *decide* rather than to
+        describe. Everything else it touches is already settled by a rule -- it
+        rewrites the sentence, or turns a question into a query the code then
+        validates. Whether "O2 MOBILE 08/26" is a utility or a communications
+        cost is not derivable from the data at all; it is a question about how a
+        practice keeps its books.
+
+        Three things keep that from becoming a licence.
+
+        It sees **distinct values, not rows** -- the discipline of section 8.
+        Categorising a vendor list means looking at the vendors, never at what
+        anybody paid them.
+
+        It returns a **mapping, not a column**. The caller writes a proposal;
+        the accountant approves it; apply_cleaning writes the column from the
+        approved mapping. Nothing reaches a dataset version without a person.
+
+        And its answer is **filtered against what was asked**: a value the model
+        invented, or a category outside a caller-supplied list, is dropped
+        rather than trusted. A model that hallucinates a vendor should cost the
+        product that one row's category, not the integrity of the column.
+        """
+        if not self.enabled or not values:
+            return {}, [], None
+
+        capped = values[:MAX_CATEGORIZE_VALUES]
+
+        rules = [
+            "Group values that mean the same thing under one category.",
+            "Prefer few, broad categories over many narrow ones -- aim for under a dozen.",
+            "Use Title Case. Keep each category under 40 characters.",
+            "Every value must be assigned exactly once.",
+            "If a value is genuinely unclassifiable, assign it 'Uncategorised'.",
+            "Judge only from the value itself. Do not invent detail you were not given.",
+        ]
+        if categories:
+            rules.insert(
+                0,
+                "Use ONLY these categories, exactly as written: " + ", ".join(categories) + ".",
+            )
+        if hint:
+            rules.append(f"Context from the accountant: {hint}")
+
+        system = (
+            f"You are assisting a UK accountant who is categorising the distinct values of a "
+            f"column named {column!r} from a client's data export.\n\n"
+            + "\n".join(f"- {rule}" for rule in rules)
+            + '\n\nReturn JSON: {"assignments": {"<value>": "<category>"}}'
+        )
+
+        result = self._complete(
+            "reasoning", system, json.dumps({"values": capped}, default=str), json_mode=True
+        )
+        if not result.ok or not result.content:
+            return {}, [], None
+
+        parsed = self._parse_json(result.content)
+        if not parsed or not isinstance(parsed.get("assignments"), dict):
+            return {}, [], result.model
+
+        # Only values we actually sent, and -- when the caller fixed the
+        # vocabulary -- only categories they allowed.
+        offered = {value.strip().lower(): value for value in capped}
+        allowed = {category.strip().lower() for category in categories} if categories else None
+
+        mapping: dict[str, str] = {}
+        for raw_value, raw_category in parsed["assignments"].items():
+            if not isinstance(raw_value, str) or not isinstance(raw_category, str):
+                continue
+            key = raw_value.strip().lower()
+            if key not in offered:
+                continue
+            category = raw_category.strip()[:MAX_CATEGORY_CHARS]
+            if not category:
+                continue
+            if allowed is not None and category.lower() not in allowed:
+                continue
+            mapping[key] = category
+
+        used = sorted({category for category in mapping.values()})
+        return mapping, used, result.model
 
     def plan_query(
         self, question: str, context: dict[str, Any]
