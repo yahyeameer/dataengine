@@ -18,19 +18,6 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# The job kinds this build knows how to execute. Sent to the database on every
-# heartbeat, so the dashboard can distinguish "no worker" from "a worker that
-# is too old to do what you just asked".
-CAPABILITIES = (
-    "parse_workbook",
-    "profile_dataset",
-    "propose_cleaning",
-    "apply_cleaning",
-    "query_dataset",
-    "reconcile_sources",
-    "generate_report",
-)
-
 VERSION = "0.2.0"
 
 
@@ -126,7 +113,23 @@ class Config:
     worker_id: str
     hostname: str
     version: str = VERSION
-    capabilities: tuple[str, ...] = CAPABILITIES
+    # The job kinds this worker will claim, announced on every heartbeat so the
+    # dashboard can tell "no worker" from "a worker too old to do what you just
+    # asked". Empty means "everything this build can execute", resolved from the
+    # handler table at startup -- see Worker.__init__.
+    #
+    # Deliberately not a second list of kinds. The tuple that used to live here
+    # fell out of step with HANDLERS twice: replay_recipe arrived with the
+    # recipe work and export_dataset with the export work, and neither updated
+    # it. A worker that does not announce a kind never claims it, because the
+    # same list is passed to claim_agent_job as p_kinds -- so the job sits in
+    # the queue behaving exactly like one waiting for a busy worker, with
+    # nothing anywhere to say it will wait forever.
+    #
+    # Set HERMES_CAPABILITIES to a comma-separated subset to run a specialised
+    # worker -- a host that only parses, say -- without shipping a build that
+    # cannot do the rest.
+    capabilities: tuple[str, ...] = ()
 
     # How long a claimed job is ours before another worker may take it. Long
     # enough to survive a slow parse, short enough that a crashed worker's jobs
@@ -186,6 +189,13 @@ def load_config() -> Config:
         service_key=key,
         worker_id=worker_id,
         hostname=hostname,
+        capabilities=tuple(
+            kind
+            for kind in (
+                part.strip() for part in os.environ.get("HERMES_CAPABILITIES", "").split(",")
+            )
+            if kind
+        ),
         lease_seconds=_int("HERMES_LEASE_SECONDS", 300),
         heartbeat_seconds=_int("HERMES_HEARTBEAT_SECONDS", 30),
         poll_seconds=_int("HERMES_POLL_SECONDS", 3),

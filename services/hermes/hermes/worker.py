@@ -48,6 +48,20 @@ class Worker:
         self._jobs_done = 0
         self._jobs_failed = 0
 
+        # HANDLERS is the single source of truth for what this build can run.
+        # An empty config means "all of it"; a configured subset is checked
+        # against the handler table, because a worker that announces a kind it
+        # cannot execute claims those jobs and then fails every one of them --
+        # which is worse than never claiming them at all.
+        requested = tuple(config.capabilities)
+        unknown = sorted(set(requested) - set(HANDLERS))
+        if unknown:
+            raise ConfigError(
+                f"HERMES_CAPABILITIES names {', '.join(unknown)}, which this build "
+                f"has no handler for. Known kinds: {', '.join(sorted(HANDLERS))}."
+            )
+        self.capabilities = requested or tuple(HANDLERS)
+
     # -- lifecycle -----------------------------------------------------------
 
     def request_stop(self, signum: int | None = None, _frame: Any = None) -> None:
@@ -78,7 +92,7 @@ class Worker:
                 "p_worker_id": self.config.worker_id,
                 "p_hostname": self.config.hostname,
                 "p_version": self.config.version,
-                "p_capabilities": list(self.config.capabilities),
+                "p_capabilities": list(self.capabilities),
                 "p_metadata": {
                     "llm_enabled": self.llm.enabled,
                     "reasoning_provider": self.config.llm.provider_for("reasoning"),
@@ -93,7 +107,7 @@ class Worker:
             "claim_agent_job",
             {
                 "p_worker_id": self.config.worker_id,
-                "p_kinds": list(self.config.capabilities),
+                "p_kinds": list(self.capabilities),
                 "p_lease_seconds": self.config.lease_seconds,
             },
         )
