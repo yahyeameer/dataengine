@@ -449,7 +449,49 @@ async function main() {
       `row_count=${exportResult.row_count}`,
     );
 
+    // The same version as csv, so both branches of the writer are exercised.
+    await postJson(
+      '/api/agent/jobs',
+      {
+        workspaceId: alpha.workspaceId,
+        kind: 'export_dataset',
+        datasetVersionId: cleaned!.id,
+        payload: { format: 'csv' },
+      },
+      alpha.cookie,
+    );
+    await waitForQuiet(alpha.workspaceId, alpha.cookie);
+
+    const { data: csvRuns } = await admin
+      .from('agent_jobs')
+      .select('id, status, result')
+      .eq('workspace_id', alpha.workspaceId)
+      .eq('kind', 'export_dataset')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const csvJob = csvRuns?.[0];
+    const csvResult = (csvJob?.result ?? {}) as Record<string, unknown>;
+
+    check('the csv export succeeded', csvJob?.status === 'succeeded');
+    check(
+      'the csv export is written as .csv',
+      typeof csvResult.export_path === 'string' && csvResult.export_path.endsWith('.csv'),
+      String(csvResult.export_path),
+    );
+
     if (exportJob) {
+      // The storage key must keep leading with the dataset uuid: it has to stay
+      // unique across every dataset in a workspace, and the tenant prefix is
+      // what the storage policy reads.
+      const storedPath = String(exportResult.export_path ?? '');
+      check(
+        'the storage path is still uuid-keyed under org/workspace/period',
+        new RegExp(
+          `^[0-9a-f-]{36}/[0-9a-f-]{36}/\d{4}-\d{2}/[0-9a-f-]{36}__v\d+__export\.xlsx$`,
+        ).test(storedPath),
+        storedPath,
+      );
+
       const link = await get(`/api/exports?jobId=${exportJob.id}`, alpha.cookie);
       const linkBody = await link.json();
       check(
@@ -457,6 +499,27 @@ async function main() {
         link.ok && typeof linkBody.url === 'string',
         JSON.stringify(linkBody).slice(0, 200),
       );
+      // Readable, and NOT the uuid-led object key -- that is the whole point of
+      // setting Content-Disposition separately from the storage path.
+      check(
+        'the xlsx download is named after the dataset, not the uuid',
+        typeof linkBody.filename === 'string' &&
+          linkBody.filename.endsWith('.xlsx') &&
+          !/^[0-9a-f-]{36}/.test(linkBody.filename),
+        String(linkBody.filename),
+      );
+
+      if (csvJob) {
+        const csvLink = await get(`/api/exports?jobId=${csvJob.id}`, alpha.cookie);
+        const csvLinkBody = await csvLink.json();
+        check(
+          'the csv download keeps its .csv extension and a readable name',
+          typeof csvLinkBody.filename === 'string' &&
+            csvLinkBody.filename.endsWith('.csv') &&
+            !/^[0-9a-f-]{36}/.test(csvLinkBody.filename),
+          String(csvLinkBody.filename),
+        );
+      }
 
       // The property the whole route design exists for: the signing client
       // bypasses RLS, so this must be refused by the route, not by storage.
@@ -465,6 +528,15 @@ async function main() {
         "Beta cannot download Alpha's export",
         crossDownload.status === 404,
         `got ${crossDownload.status}`,
+      );
+
+      // And a caller with no session at all is told to sign in, rather than
+      // that the file does not exist.
+      const anonDownload = await get(`/api/exports?jobId=${exportJob.id}`);
+      check(
+        'an unauthenticated download is 401, not 404',
+        anonDownload.status === 401,
+        `got ${anonDownload.status}`,
       );
     }
 

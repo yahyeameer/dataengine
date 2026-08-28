@@ -330,9 +330,30 @@ def _op_normalize_date(table: Table, params: dict[str, Any]) -> OperationResult:
     return result
 
 
+# Findings that ask a person to look at something, as opposed to changes that
+# do something. Approving one records a decision; it moves no data, and the
+# condition it describes is still there afterwards.
+#
+# Named as a set rather than left implicit in a `review_`/`block_` prefix
+# because callers outside this module have to reason about the distinction: an
+# apply whose approved set is entirely advisory must not write a new version,
+# or the lineage grows a child byte-identical to its parent and claims a
+# cleaning happened. The review queue draws on the same idea to avoid offering
+# "apply" for something that cannot be applied.
+ADVISORY_OPERATIONS = frozenset(
+    {
+        "review_ambiguous_dates",
+        "review_key_conflicts",
+        "review_outliers",
+        "review_vat_rate",
+        "block_totals_mismatch",
+    }
+)
+
+
 def _op_noop(table: Table, params: dict[str, Any]) -> OperationResult:
     """
-    Review and block operations carry no transformation.
+    Advisory operations carry no transformation.
 
     They exist as recipe steps so that the recipe is a complete record of what
     was decided, including the decisions that were "look at this and confirm".
@@ -341,18 +362,21 @@ def _op_noop(table: Table, params: dict[str, Any]) -> OperationResult:
     return OperationResult(op=params.get("__op", "review"), column=params.get("column"), rows_changed=0)
 
 
-OPERATIONS: dict[str, Callable[[Table, dict[str, Any]], OperationResult]] = {
+_TRANSFORMS: dict[str, Callable[[Table, dict[str, Any]], OperationResult]] = {
     "normalize_whitespace": _op_normalize_whitespace,
     "normalize_case": _op_normalize_case,
     "map_values": _op_map_values,
     "drop_duplicate_rows": _op_drop_duplicate_rows,
     "coerce_number": _op_coerce_number,
     "normalize_date": _op_normalize_date,
-    "review_ambiguous_dates": _op_noop,
-    "review_key_conflicts": _op_noop,
-    "review_outliers": _op_noop,
-    "review_vat_rate": _op_noop,
-    "block_totals_mismatch": _op_noop,
+}
+
+# Derived, not hand-listed. A second list of operation names is exactly how the
+# worker's capability list fell out of step with its handler table -- two places
+# to edit, one of them easy to forget, and the failure is silent.
+OPERATIONS: dict[str, Callable[[Table, dict[str, Any]], OperationResult]] = {
+    **_TRANSFORMS,
+    **{name: _op_noop for name in sorted(ADVISORY_OPERATIONS)},
 }
 
 
@@ -439,6 +463,7 @@ def column_hash(columns: dict[str, list[Any]]) -> str:
 
 
 __all__ = [
+    "ADVISORY_OPERATIONS",
     "CleanResult",
     "OperationResult",
     "apply_operations",

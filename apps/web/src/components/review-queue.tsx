@@ -8,6 +8,7 @@ import {
   CONFIDENCE_LABELS,
   CONFIDENCE_ORDER,
   formatMoney,
+  isAdvisory,
 } from '@/lib/agent';
 import type { Json } from '@/lib/database.types';
 import { ErrorText, buttonClass, secondaryButtonClass } from '@/components/ui';
@@ -69,6 +70,10 @@ export function ReviewQueue({
 
   const pending = ordered.filter((change) => change.status === 'pending');
   const approved = ordered.filter((change) => change.status === 'approved');
+  // Split the approved set the way apply_cleaning does: an advisory moves no
+  // data, so a set with none of the former has nothing to apply.
+  const approvedTransforms = approved.filter((change) => !isAdvisory(change.step_type));
+  const approvedAdvisories = approved.filter((change) => isAdvisory(change.step_type));
   const blocking = pending.filter((change) => change.confidence === 'low');
   const reviewable = pending.filter((change) => change.confidence !== 'low');
 
@@ -182,18 +187,35 @@ export function ReviewQueue({
       {approved.length > 0 ? (
         <div className="mt-5 flex flex-wrap items-center gap-3 rounded-lg border border-black/10 px-4 py-3 dark:border-white/15">
           <p className="text-sm">
-            {approved.length} change{approved.length === 1 ? '' : 's'} approved and ready to
-            apply.
+            {approvedTransforms.length > 0 ? (
+              <>
+                {approvedTransforms.length} change
+                {approvedTransforms.length === 1 ? '' : 's'} approved and ready to apply
+                {approvedAdvisories.length > 0
+                  ? `, plus ${approvedAdvisories.length} review item${
+                      approvedAdvisories.length === 1 ? '' : 's'
+                    }`
+                  : ''}
+                .
+              </>
+            ) : (
+              <>
+                {approvedAdvisories.length} review item
+                {approvedAdvisories.length === 1 ? '' : 's'} acknowledged.
+              </>
+            )}
           </p>
           <button
             type="button"
             className={`${buttonClass} ml-auto px-3 py-1.5 text-xs`}
-            disabled={busy !== null || blocking.length > 0}
+            disabled={busy !== null || blocking.length > 0 || approvedTransforms.length === 0}
             onClick={apply}
             title={
               blocking.length > 0
                 ? 'A blocking issue is still unresolved'
-                : 'Writes a new version; the current one is left untouched'
+                : approvedTransforms.length === 0
+                  ? 'Review items record a decision; they do not change the data'
+                  : 'Writes a new version; the current one is left untouched'
             }
           >
             {busy === 'apply' ? 'Starting…' : 'Apply and create a new version'}
@@ -201,6 +223,15 @@ export function ReviewQueue({
           {blocking.length > 0 ? (
             <p className="w-full text-xs text-red-700 dark:text-red-300">
               The blocking issue above has to be approved or rejected first.
+            </p>
+          ) : approvedTransforms.length === 0 ? (
+            // Without this the reviewer approves a review item, presses apply,
+            // and gets a run that changes nothing -- which reads as a failure
+            // rather than as the correct outcome.
+            <p className="w-full text-xs opacity-60">
+              Review items record that you have seen a finding. They do not change the data,
+              so there is nothing to apply and no new version is written. The finding stays
+              visible on this version.
             </p>
           ) : (
             <p className="w-full text-xs opacity-60">

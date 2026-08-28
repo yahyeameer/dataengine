@@ -56,6 +56,29 @@ export const CONFIDENCE_LABELS: Record<ChangeConfidence, string> = {
 
 export const CONFIDENCE_ORDER: ChangeConfidence[] = ['low', 'medium', 'high'];
 
+/**
+ * Findings that ask someone to look at something, rather than changes that do
+ * something. Approving one records a decision; it moves no data, and the
+ * condition it describes is still true afterwards.
+ *
+ * Mirrors ADVISORY_OPERATIONS in services/hermes/hermes/tools/clean.py, where
+ * every one of these dispatches to a no-op. The queue needs the distinction
+ * because "apply" is not a thing that can be done to them: an approved set
+ * containing only these produces no new version, and offering the button
+ * without saying so invites the reviewer to conclude the run failed.
+ */
+export const ADVISORY_STEP_TYPES: ReadonlySet<string> = new Set([
+  'review_ambiguous_dates',
+  'review_key_conflicts',
+  'review_outliers',
+  'review_vat_rate',
+  'block_totals_mismatch',
+]);
+
+export function isAdvisory(stepType: string): boolean {
+  return ADVISORY_STEP_TYPES.has(stepType);
+}
+
 export function isTerminal(status: AgentJobStatus): boolean {
   return status === 'succeeded' || status === 'failed' || status === 'cancelled';
 }

@@ -36,7 +36,7 @@ from .llm.redact import build_context
 from .llm.router import LLMRouter
 from .supabase import SupabaseClient, SupabaseError
 from .tools import analyze, report
-from .tools.clean import apply_operations, column_hash, to_parquet
+from .tools.clean import ADVISORY_OPERATIONS, apply_operations, column_hash, to_parquet
 from .tools.parse import ParsedTable, SheetInterpretation, SkippedRow, parse_workbook
 from .tools.profile import Profile, profile_table
 from .tools.propose import build_proposals, summarise
@@ -695,13 +695,52 @@ def handle_apply_cleaning(context: JobContext) -> dict[str, Any]:
             f"first: {titles}"
         )
 
+    # An advisory records that somebody looked at a finding. It moves no data,
+    # and the condition it describes is still true afterwards.
+    #
+    # So an approved set containing nothing else has nothing to apply. Writing a
+    # version for it would add a child byte-identical to its parent while
+    # claiming a cleaning happened, burn a version number and a Parquet object
+    # on a copy, and -- since the finding is still there -- offer the same item
+    # again on the next profile. Acknowledge them against the version on screen
+    # and stop, which is also the version the reviewer was looking at.
+    #
+    # Advisories approved *alongside* real changes still travel into the recipe
+    # below: the recipe is meant to be a complete record of what was decided,
+    # including the decisions that were "look at this and confirm".
+    transforms = [item for item in approved if item["step_type"] not in ADVISORY_OPERATIONS]
+    advisories = [item for item in approved if item["step_type"] in ADVISORY_OPERATIONS]
+
+    if not transforms:
+        context.supabase.rpc(
+            "mark_changes_applied",
+            {
+                "p_dataset_version_id": version_id,
+                "p_group_keys": [item["group_key"] for item in advisories],
+            },
+        )
+        return {
+            "dataset_version_id": version_id,
+            "new_dataset_version_id": None,
+            "acknowledged": [item["group_key"] for item in advisories],
+            "rows_changed": 0,
+            "rows_removed": 0,
+            "note": (
+                f"{len(advisories)} review item(s) acknowledged. Review items record that "
+                f"someone has seen a finding; they do not change the data, so no new version "
+                f"was written."
+            ),
+        }
+
     context.heartbeat({"stage": "downloading"})
     parquet_bytes = _load_parquet(context, version)
     _profile, table = _profile_from_parquet(
         parquet_bytes, _stored_interpretation(context, version)
     )
 
-    context.heartbeat({"stage": "applying", "operations": len(approved)})
+    context.heartbeat(
+        {"stage": "applying", "operations": len(transforms), "review_items": len(advisories)}
+    )
     operations = [item["operation"] for item in approved]
     result = apply_operations(table, operations)
 
