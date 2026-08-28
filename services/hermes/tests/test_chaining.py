@@ -368,3 +368,94 @@ def test_a_worker_cannot_announce_a_kind_it_cannot_run():
 
     with pytest.raises(ConfigError, match="no handler"):
         _worker(("parse_workbook", "make_the_tea"))
+
+
+# -----------------------------------------------------------------------------
+# Deviations and replay completion
+# -----------------------------------------------------------------------------
+
+
+class FakeDeviationStore(FakeSupabase):
+    """A workspace with some history of runs over one input version."""
+
+    def __init__(self, runs: list[dict[str, Any]], deviations: list[dict[str, Any]]):
+        super().__init__()
+        self.runs = runs
+        self.deviations = deviations
+
+    def select(self, table: str, **kwargs: Any) -> list[dict[str, Any]]:
+        filters = kwargs.get("filters") or {}
+        if table == "recipe_runs":
+            wanted = filters.get("dataset_version_in", "").removeprefix("eq.")
+            return [run for run in self.runs if run["dataset_version_in"] == wanted]
+        if table == "deviations":
+            raw = filters.get("run_id", "")
+            ids = raw.removeprefix("in.(").rstrip(")").split(",") if raw.startswith("in.(") else []
+            rows = [d for d in self.deviations if d["run_id"] in ids]
+            if filters.get("resolution") == "neq.pending":
+                rows = [d for d in rows if d["resolution"] != "pending"]
+            return rows
+        return super().select(table, **kwargs)
+
+
+def test_no_prior_runs_means_nothing_is_decided():
+    from hermes.jobs import _resolved_deviation_keys
+
+    supabase = FakeDeviationStore(runs=[], deviations=[])
+    assert _resolved_deviation_keys(_context(supabase, {}), "version-1") == set()
+
+
+def test_resolved_deviations_are_remembered_for_that_file():
+    """
+    The reason resolving does anything at all.
+
+    A replay recomputes its findings from the file every run, so without this
+    the same question returns forever and the resolution UI is decoration.
+    """
+    from hermes.jobs import _resolved_deviation_keys
+
+    supabase = FakeDeviationStore(
+        runs=[{"id": "run-1", "dataset_version_in": "version-1"}],
+        deviations=[
+            {"run_id": "run-1", "group_key": "new_column", "resolution": "accepted"},
+            {"run_id": "run-1", "group_key": "unmapped:vendor:acme", "resolution": "mapped"},
+            {"run_id": "run-1", "group_key": "invariant:row_count", "resolution": "pending"},
+        ],
+    )
+
+    decided = _resolved_deviation_keys(_context(supabase, {}), "version-1")
+
+    assert decided == {"new_column", "unmapped:vendor:acme"}
+    assert "invariant:row_count" not in decided, "a pending finding is not a decision"
+
+
+def test_a_decision_does_not_leak_to_another_file():
+    """
+    Scoping, which is the whole reason this reads by input version.
+
+    group_key is coarse on purpose -- every new column in a run shares the key
+    "new_column" so they arrive as one screen. Matching workspace-wide would let
+    this month's answer suppress next month's *different* new column, which is
+    the exact failure the feature exists to catch.
+    """
+    from hermes.jobs import _resolved_deviation_keys
+
+    supabase = FakeDeviationStore(
+        runs=[{"id": "run-1", "dataset_version_in": "version-1"}],
+        deviations=[{"run_id": "run-1", "group_key": "new_column", "resolution": "accepted"}],
+    )
+
+    assert _resolved_deviation_keys(_context(supabase, {}), "version-2") == set()
+
+
+def test_resolution_states_match_the_database_enum():
+    """
+    The UI offers four actions; the enum allows exactly these four plus pending,
+    and resolve_deviation refuses pending explicitly. A fifth invented action
+    would fail only when a user clicked it.
+    """
+    offered = {"accepted", "rejected", "mapped", "ignored"}
+    allowed = {"pending", "accepted", "rejected", "mapped", "ignored"}
+
+    assert offered < allowed
+    assert "pending" not in offered

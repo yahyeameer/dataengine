@@ -31,6 +31,14 @@ const KINDS = [
   'reconcile_sources',
   'generate_report',
   'export_dataset',
+  // Normally chained by parse_workbook when a recipe matches the file's
+  // signature, never asked for directly. It is allowed here for one case: a run
+  // that stopped at needs_review has to be re-run once its deviations are
+  // answered, and the worker has no notion of resuming a finished run. Safe to
+  // expose because handle_replay_recipe resolves the recipe itself from the
+  // version's signature and refuses with a readable message when none matches --
+  // the caller cannot name a recipe, only a version they already have access to.
+  'replay_recipe',
 ] as const;
 
 const createSchema = z.object({

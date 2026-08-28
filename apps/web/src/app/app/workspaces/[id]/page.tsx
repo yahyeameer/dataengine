@@ -1,6 +1,11 @@
 import { notFound } from 'next/navigation';
 
 import { AgentPanel, AnalyseButton, ExportButton } from '@/components/agent-panel';
+import {
+  DeviationsPanel,
+  type Deviation,
+  type RecipeRun,
+} from '@/components/deviations-panel';
 import { ReviewQueue, type ProposedChange } from '@/components/review-queue';
 import { UploadPanel } from '@/components/upload-panel';
 import { Card, EmptyState, PageHeader, StatusBadge } from '@/components/ui';
@@ -48,6 +53,41 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
         .order('last_seen_at', { ascending: false })
         .limit(5),
     ]);
+
+  // Month two's open question, if there is one.
+  //
+  // A replay that meets something it cannot handle finishes as needs_review and
+  // writes no output version. That state used to be invisible: the job reported
+  // success, because it had succeeded -- it ran, and stopped to ask. Read the
+  // most recent unfinished run so the panel can say what it is waiting for.
+  const { data: runs } = await supabase
+    .from('recipe_runs')
+    .select(
+      'id, status, dataset_version_in, rows_processed, rows_matched, auto_corrections, automation_rate, invariant_status',
+    )
+    .eq('workspace_id', workspace.id)
+    .in('status', ['needs_review', 'blocked'])
+    .order('started_at', { ascending: false })
+    .limit(1);
+
+  const openRun = (runs?.[0] ?? null) as RecipeRun | null;
+  let runDeviations: Deviation[] = [];
+
+  if (openRun) {
+    const { data: found } = await supabase
+      .from('deviations')
+      .select(
+        'id, type, severity, title, detail, column_name, source_value, suggested_value, affected_rows, materiality_gbp, resolution, evidence',
+      )
+      .eq('run_id', openRun.id)
+      // Severity ascending puts 'block' first: the enum is declared
+      // auto -> review -> block, so descending would bury the one that stops
+      // everything underneath the ones that merely ask.
+      .order('severity', { ascending: false })
+      .order('materiality_gbp', { ascending: false, nullsFirst: false });
+
+    runDeviations = (found ?? []) as Deviation[];
+  }
 
   const datasetNames = new Map((datasets ?? []).map((d) => [d.id, d.name]));
   const datasetIds = (datasets ?? []).map((d) => d.id);
@@ -103,6 +143,16 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
           initialWorkers={workers ?? []}
         />
       </div>
+
+      {openRun ? (
+        <div className="mb-8">
+          <DeviationsPanel
+            workspaceId={workspace.id}
+            run={openRun}
+            deviations={runDeviations}
+          />
+        </div>
+      ) : null}
 
       {reviewVersionId && changes.length > 0 ? (
         <div className="mb-8">

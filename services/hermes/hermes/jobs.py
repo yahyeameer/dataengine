@@ -1035,10 +1035,30 @@ def handle_replay_recipe(context: JobContext) -> dict[str, Any]:
         summary = result.summary()
         status_text = invariant_status(outcomes)
 
-        if result.blocked:
+        # A deviation the accountant has already decided on must not stop the
+        # run a second time. Without this, resolving one changes nothing: the
+        # next replay recomputes the same finding from the same file, sets
+        # needs_review again, and writes no version -- so the workflow has no
+        # way to finish and the resolution UI is decoration.
+        #
+        # Scoped to the input version rather than the workspace, because group
+        # keys are deliberately coarse. Every new column in a run shares the key
+        # "new_column" so they arrive as one screen rather than eleven; matching
+        # workspace-wide would let this month's decision silently suppress next
+        # month's different new column, which is the failure this whole feature
+        # exists to prevent.
+        #
+        # The deviations are still recorded either way. What a prior resolution
+        # changes is whether the run stops, not whether the finding is reported.
+        decided = _resolved_deviation_keys(context, version_id)
+        outstanding = [
+            deviation for deviation in result.deviations if deviation.group_key not in decided
+        ]
+
+        if any(deviation.severity == "block" for deviation in outstanding):
             status = "blocked"
             output_version = None
-        elif result.needs_review:
+        elif any(deviation.severity == "review" for deviation in outstanding):
             status = "needs_review"
             output_version = None
         else:
@@ -1121,6 +1141,41 @@ def handle_replay_recipe(context: JobContext) -> dict[str, Any]:
         "invariants": status_text,
         "summary": summary,
     }
+
+
+def _resolved_deviation_keys(context: JobContext, dataset_version_in: str) -> set[str]:
+    """
+    Group keys already decided by a person for this particular input file.
+
+    Read from the deviations of every earlier run over the same input version.
+    That is the scope that matches how a replay is retried: the accountant
+    resolves what run 1 found, presses replay again, and run 2 sees the same
+    file -- so it necessarily rediscovers the same findings, and has to know
+    they have been answered.
+
+    A 'mapped' resolution additionally teaches the mapping table, so unmapped
+    values genuinely stop recurring on their own. The other resolutions
+    (accepted, rejected, ignored) record a judgement and teach nothing, which is
+    exactly why they need to be remembered here.
+    """
+    runs = context.supabase.select(
+        "recipe_runs",
+        columns="id",
+        filters={"dataset_version_in": f"eq.{dataset_version_in}"},
+    )
+    run_ids = [run["id"] for run in runs if run.get("id")]
+    if not run_ids:
+        return set()
+
+    rows = context.supabase.select(
+        "deviations",
+        columns="group_key,resolution",
+        filters={
+            "run_id": f"in.({','.join(run_ids)})",
+            "resolution": "neq.pending",
+        },
+    )
+    return {row["group_key"] for row in rows if row.get("group_key")}
 
 
 def _load_mappings(context: JobContext, steps: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
