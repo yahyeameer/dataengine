@@ -1696,17 +1696,24 @@ def handle_categorize_dataset(context: JobContext) -> dict[str, Any]:
     requested = context.payload.get("categories")
     categories_in = [str(item) for item in requested] if isinstance(requested, list) else None
 
-    mapping, categories, model_used = context.llm.categorize_values(
+    mapping, categories, model_used, llm_error = context.llm.categorize_values(
         column,
         ordered,
         categories=categories_in,
         hint=str(context.payload.get("hint") or "") or None,
     )
 
+    if llm_error:
+        # Transient by default. A busy free tier, a timeout and a dropped
+        # connection all land here, and telling an accountant their column has
+        # no categories in it because a shared rate limit was hit is a lie the
+        # retry would have corrected.
+        raise JobError(f"The model could not be reached: {llm_error}", retryable=True)
+
     if not mapping:
         raise JobError(
-            "The model did not return any usable categories for this column. It may be free "
-            "text rather than something with categories in it."
+            "The model answered but categorised nothing in this column. It may be free text "
+            "rather than something with categories in it."
         )
 
     target = str(context.payload.get("target") or "").strip() or f"{column}_category"

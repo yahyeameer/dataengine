@@ -224,7 +224,7 @@ class LLMRouter:
         values: list[str],
         categories: list[str] | None = None,
         hint: str | None = None,
-    ) -> tuple[dict[str, str], list[str], str | None]:
+    ) -> tuple[dict[str, str], list[str], str | None, str | None]:
         """
         Sort a column's distinct values into categories.
 
@@ -251,7 +251,7 @@ class LLMRouter:
         product that one row's category, not the integrity of the column.
         """
         if not self.enabled or not values:
-            return {}, [], None
+            return {}, [], None, "no model configured"
 
         capped = values[:MAX_CATEGORIZE_VALUES]
 
@@ -281,12 +281,17 @@ class LLMRouter:
         result = self._complete(
             "reasoning", system, json.dumps({"values": capped}, default=str), json_mode=True
         )
+        # A transport failure and an uncategorisable column are different
+        # conclusions, and the caller has to be able to tell them apart: one is
+        # worth retrying in a minute, the other never will be. Returning an
+        # empty mapping for both is how "the free tier is busy" reaches an
+        # accountant as "this column has no categories in it".
         if not result.ok or not result.content:
-            return {}, [], None
+            return {}, [], result.model, result.error or "the model did not answer"
 
         parsed = self._parse_json(result.content)
         if not parsed or not isinstance(parsed.get("assignments"), dict):
-            return {}, [], result.model
+            return {}, [], result.model, "the model's reply was not the expected JSON"
 
         # Only values we actually sent, and -- when the caller fixed the
         # vocabulary -- only categories they allowed.
@@ -308,7 +313,7 @@ class LLMRouter:
             mapping[key] = category
 
         used = sorted({category for category in mapping.values()})
-        return mapping, used, result.model
+        return mapping, used, result.model, None
 
     def plan_query(
         self, question: str, context: dict[str, Any]

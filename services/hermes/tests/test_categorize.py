@@ -118,7 +118,7 @@ def _router(reply: str) -> LLMRouter:
 def test_a_clean_reply_becomes_a_mapping():
     router = _router('{"assignments": {"O2 Mobile": "Communications", "British Gas": "Utilities"}}')
     try:
-        mapping, categories, model = router.categorize_values(
+        mapping, categories, model, error = router.categorize_values(
             "vendor", ["O2 Mobile", "British Gas"]
         )
     finally:
@@ -127,6 +127,7 @@ def test_a_clean_reply_becomes_a_mapping():
     assert mapping == {"o2 mobile": "Communications", "british gas": "Utilities"}
     assert categories == ["Communications", "Utilities"]
     assert model == "test-model"
+    assert error is None
 
 
 def test_a_value_nobody_asked_about_is_dropped():
@@ -139,7 +140,7 @@ def test_a_value_nobody_asked_about_is_dropped():
         '{"assignments": {"O2 Mobile": "Communications", "Acme Holdings Ltd": "Consulting"}}'
     )
     try:
-        mapping, _categories, _model = router.categorize_values("vendor", ["O2 Mobile"])
+        mapping, _categories, _model, _error = router.categorize_values("vendor", ["O2 Mobile"])
     finally:
         router.close()
 
@@ -152,7 +153,7 @@ def test_a_category_outside_the_allowed_list_is_dropped():
         '{"assignments": {"O2 Mobile": "Communications", "British Gas": "Something Else"}}'
     )
     try:
-        mapping, categories, _model = router.categorize_values(
+        mapping, categories, _model, _error = router.categorize_values(
             "vendor",
             ["O2 Mobile", "British Gas"],
             categories=["Communications", "Utilities"],
@@ -167,18 +168,24 @@ def test_a_category_outside_the_allowed_list_is_dropped():
 def test_a_reply_that_is_not_json_yields_nothing():
     router = _router("Sure! Here are the categories you asked for.")
     try:
-        mapping, categories, _model = router.categorize_values("vendor", ["O2 Mobile"])
+        mapping, categories, _model, error = router.categorize_values("vendor", ["O2 Mobile"])
     finally:
         router.close()
 
     assert mapping == {}
     assert categories == []
+    assert error, "a malformed reply must be reported, not read as an empty column"
 
 
 def test_no_model_configured_means_no_call():
     """Without a key the router must decline rather than half-run."""
     router = LLMRouter(LLMConfig())
     try:
-        assert router.categorize_values("vendor", ["O2 Mobile"]) == ({}, [], None)
+        assert router.categorize_values("vendor", ["O2 Mobile"]) == (
+            {},
+            [],
+            None,
+            "no model configured",
+        )
     finally:
         router.close()
