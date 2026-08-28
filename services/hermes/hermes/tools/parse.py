@@ -273,6 +273,68 @@ def _looks_like_header_cell(value: Any) -> bool:
     return bool(re.search(r"[A-Za-z]", text))
 
 
+def _cell_shape(value: Any) -> str | None:
+    """A coarse description of what a cell is, for comparing like with like."""
+    if not _cell_populated(value):
+        return None
+    if parse_number(value).ok:
+        return "number"
+    if parse_date(value).ok:
+        return "date"
+    return "short_text" if len(normalize_text(value)) <= 30 else "long_text"
+
+
+def _column_contrast(grid: list[list[Any]], index: int) -> float:
+    """
+    How unlike its own column each cell of a candidate row is.
+
+    This is the signal that survives when the length ceiling fails. A header
+    does not resemble the values underneath it -- "Timestamp" sits above
+    timestamps, a question sits above answers -- whereas a data row is
+    indistinguishable from its neighbours by construction, because it *is* one
+    of them.
+
+    It matters most for the file that exposed the gap: a survey export whose
+    headers are the questions, twenty-five of them past sixty characters and so
+    rejected as labels, above short human answers that read like perfect
+    headers. Judged on length alone the nineteenth respondent won, her answers
+    became the column names, and the eighteen people above her were discarded as
+    if they sat above the table. Judged on contrast she loses, because her
+    answers look exactly like everyone else's.
+
+    Deliberately coarse. Comparing shapes -- number, date, short text, long text
+    -- rather than values keeps it robust on a column whose entries are all
+    different, which is most of them.
+    """
+    row = grid[index]
+    body = grid[index + 1 : index + 21]
+    if not body:
+        return 0.0
+
+    considered = 0
+    differing = 0
+
+    for column, cell in enumerate(row):
+        shape = _cell_shape(cell)
+        if shape is None:
+            continue
+
+        below = [
+            _cell_shape(body_row[column])
+            for body_row in body
+            if column < len(body_row) and _cell_populated(body_row[column])
+        ]
+        if len(below) < 3:
+            continue
+
+        considered += 1
+        modal = Counter(below).most_common(1)[0][0]
+        if shape != modal:
+            differing += 1
+
+    return (differing / considered) if considered else 0.0
+
+
 def _score_header_row(grid: list[list[Any]], index: int, body_width: int) -> tuple[float, list[str]]:
     """
     Score a candidate header row.
@@ -316,15 +378,30 @@ def _score_header_row(grid: list[list[Any]], index: int, body_width: int) -> tup
                 body_typed += 1
     typed_contrast = (body_typed / body_cells) if body_cells else 0.0
 
+    # How unlike its own column this row is. Carries real weight because it is
+    # the only term that still works when the labels are long: header_ratio
+    # measures whether cells look like labels, and a survey question does not.
+    column_contrast = _column_contrast(grid, index)
+
     score = (
-        0.35 * header_ratio
-        + 0.20 * distinct_ratio
-        + 0.25 * width_match
-        + 0.20 * min(1.0, typed_contrast * 1.5)
+        0.25 * header_ratio
+        + 0.15 * distinct_ratio
+        + 0.20 * width_match
+        + 0.15 * min(1.0, typed_contrast * 1.5)
+        + 0.25 * column_contrast
     )
 
+    if column_contrast > 0.6:
+        reasons.append("does not resemble the values in its own columns")
+    elif column_contrast < 0.2:
+        reasons.append("looks like one of the rows beneath it")
+
     # A row of text above a row of text is a title block, not a header.
-    if typed_contrast < 0.05 and header_ratio > 0.9:
+    #
+    # Guarded by column_contrast now: a genuine header of long questions also
+    # has no typed values beneath it when every answer is text, and demoting it
+    # here is what let a data row win outright.
+    if typed_contrast < 0.05 and header_ratio > 0.9 and column_contrast < 0.5:
         score *= 0.4
         reasons.append("no typed values beneath; may be a title block")
 
