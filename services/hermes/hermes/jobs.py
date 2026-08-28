@@ -1397,6 +1397,79 @@ def handle_reconcile_sources(context: JobContext) -> dict[str, Any]:
 # -----------------------------------------------------------------------------
 
 
+def _report_provenance(context: JobContext, version: dict[str, Any]) -> dict[str, Any]:
+    """
+    Where this version came from and what a person approved on the way.
+
+    Assembled from rows that already existed. The source workbook is two or
+    three parent hops away, the approved changes are recorded against the
+    *parent* version -- they were proposals about that version, and applying
+    them is what produced this one -- and the lineage is the parent pointer.
+
+    None of it was in the report, which is the gap that matters most for
+    someone signing off: the totals were traceable and the file they came from
+    was not.
+    """
+    provenance: dict[str, Any] = {
+        "source_filename": _source_filename(context, version),
+        "row_count": version.get("row_count"),
+    }
+
+    # A version carrying raw_upload_id was produced by parsing that upload, and
+    # is therefore not derived from anything -- it is a fresh reading of the
+    # workbook.
+    #
+    # Worth stating because the parent pointer does not distinguish the two.
+    # record_dataset_version fills an absent parent with whatever version was
+    # latest, so a re-parse silently chains itself to the cleaned version that
+    # happened to precede it. Reporting that as "derived from v2" would put a
+    # lineage in an accountant's hands that never happened, and the applied
+    # changes hanging off that parent belong to a different chain entirely.
+    if version.get("raw_upload_id"):
+        uploads = context.supabase.select(
+            "raw_uploads",
+            columns="created_at",
+            filters={"id": f"eq.{version['raw_upload_id']}"},
+            limit=1,
+        )
+        if uploads:
+            provenance["uploaded_at"] = uploads[0].get("created_at")
+        provenance["parsed_directly"] = True
+        return provenance
+
+    parent_id = version.get("parent_version_id")
+    if not parent_id:
+        return provenance
+
+    try:
+        parent = _load_version(context, parent_id)
+    except JobError:
+        return provenance
+
+    provenance["parent_version_no"] = parent.get("version_no")
+
+    # Proposals live against the version they were made about, so the changes
+    # that produced *this* version are the applied ones on its parent.
+    applied = context.supabase.select(
+        "proposed_changes",
+        columns="title,affected_rows,decided_at,step_type",
+        filters={"dataset_version_id": f"eq.{parent_id}", "status": "eq.applied"},
+        order="decided_at.asc",
+    )
+    provenance["applied_changes"] = applied or []
+
+    uploads = context.supabase.select(
+        "raw_uploads",
+        columns="created_at",
+        filters={"id": f"eq.{parent.get('raw_upload_id') or version.get('raw_upload_id') or ''}"},
+        limit=1,
+    ) if (parent.get("raw_upload_id") or version.get("raw_upload_id")) else []
+    if uploads:
+        provenance["uploaded_at"] = uploads[0].get("created_at")
+
+    return provenance
+
+
 def handle_generate_report(context: JobContext) -> dict[str, Any]:
     version_id = context.job.get("dataset_version_id")
     if not version_id:
@@ -1419,19 +1492,72 @@ def handle_generate_report(context: JobContext) -> dict[str, Any]:
 
     comparison: dict[str, Any] | None = None
     compare_to = context.payload.get("compare_to_version_id")
+    periods = context.payload.get("periods")
+
     if compare_to and date_column and money:
-        # Month-on-month against another version of the same dataset.
+        # Explicit: compare against another version of the same dataset.
         other = _load_version(context, compare_to)
         other_parquet = _load_parquet(context, other)
         combined = _concat_parquet(parquet_bytes, other_parquet)
-        periods = context.payload.get("periods")
         if combined and periods and len(periods) == 2:
             result = analyze.compare_periods(
-                combined,
-                date_column,
-                money[0],
-                tuple(periods[0]),
-                tuple(periods[1]),
+                combined, date_column, money[0],
+                tuple(periods[0]), tuple(periods[1]),
+                breakdown_column=breakdown,
+            )
+            comparison = result.__dict__
+
+    elif date_column and money:
+        # Nothing asked for a comparison, so derive one from the data.
+        #
+        # "Revenue up 12% on last month" is the line an accountant reads first,
+        # and it was unreachable: the code required a caller to name a second
+        # version *and* both date ranges, and nothing in the product ever did.
+        # A ledger spanning two months already contains the comparison -- the
+        # report just never looked.
+        #
+        # The two most recent months with data, which is what month-on-month
+        # means. Gaps are skipped rather than filled: comparing March against
+        # January is still a real comparison, and inventing an empty February
+        # to sit between them would not be.
+        series = (kpis.get("monthly") or {}).get("series") or []
+        source = parquet_bytes
+
+        if len(series) < 2:
+            # One month in this file, which is the ordinary case here: a client
+            # sends one workbook per month. The previous month is a sibling
+            # version of the same dataset, so borrow it and compare across the
+            # two -- that pairing is the whole point of the recipe workflow.
+            siblings = context.supabase.select(
+                "dataset_versions",
+                columns="id,parquet_path,created_at",
+                filters={
+                    "dataset_id": f"eq.{version['dataset_id']}",
+                    "id": f"neq.{version_id}",
+                    "parquet_path": "not.is.null",
+                },
+                order="created_at.desc",
+                limit=1,
+            )
+            if siblings:
+                try:
+                    combined = _concat_parquet(
+                        parquet_bytes, _load_parquet(context, siblings[0])
+                    )
+                except JobError:
+                    combined = None
+                if combined:
+                    merged = analyze.headline_kpis(combined, money, date_column, breakdown)
+                    merged_series = (merged.get("monthly") or {}).get("series") or []
+                    if len(merged_series) > 1:
+                        series, source = merged_series, combined
+
+        if len(series) > 1:
+            previous, current = series[-2]["month"], series[-1]["month"]
+            result = analyze.compare_periods(
+                source, date_column, money[0],
+                (f"{previous}-01", f"{previous}-31"),
+                (f"{current}-01", f"{current}-31"),
                 breakdown_column=breakdown,
             )
             comparison = result.__dict__
@@ -1456,6 +1582,8 @@ def handle_generate_report(context: JobContext) -> dict[str, Any]:
         "workspaces", columns="id,name", filters={"id": f"eq.{context.workspace_id}"}, limit=1
     )
 
+    provenance = _report_provenance(context, version)
+
     markdown = report.build_markdown_report(
         workspace_name=workspace_rows[0]["name"] if workspace_rows else "Workspace",
         dataset_name=dataset_rows[0]["name"] if dataset_rows else "Dataset",
@@ -1463,6 +1591,7 @@ def handle_generate_report(context: JobContext) -> dict[str, Any]:
         kpis=kpis,
         profile_signals=profile.signals,
         comparison=comparison,
+        provenance=provenance,
         narrative=narrative,
     )
 

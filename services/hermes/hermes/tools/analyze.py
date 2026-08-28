@@ -460,6 +460,30 @@ def headline_kpis(
                 for label, total, row_count in rows
             ]
 
+        # A month-by-month series of the primary money column.
+        #
+        # Computed here rather than in the report because it answers two
+        # questions at once: it is the trend a reader looks for first, and it is
+        # what makes a month-on-month comparison possible without a second file.
+        # A ledger covering April to June already contains the comparison; the
+        # report simply never had the numbers to draw it.
+        if date_column and date_column in columns and money_columns:
+            metric = money_columns[0]
+            rows = connection.execute(
+                f'select substr(cast("{date_column}" as varchar), 1, 7) as month, '
+                f'sum("{metric}") as total, count(*) as rows from dataset '
+                f'where "{date_column}" is not null '
+                f'group by 1 order by 1'
+            ).fetchall()
+            kpis["monthly"] = {
+                "metric": metric,
+                "series": [
+                    {"month": month, "total": round(float(total or 0), 2), "rows": row_count}
+                    for month, total, row_count in rows
+                    if month
+                ],
+            }
+
         return kpis
     finally:
         connection.close()

@@ -58,6 +58,36 @@ def _table(headers: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _bar_chart(rows: list[tuple[str, float]], width: int = 32) -> str:
+    """
+    A bar chart drawn in text.
+
+    Deliberately not a PNG. This report is Markdown because an accountant's
+    month-end pack goes into an email, a working paper or a client portal, and
+    an image would either travel as a second file that gets separated from it or
+    as a base64 blob that half of those viewers refuse to render. A bar made of
+    block characters survives all of them, including a plain-text paste, and
+    needs no plotting dependency on the agent host.
+
+    Scaled against the largest absolute value so a month of credits reads as a
+    bar on the same axis rather than as an empty row. The number is always
+    printed beside the bar: the bar is for the shape, the figure is the fact.
+    """
+    if not rows:
+        return ""
+
+    largest = max(abs(value) for _label, value in rows) or 1.0
+    longest_label = max(len(label) for label, _value in rows)
+
+    lines = ["```"]
+    for label, value in rows:
+        filled = int(round(abs(value) / largest * width))
+        bar = ("█" * filled).ljust(width, "░")
+        lines.append(f"{label.ljust(longest_label)}  {bar}  {_money(value)}")
+    lines.append("```")
+    return "\n".join(lines) + "\n"
+
+
 def build_markdown_report(
     *,
     workspace_name: str,
@@ -67,6 +97,7 @@ def build_markdown_report(
     profile_signals: dict[str, Any],
     proposals_summary: dict[str, Any] | None = None,
     comparison: dict[str, Any] | None = None,
+    provenance: dict[str, Any] | None = None,
     narrative: str | None = None,
     generated_at: dt.datetime | None = None,
 ) -> str:
@@ -112,6 +143,12 @@ def build_markdown_report(
 
     parts.append(_table(["Measure", "Value"], rows))
 
+    monthly = kpis.get("monthly") or {}
+    series = monthly.get("series") or []
+    if len(series) > 1:
+        parts.append(f"\n## {_label(monthly['metric'])} by month\n")
+        parts.append(_bar_chart([(item["month"], item["total"]) for item in series]))
+
     for key, value in kpis.items():
         if not key.startswith("top_by_") or not isinstance(value, list):
             continue
@@ -126,6 +163,8 @@ def build_markdown_report(
                 ],
             )
         )
+        parts.append("\n")
+        parts.append(_bar_chart([(str(item["label"])[:28], item["total"]) for item in value[:8]]))
 
     if comparison:
         parts.append("\n## Period comparison\n")
@@ -199,9 +238,67 @@ def build_markdown_report(
 
     parts.append(_table(["Check", "Result"], quality_rows))
 
+    # Where these figures came from and what was done to them on the way.
+    #
+    # The question an accountant asks before signing anything is not "what is
+    # the total" but "which file is this, and what changed before you counted".
+    # Every fact needed to answer that was already in the database -- the source
+    # workbook, the version chain, the changes a person approved -- and the
+    # report simply never asked for any of it.
+    if provenance:
+        parts.append("\n## Provenance\n")
+        trail: list[list[str]] = []
+
+        if provenance.get("source_filename"):
+            trail.append(["Source workbook", str(provenance["source_filename"])])
+        if provenance.get("uploaded_at"):
+            trail.append(["Uploaded", str(provenance["uploaded_at"])[:19].replace("T", " ")])
+        trail.append(["Dataset version", f"v{version_no}"])
+        if provenance.get("parsed_directly"):
+            trail.append(["Produced by", "reading the source workbook"])
+        elif provenance.get("parent_version_no") is not None:
+            trail.append(["Derived from", f"v{provenance['parent_version_no']}"])
+        if provenance.get("row_count") is not None:
+            trail.append(["Rows in this version", f"{provenance['row_count']:,}"])
+
+        parts.append(_table(["", ""], trail))
+
+        applied = provenance.get("applied_changes") or []
+        if applied:
+            parts.append(
+                f"\n{len(applied)} change(s) were approved by a person and applied to produce "
+                f"this version:\n"
+            )
+            parts.append(
+                _table(
+                    ["Change", "Rows", "Decided"],
+                    [
+                        [
+                            str(change.get("title", "")),
+                            str(change.get("affected_rows", 0)),
+                            str(change.get("decided_at", ""))[:10],
+                        ]
+                        for change in applied
+                    ],
+                )
+            )
+        elif provenance.get("parent_version_no") is not None:
+            parts.append("\nNo changes were applied to produce this version.\n")
+
+    # The claim is deliberately narrower than it was. It used to read "every
+    # figure above is computed from the stored dataset" -- which is true of the
+    # tables and not of the summary, because that paragraph is written by a
+    # model from the profile. The numbers in it have been right in testing;
+    # nothing in the code makes them right, and a blanket guarantee over
+    # unvalidated prose is exactly the sentence that matters after something
+    # goes wrong.
+    claim = "Every figure in the tables above is computed from the stored dataset, not estimated."
+    if narrative:
+        claim += " The summary is written by a language model from those same figures and is not independently checked."
+
     parts.append(
         "\n---\n\n_Produced by the Hermes agent from dataset version "
-        f"{version_no}. Every figure above is computed from the stored dataset, not estimated. "
+        f"{version_no}. {claim} "
         "A copilot, not an autonomous accountant — review before use._\n"
     )
 
