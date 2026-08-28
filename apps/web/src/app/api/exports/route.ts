@@ -162,8 +162,13 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({
+      // The same name the signed URL will set on Content-Disposition, not the
+      // object key's last segment. Reporting the key here made the response
+      // disagree with the file the browser actually saved -- harmless for the
+      // download itself, which reads the header, and precisely wrong for
+      // anything that shows the user what they are about to get.
       url: signed.signedUrl,
-      filename: path.split('/').pop(),
+      filename,
       expiresInSeconds: SIGNED_URL_TTL_SECONDS,
     });
   } catch (error) {

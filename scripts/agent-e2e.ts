@@ -34,6 +34,9 @@ if (!SUPABASE_URL || !PUBLISHABLE_KEY || !SECRET_KEY) {
 
 const MAX_CHUNK_SIZE = 3180;
 const FIXTURE = 'fixtures/messy/acme-sales-2026-08.xlsx';
+// Month two: same layout, different content. The signature therefore matches
+// the recipe captured from August, which is what sends it down the replay path.
+const FIXTURE_MONTH_2 = 'fixtures/messy/acme-sales-2026-09.xlsx';
 
 /** How long to wait for a worker to finish the parse -> profile -> propose chain. */
 const PIPELINE_TIMEOUT_MS = 60_000;
@@ -185,6 +188,53 @@ async function seedTenantViaHttp(
     uploadId: signed.uploadId,
   };
 }
+
+/**
+ * Put another file into an existing workspace, as that workspace's own user.
+ *
+ * The same three calls the browser makes: sign, upload to the signed URL,
+ * complete. Nothing here uses the service role -- the point of the month-two
+ * check is that an ordinary signed-in accountant can drive it.
+ */
+async function uploadFixtureAs(
+  cookie: string,
+  workspaceId: string,
+  file: string,
+  filename: string,
+  datasetName: string,
+): Promise<{ uploadId: string; datasetId: string }> {
+  const bytes = readFileSync(file);
+
+  const signResponse = await postJson(
+    '/api/uploads/sign',
+    { workspaceId, filename, byteSize: bytes.byteLength, datasetName },
+    cookie,
+  );
+  const signed = await signResponse.json();
+  if (!signResponse.ok) throw new Error(`sign failed: ${JSON.stringify(signed)}`);
+
+  const storage = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { error: uploadError } = await storage.storage
+    .from(signed.bucket)
+    .uploadToSignedUrl(signed.storagePath, signed.token, bytes, {
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+  if (uploadError) throw new Error(`upload failed: ${uploadError.message}`);
+
+  const completeResponse = await postJson(
+    '/api/uploads/complete',
+    { uploadId: signed.uploadId, workspaceId },
+    cookie,
+  );
+  if (!completeResponse.ok) {
+    throw new Error(`complete failed: ${JSON.stringify(await completeResponse.json())}`);
+  }
+
+  return { uploadId: signed.uploadId, datasetId: signed.datasetId };
+}
+
 
 async function workerIsOnline(): Promise<boolean> {
   const { data } = await admin
@@ -486,9 +536,11 @@ async function main() {
       const storedPath = String(exportResult.export_path ?? '');
       check(
         'the storage path is still uuid-keyed under org/workspace/period',
-        new RegExp(
-          `^[0-9a-f-]{36}/[0-9a-f-]{36}/\d{4}-\d{2}/[0-9a-f-]{36}__v\d+__export\.xlsx$`,
-        ).test(storedPath),
+        // A literal, not a template string: inside a template `\d` collapses to
+        // `d`, so the pattern silently became d{4}-d{2} and matched nothing.
+        /^[0-9a-f-]{36}\/[0-9a-f-]{36}\/\d{4}-\d{2}\/[0-9a-f-]{36}__v\d+__export\.xlsx$/.test(
+          storedPath,
+        ),
         storedPath,
       );
 
@@ -538,6 +590,170 @@ async function main() {
         anonDownload.status === 401,
         `got ${anonDownload.status}`,
       );
+    }
+
+    // -- month two -----------------------------------------------------------
+    //
+    // The apply above captured a recipe. September has the same layout as
+    // August, so parsing it should route to replay rather than back through the
+    // review queue -- MVP criterion 6 -- and anything the recipe cannot handle
+    // should arrive as a deviation a person can answer.
+
+    await uploadFixtureAs(
+      alpha.cookie,
+      alpha.workspaceId,
+      FIXTURE_MONTH_2,
+      'acme-sales-2026-09.xlsx',
+      'ACME monthly sales',
+    );
+
+    const septemberUploads = await admin
+      .from('raw_uploads')
+      .select('id, dataset_id, original_filename')
+      .eq('workspace_id', alpha.workspaceId)
+      .eq('original_filename', 'acme-sales-2026-09.xlsx')
+      .limit(1);
+    const september = septemberUploads.data?.[0];
+
+    check('the second month uploaded', !!september);
+
+    if (september) {
+      await postJson(
+        '/api/agent/jobs',
+        {
+          workspaceId: alpha.workspaceId,
+          kind: 'parse_workbook',
+          rawUploadId: september.id,
+          datasetId: september.dataset_id,
+        },
+        alpha.cookie,
+      );
+      await waitForQuiet(alpha.workspaceId, alpha.cookie);
+
+      const { data: replayJobs } = await admin
+        .from('agent_jobs')
+        .select('id, status, error')
+        .eq('workspace_id', alpha.workspaceId)
+        .eq('kind', 'replay_recipe')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      check(
+        'the second month routed to replay rather than a fresh review',
+        replayJobs?.[0]?.status === 'succeeded',
+        replayJobs?.[0]?.error ?? 'no replay job was queued at all',
+      );
+
+      let { data: runs } = await admin
+        .from('recipe_runs')
+        .select('id, status, dataset_version_in, dataset_version_out, rows_matched')
+        .eq('workspace_id', alpha.workspaceId)
+        .order('started_at', { ascending: false })
+        .limit(1);
+      let run = runs?.[0];
+
+      check('the replay recorded a run', !!run, JSON.stringify(runs));
+
+      // Whatever it could not handle is now a question. Answer each one as the
+      // signed-in accountant would, through the same route the panel calls.
+      if (run && run.status !== 'succeeded') {
+        const { data: open } = await admin
+          .from('deviations')
+          .select('id, type, severity, source_value, resolution')
+          .eq('run_id', run.id)
+          .eq('resolution', 'pending');
+
+        check(
+          'a stalled run explains itself with at least one deviation',
+          (open ?? []).length > 0,
+          `status=${run.status} with no deviations is a dead end`,
+        );
+
+        for (const deviation of open ?? []) {
+          const resolved = await postJson(
+            '/api/agent/deviations',
+            { deviationId: deviation.id, resolution: 'accepted' },
+            alpha.cookie,
+          );
+          check(
+            `the accountant can resolve a ${deviation.type} deviation`,
+            resolved.ok,
+            JSON.stringify(await resolved.json()).slice(0, 200),
+          );
+        }
+
+        const { data: stillPending } = await admin
+          .from('deviations')
+          .select('id')
+          .eq('run_id', run.id)
+          .eq('resolution', 'pending');
+        check(
+          'a resolved deviation leaves the pending queue',
+          (stillPending ?? []).length === 0,
+          `${stillPending?.length} still pending`,
+        );
+
+        // Replaying is explicit: the worker does not resume a finished run.
+        await postJson(
+          '/api/agent/jobs',
+          {
+            workspaceId: alpha.workspaceId,
+            kind: 'replay_recipe',
+            datasetVersionId: run.dataset_version_in,
+          },
+          alpha.cookie,
+        );
+        await waitForQuiet(alpha.workspaceId, alpha.cookie);
+
+        ({ data: runs } = await admin
+          .from('recipe_runs')
+          .select('id, status, dataset_version_in, dataset_version_out, rows_matched')
+          .eq('workspace_id', alpha.workspaceId)
+          .order('started_at', { ascending: false })
+          .limit(1));
+        run = runs?.[0];
+      }
+
+      // The assertion the whole month-two path exists for.
+      check(
+        'the replay finishes and writes a cleaned version',
+        run?.status === 'succeeded' && !!run?.dataset_version_out,
+        `status=${run?.status} out=${run?.dataset_version_out}`,
+      );
+
+      if (run?.dataset_version_out) {
+        await postJson(
+          '/api/agent/jobs',
+          {
+            workspaceId: alpha.workspaceId,
+            kind: 'export_dataset',
+            datasetVersionId: run.dataset_version_out,
+            payload: { format: 'xlsx' },
+          },
+          alpha.cookie,
+        );
+        await waitForQuiet(alpha.workspaceId, alpha.cookie);
+
+        const { data: m2Export } = await admin
+          .from('agent_jobs')
+          .select('id, status, result')
+          .eq('workspace_id', alpha.workspaceId)
+          .eq('kind', 'export_dataset')
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        check('month two can be exported', m2Export?.[0]?.status === 'succeeded');
+
+        if (m2Export?.[0]) {
+          const m2Link = await get(`/api/exports?jobId=${m2Export[0].id}`, alpha.cookie);
+          const m2Body = await m2Link.json();
+          check(
+            'month two yields a signed download link',
+            m2Link.ok && typeof m2Body.url === 'string',
+            JSON.stringify(m2Body).slice(0, 200),
+          );
+        }
+      }
     }
 
     const { data: audit } = await admin
