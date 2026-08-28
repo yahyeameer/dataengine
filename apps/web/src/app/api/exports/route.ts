@@ -62,22 +62,31 @@ const SIGNED_URL_TTL_SECONDS = 60;
  */
 function downloadName(result: Record<string, unknown>, path: string): string {
   const fallback = path.split('/').pop() ?? 'export';
+
+  // The workbook they sent, if we can still trace it -- "Dheddig_Contacts" is
+  // what they will look for, not the dataset name someone typed into a form
+  // once. Falls back to the dataset name, then to the object key.
+  const source = typeof result.source_filename === 'string' ? result.source_filename.trim() : '';
   const dataset = typeof result.dataset_name === 'string' ? result.dataset_name.trim() : '';
-  if (!dataset) return fallback;
+  const stem = source ? source.replace(/\.[^.]+$/, '') : dataset;
+  if (!stem) return fallback;
 
   const extension = fallback.includes('.') ? fallback.slice(fallback.lastIndexOf('.') + 1) : 'bin';
   const version = typeof result.version_no === 'number' ? ` v${result.version_no}` : '';
+  // Says what happened to it. A file called the same thing as the original,
+  // sitting next to the original, is its own kind of accident.
+  const marker = result.export_path ? ' (cleaned)' : ' (report)';
 
   // A dataset is named by a person, so it can contain anything -- quotes and
   // newlines would break the header outright, and path separators are worse.
   const safe =
-    dataset
+    stem
       .replace(/[\\/:*?"<>|\r\n]+/g, '-')
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, 80) || 'export';
 
-  return `${safe}${version}.${extension}`;
+  return `${safe}${marker}${version}.${extension}`;
 }
 
 export async function GET(request: Request) {

@@ -112,7 +112,7 @@ def _load_version(context: JobContext, version_id: str) -> dict[str, Any]:
         "dataset_versions",
         columns=(
             "id,dataset_id,version_no,kind,parquet_path,row_count,"
-            "parent_version_id,produced_by_run_id"
+            "parent_version_id,produced_by_run_id,raw_upload_id"
         ),
         filters={"id": f"eq.{version_id}"},
         limit=1,
@@ -1178,6 +1178,47 @@ def _resolved_deviation_keys(context: JobContext, dataset_version_in: str) -> se
     return {row["group_key"] for row in rows if row.get("group_key")}
 
 
+def _source_filename(context: JobContext, version: dict[str, Any]) -> str | None:
+    """
+    The name of the workbook this version ultimately came from.
+
+    A cleaned version is two or three links down a chain from the upload --
+    parse wrote one, apply wrote another on top -- and only the first carries
+    raw_upload_id. So walk up the parents until one does.
+
+    Worth the two extra reads. An accountant recognises "Dheddig_Contacts", not
+    the dataset name someone typed once in a form, and certainly not a version
+    number: the file that lands in their Downloads folder has to be findable
+    next to the file they sent.
+    """
+    seen: set[str] = set()
+    current: dict[str, Any] | None = version
+
+    while current is not None and current["id"] not in seen:
+        seen.add(current["id"])
+        upload_id = current.get("raw_upload_id")
+        if upload_id:
+            uploads = context.supabase.select(
+                "raw_uploads",
+                columns="id,original_filename",
+                filters={"id": f"eq.{upload_id}"},
+                limit=1,
+            )
+            if uploads:
+                return uploads[0].get("original_filename")
+            return None
+
+        parent_id = current.get("parent_version_id")
+        if not parent_id:
+            return None
+        try:
+            current = _load_version(context, parent_id)
+        except JobError:
+            return None
+
+    return None
+
+
 def _load_mappings(context: JobContext, steps: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
     """Current contents of every mapping table the recipe's steps refer to."""
     table_ids = {
@@ -1503,7 +1544,16 @@ def _rows_from_parquet(parquet_bytes: bytes) -> list[dict[str, Any]]:
     import polars as pl
 
     frame = pl.read_parquet(io.BytesIO(parquet_bytes))
-    columns = [name for name in frame.columns if name != "__source_row"]
+    # `__source_row` is the provenance key and `__raw_*` holds each coerced
+    # column's original text, kept so a change can be shown as before/after.
+    # Both are machinery. Six of them shipped in a customer's export before this
+    # filter existed, next to the columns they duplicate -- Table.business_columns
+    # has always drawn exactly this line, and the export simply was not asking.
+    columns = [
+        name
+        for name in frame.columns
+        if name != "__source_row" and not name.startswith("__raw_")
+    ]
     return frame.select(columns).to_dicts()
 
 
@@ -1535,6 +1585,7 @@ def handle_export_dataset(context: JobContext) -> dict[str, Any]:
         "datasets", columns="id,name", filters={"id": f"eq.{version['dataset_id']}"}, limit=1
     )
     dataset_name = dataset_rows[0]["name"] if dataset_rows else "Dataset"
+    source_filename = _source_filename(context, version)
 
     context.heartbeat({"stage": "writing"})
     if fmt == "xlsx":
@@ -1562,6 +1613,9 @@ def handle_export_dataset(context: JobContext) -> dict[str, Any]:
         "row_count": len(rows),
         "byte_size": stored.size,
         "dataset_name": dataset_name,
+        # What the accountant originally sent us, so the download can be named
+        # after it rather than after the dataset someone named in a form.
+        "source_filename": source_filename,
         "version_no": version["version_no"],
     }
 
