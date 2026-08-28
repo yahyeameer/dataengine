@@ -79,6 +79,20 @@ class LLMConfig:
     reasoning_provider: str = "openai"
     drafting_provider: str = "openai"
 
+    # Sent as OpenAI's `reasoning_effort` on the categorisation call only.
+    #
+    # "none" by default because that task is the one place where thinking is
+    # both expensive and unnecessary: sorting values into buckets needs no
+    # deliberation, and a thinking model spends the output ceiling reasoning
+    # before it writes any JSON. Measured on Gemini 2.5 Flash over 118 of this
+    # customer's values -- 5,762 output tokens with thinking, 1,514 without, for
+    # the same answer. At the configured 2,000 ceiling it never finished at all:
+    # 8,400 tokens of reasoning and 338 of truncated JSON.
+    #
+    # Set HERMES_LLM_REASONING_EFFORT to empty to stop sending it at all, for a
+    # provider that rejects the parameter.
+    reasoning_effort: str = "none"
+
     timeout_seconds: int = 90
     max_output_tokens: int = 2000
 
@@ -177,6 +191,11 @@ def load_config() -> Config:
         kimi_base_url=os.environ.get("KIMI_BASE_URL", "").strip() or "https://api.moonshot.ai/v1",
         kimi_model=os.environ.get("KIMI_MODEL", "").strip() or "kimi-k2-0905-preview",
         reasoning_provider=os.environ.get("HERMES_REASONING_PROVIDER", "").strip() or "openai",
+        reasoning_effort=(
+            os.environ["HERMES_LLM_REASONING_EFFORT"].strip()
+            if "HERMES_LLM_REASONING_EFFORT" in os.environ
+            else "none"
+        ),
         drafting_provider=os.environ.get("HERMES_DRAFTING_PROVIDER", "").strip() or "openai",
         timeout_seconds=_int("HERMES_LLM_TIMEOUT_SECONDS", 90),
         max_output_tokens=_int("HERMES_LLM_MAX_OUTPUT_TOKENS", 2000),

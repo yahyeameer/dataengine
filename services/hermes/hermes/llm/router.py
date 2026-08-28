@@ -44,6 +44,10 @@ MAX_RATIONALE_CHARS = 600
 MAX_CATEGORIZE_VALUES = 500
 MAX_CATEGORY_CHARS = 40
 
+# Ceiling for one categorisation reply. Generous because the cost of being
+# wrong is a truncated mapping that looks like a model failure.
+MAX_CATEGORIZE_TOKENS = 32000
+
 
 @dataclass
 class LLMResult:
@@ -87,6 +91,8 @@ class LLMRouter:
         system: str,
         user: str,
         json_mode: bool = False,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> LLMResult:
         provider = self._config.provider_for(task)
         if provider is None:
@@ -99,7 +105,7 @@ class LLMRouter:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            "max_tokens": self._config.max_output_tokens,
+            "max_tokens": max_tokens or self._config.max_output_tokens,
             # Low but not zero. These are explanation tasks where a completely
             # greedy decode tends to produce the same stock phrasing for every
             # dataset, which reads as boilerplate and gets ignored.
@@ -107,6 +113,8 @@ class LLMRouter:
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
 
         try:
             response = self._client.post(
@@ -278,8 +286,25 @@ class LLMRouter:
             + '\n\nReturn JSON: {"assignments": {"<value>": "<category>"}}'
         )
 
+        # Every other task here returns prose of roughly fixed length, so the
+        # configured ceiling fits them all. This one returns a line per value,
+        # and a budget sized for a two-sentence rationale truncates it into
+        # invalid JSON -- which then reads as "the model cannot do this" rather
+        # than "we did not give it room to answer".
+        #
+        # The headroom on top is not padding. A thinking model spends tokens
+        # reasoning before it emits anything, and those count against the same
+        # ceiling while being reported separately: Gemini 2.5 Flash burned ~1,900
+        # of 2,000 on thinking and had 69 left for a 118-entry mapping.
+        budget = min(MAX_CATEGORIZE_TOKENS, 4000 + len(capped) * 40)
+
         result = self._complete(
-            "reasoning", system, json.dumps({"values": capped}, default=str), json_mode=True
+            "reasoning",
+            system,
+            json.dumps({"values": capped}, default=str),
+            json_mode=True,
+            max_tokens=budget,
+            reasoning_effort=self._config.reasoning_effort or None,
         )
         # A transport failure and an uncategorisable column are different
         # conclusions, and the caller has to be able to tell them apart: one is
