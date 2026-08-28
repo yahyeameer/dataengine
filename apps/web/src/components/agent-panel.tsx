@@ -262,6 +262,18 @@ function JobStatus({ job }: { job: Job }) {
   );
 }
 
+/**
+ * The minimum a download control needs. Declared separately from Job so the
+ * page can hand over its own server-fetched rows without the two queries having
+ * to agree on every column.
+ */
+export type DownloadableJob = {
+  id: string;
+  kind: AgentJobKind;
+  status: AgentJobStatus;
+  result: Json;
+};
+
 /** The kinds that leave a file behind in the exports bucket. */
 const DOWNLOADABLE_KINDS = new Set<AgentJobKind>(['generate_report', 'export_dataset']);
 
@@ -272,7 +284,7 @@ const DOWNLOADABLE_KINDS = new Set<AgentJobKind>(['generate_report', 'export_dat
  * off the same row when the URL is signed, so nothing the browser holds decides
  * which object gets handed out.
  */
-function artefactName(job: Job): string | null {
+function artefactName(job: DownloadableJob): string | null {
   if (job.status !== 'succeeded' || !DOWNLOADABLE_KINDS.has(job.kind)) return null;
 
   const result = (job.result ?? {}) as Record<string, unknown>;
@@ -286,7 +298,21 @@ function artefactName(job: Job): string | null {
   return path?.split('/').pop() ?? null;
 }
 
-function DownloadButton({ job }: { job: Job }) {
+export /**
+ * "Download Excel" beats "Download" the moment there are two of them.
+ *
+ * A workspace that has exported both formats renders two identical buttons
+ * otherwise, and the only way to tell them apart is to hover for the tooltip.
+ */
+function formatLabel(filename: string): string {
+  const extension = filename.slice(filename.lastIndexOf('.') + 1).toLowerCase();
+  if (extension === 'xlsx') return 'Excel';
+  if (extension === 'csv') return 'CSV';
+  if (extension === 'md') return 'report';
+  return extension.toUpperCase();
+}
+
+export function DownloadButton({ job }: { job: DownloadableJob }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -319,9 +345,9 @@ function DownloadButton({ job }: { job: Job }) {
         onClick={download}
         disabled={busy}
         title={name}
-        className="rounded border border-black/15 px-2 py-0.5 text-xs transition-colors hover:bg-black/5 disabled:opacity-50 dark:border-white/20 dark:hover:bg-white/10"
+        className="rounded border border-black/15 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-black/5 disabled:opacity-50 dark:border-white/20 dark:hover:bg-white/10"
       >
-        {busy ? 'Preparing…' : 'Download'}
+        {busy ? 'Preparing…' : `Download ${formatLabel(name)}`}
       </button>
       {error ? <span className="text-xs text-red-600">{error}</span> : null}
     </>

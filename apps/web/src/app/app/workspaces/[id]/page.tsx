@@ -1,6 +1,12 @@
 import { notFound } from 'next/navigation';
 
-import { AgentPanel, AnalyseButton, ExportButton } from '@/components/agent-panel';
+import {
+  AgentPanel,
+  AnalyseButton,
+  DownloadButton,
+  type DownloadableJob,
+  ExportButton,
+} from '@/components/agent-panel';
 import {
   DeviationsPanel,
   type Deviation,
@@ -132,6 +138,19 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
     }
   }
 
+  // Files the agent has already written and nobody has been able to find.
+  //
+  // Derived from the job list that was fetched anyway rather than a second
+  // query. Every export lands here the moment its job succeeds, which is the
+  // whole point: the download used to live inline in a job row at the top of
+  // the page and at the bottom of a column, and in testing it was missed
+  // entirely -- the work completed and the person could not see the result.
+  const readyDownloads = (jobs ?? []).filter(
+    (job) =>
+      job.status === 'succeeded' &&
+      (job.kind === 'export_dataset' || job.kind === 'generate_report'),
+  ) as DownloadableJob[];
+
   return (
     <>
       <PageHeader title={workspace.name} subtitle={workspace.client_name ?? 'Client workspace'} />
@@ -143,6 +162,41 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
           initialWorkers={workers ?? []}
         />
       </div>
+
+      {latestVersion ? (
+        <section className="mb-6 rounded-lg border border-emerald-600/40 bg-emerald-500/5 px-4 py-5 text-center">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-300">
+            Cleaned data ready
+          </h2>
+          <p className="mt-1 text-xs opacity-70">
+            Version {latestVersion.version_no}
+            {latestVersion.row_count !== null ? ` · ${latestVersion.row_count} rows` : ''} · the
+            original file is untouched
+          </p>
+
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-3">
+            <ExportButton workspaceId={workspace.id} datasetVersionId={latestVersion.id} />
+          </div>
+
+          {readyDownloads.length > 0 ? (
+            <div className="mt-4 border-t border-emerald-600/20 pt-3">
+              <p className="text-xs font-medium opacity-70">
+                Ready to download ({readyDownloads.length})
+              </p>
+              <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                {readyDownloads.map((job) => (
+                  <DownloadButton key={job.id} job={job} />
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="mt-3 text-xs opacity-60">
+              Choose a format above. The file takes a few seconds to prepare, then a download
+              button appears here.
+            </p>
+          )}
+        </section>
+      ) : null}
 
       {openRun ? (
         <div className="mb-8">
@@ -183,9 +237,6 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
                 Latest dataset version: v{latestVersion.version_no}
                 {latestVersion.row_count !== null ? ` · ${latestVersion.row_count} rows` : ''}
               </p>
-              <div className="mt-2">
-                <ExportButton workspaceId={workspace.id} datasetVersionId={latestVersion.id} />
-              </div>
             </>
           ) : null}
         </section>
