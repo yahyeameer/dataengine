@@ -45,6 +45,41 @@ const DOWNLOADABLE_KINDS = new Set(['generate_report', 'export_dataset']);
  */
 const SIGNED_URL_TTL_SECONDS = 60;
 
+/**
+ * What the file is called once it reaches the accountant's Downloads folder.
+ *
+ * Deliberately not the storage key's last segment. That segment is built for
+ * the object store, where a name has to stay unique across every dataset in a
+ * workspace, so it leads with a uuid --
+ * `a8fade1c-a7d4-4d90-bcf4-274c2680dcfe__v1__export.xlsx`. Nobody can pick that
+ * out of a folder a week later, and renaming it by hand is the sort of chore
+ * this product exists to remove.
+ *
+ * The storage key stays as it is; only the Content-Disposition changes, which
+ * is the header the browser actually reads for the saved name. The worker
+ * records dataset_name and version_no on the job result precisely so this can
+ * be reconstructed without a second query.
+ */
+function downloadName(result: Record<string, unknown>, path: string): string {
+  const fallback = path.split('/').pop() ?? 'export';
+  const dataset = typeof result.dataset_name === 'string' ? result.dataset_name.trim() : '';
+  if (!dataset) return fallback;
+
+  const extension = fallback.includes('.') ? fallback.slice(fallback.lastIndexOf('.') + 1) : 'bin';
+  const version = typeof result.version_no === 'number' ? ` v${result.version_no}` : '';
+
+  // A dataset is named by a person, so it can contain anything -- quotes and
+  // newlines would break the header outright, and path separators are worse.
+  const safe =
+    dataset
+      .replace(/[\\/:*?"<>|\r\n]+/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80) || 'export';
+
+  return `${safe}${version}.${extension}`;
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -110,13 +145,13 @@ export async function GET(request: Request) {
       );
     }
 
+    const filename = downloadName(result, path);
+
     const admin = adminFor(context);
     const { data: signed, error: signError } = await admin.storage
       .from(bucket)
       .createSignedUrl(path, SIGNED_URL_TTL_SECONDS, {
-        // Without this the browser saves the object key's last segment, which
-        // is a uuid pair. The accountant wants a filename.
-        download: path.split('/').pop() ?? 'export',
+        download: filename,
       });
 
     if (signError || !signed) {

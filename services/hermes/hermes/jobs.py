@@ -547,24 +547,41 @@ def handle_profile_dataset(context: JobContext) -> dict[str, Any]:
         },
     )
 
-    context.supabase.rpc(
-        "enqueue_agent_job_internal",
-        {
-            "p_workspace_id": context.workspace_id,
-            "p_kind": "propose_cleaning",
-            "p_dataset_id": version["dataset_id"],
-            "p_dataset_version_id": version_id,
-            "p_requested_by": context.requested_by(),
-            "p_priority": 50,
-        },
-    )
+    # Profiling a version the accountant has just cleaned is worth doing -- the
+    # profile is the evidence behind the next month's comparison. Proposing
+    # against it is not.
+    #
+    # apply_cleaning chains here so the new version gets a profile, and this
+    # step used to chain onward to propose_cleaning unconditionally. The result
+    # was a treadmill: approve a queue, apply it, and a fresh queue appears on
+    # the version that was just cleaned to your approval. Some of it recurs
+    # verbatim, because a step like review_key_conflicts flags a condition
+    # rather than removing it, so applying can never satisfy it and it is
+    # re-proposed on every pass. The reviewer sees no end to the work and, worse,
+    # an apply aimed at the version they were looking at fails with "nothing has
+    # been approved for this version yet" -- the new proposals are all pending.
+    #
+    # So the caller decides. A profile that follows a parse proposes; one that
+    # follows an apply does not.
+    if context.payload.get("propose", True):
+        context.supabase.rpc(
+            "enqueue_agent_job_internal",
+            {
+                "p_workspace_id": context.workspace_id,
+                "p_kind": "propose_cleaning",
+                "p_dataset_id": version["dataset_id"],
+                "p_dataset_version_id": version_id,
+                "p_requested_by": context.requested_by(),
+                "p_priority": 50,
+            },
+        )
 
     return {
         "dataset_version_id": version_id,
         "rows": profile.row_count,
         "columns": profile.column_count,
         "signals": profile.signals,
-        "next": "propose_cleaning",
+        "next": "propose_cleaning" if context.payload.get("propose", True) else None,
     }
 
 
@@ -739,6 +756,10 @@ def handle_apply_cleaning(context: JobContext) -> dict[str, Any]:
             "p_kind": "profile_dataset",
             "p_dataset_id": version["dataset_id"],
             "p_dataset_version_id": new_version["id"],
+            # Profile it, but do not turn round and propose against it. See the
+            # note in handle_profile_dataset: this version is the output of a
+            # review that just finished, not an inbox for a new one.
+            "p_payload": {"propose": False},
             "p_requested_by": context.requested_by(),
             "p_priority": 50,
         },
@@ -1322,6 +1343,11 @@ def handle_generate_report(context: JobContext) -> dict[str, Any]:
     return {
         "report_path": stored.path,
         "bucket": EXPORTS_BUCKET,
+        # Carried so the download route can name the saved file after the
+        # dataset rather than after its uuid. See downloadName() in
+        # apps/web/src/app/api/exports/route.ts.
+        "dataset_name": dataset_rows[0]["name"] if dataset_rows else "Report",
+        "version_no": version["version_no"],
         "markdown": markdown,
         "kpis": kpis,
         "comparison": comparison,
