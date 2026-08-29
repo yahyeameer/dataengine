@@ -1,0 +1,28 @@
+A DataEngine job has arrived. Handle it now.
+
+  job_id             {job_id}
+  kind               {kind}
+  workspace_id       {workspace_id}
+  dataset_id         {dataset_id}
+  dataset_version_id {dataset_version_id}
+  input url          {input.url}
+  input filename     {input.filename}
+  input bytes        {input.byte_size}
+  export upload url  {output.export_url}
+  export path        {output.export_path}
+  export format      {output.format}
+  parquet upload url {output.parquet_url}
+  parquet path       {output.parquet_path}
+  callback url       {callback_url}
+  urls expire        {expires_at}
+
+Read the file /opt/data/dataengine-job-prompt.md and follow it exactly. It is
+the complete specification for this work: what each kind means, how to fetch and
+clean the file, where to upload what you produce, and how to sign and post the
+result. Do not improvise around it and do not substitute your own judgement for
+the reporting contract at the end of it.
+
+The values above are this job's. If any of them render as empty, missing or a
+literal placeholder, do not guess and do not proceed: report a failure to the
+callback url saying which field was missing, so the accountant waiting on this
+gets an explanation rather than a spinner.

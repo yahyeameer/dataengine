@@ -9,49 +9,88 @@ agent already carries are what that turn reaches for. The case study in
 `hermes-webhook-integrations/references/analyzit-case.md` establishes the shape;
 this is the same thing pointed at a job instead of a question.
 
-## 1. Create the route
+## Two files, and why
 
-Ask the agent to do it rather than composing the command by hand. The prompt is
-several kilobytes of markdown containing `$`, backticks and quotes, and
-`--prompt "$(cat prompt.md)"` runs all of it through shell expansion first --
-which mangles the prompt silently and leaves a route that looks created and
-behaves oddly.
+`hermes webhook subscribe --prompt` takes a **string**, not a file, and that
+string is a template: it substitutes `{dot.notation}` references against the
+webhook payload before the agent ever sees it.
 
-Upload `prompt.md` through **FILES** (it lands in `/opt/data`), then in **CHAT**:
+That rules out passing the runbook as `--prompt`. It contains three brace
+patterns a renderer would try to substitute — a JSON example, an f-string
+`{sig}`, and the path `/api/tools/{tool}` — and the corruption would be silent.
 
-> Run `hermes webhook subscribe --help` and show me the options. Then create a
-> subscription named `dataengine-job` for the event `job.dispatched`, using the
-> full contents of `/opt/data/prompt.md` as its prompt — read it from the file
-> rather than pasting it through the shell. Then run `hermes webhook list` and
-> show me the result.
+So the route carries a short template, and the long specification lives on disk:
 
-The agent has `terminal`, so it can read the help, pick the right flag (a
-`--prompt-file` if one exists) and avoid the quoting problem entirely.
+| File | Role |
+|---|---|
+| `route-prompt.txt` | Passed as `--prompt`. Short, and every brace in it is a deliberate payload reference. |
+| `prompt.md` | Uploaded to `/opt/data/dataengine-job-prompt.md`. The agent reads it at run time, so no template rendering touches it. |
 
-**Check the result yourself.** Run `hermes webhook list` in a terminal rather
-than relying on the agent's summary of what it did — a route whose prompt was
-truncated reports as created, and the failure only appears later as an agent
-turn that stops halfway with no explanation.
+## 1. Upload the runbook
 
-## 2. Take the secret it generates
+Drag `prompt.md` into **FILES** in the Hermes UI and name it
+`dataengine-job-prompt.md`. It cannot be fetched from this repository — the repo
+is private, which is correct and should stay that way.
 
-The gateway stores a per-route secret in `~/.hermes/webhook_subscriptions.json`
-and does not display it again:
+Confirm it landed intact before continuing. A truncated upload produces a route
+that reports as created and fails halfway through the first real job:
 
 ```bash
-docker exec hermes-agent-bwlq-hermes-agent-1 hermes webhook list
+docker exec hermes-agent-bwlq-hermes-agent-1   wc -c /opt/data/dataengine-job-prompt.md      # expect 6687 or thereabouts
 ```
 
-Copy it verbatim into `apps/web/.env` as `HERMES_WEBHOOK_SECRET`. The case study
-records an afternoon lost to a one-letter case difference (`LW` against `Lw`)
-that presented only as `Invalid signature` — compare it character by character
-rather than by eye, and never retype it.
+## 2. Create the route
+
+Generate the secret yourself rather than letting the gateway mint one. Both
+sides need the same value, and a secret you already hold is one you never have
+to transcribe out of a terminal — which is the exact step that cost the case
+study an afternoon over `LW` against `Lw`:
+
+```bash
+openssl rand -hex 32        # keep this; it goes in apps/web/.env too
+```
+
+Then ask the agent, in **CHAT**, to run the subscription through Python's
+`subprocess` with an argument list — no shell, no interpolation:
+
+> Create a Hermes webhook subscription. Do it from Python with `subprocess.run`
+> and an argument list, not through a shell.
+>
+> - name: `dataengine-job`
+> - `--events job.dispatched`
+> - `--prompt`: the exact contents of `/opt/data/route-prompt.txt`, read from
+>   the file
+> - `--secret`: `<the value from openssl above>`
+> - `--skills`: `analyzit-data-cleaning,analyzit-cleaning-recipes,analyzit-data-analysis,analyzit-polars,analyzit-duckdb,analyzit-accounting,analyzit-reporting`
+> - `--description`: `DataEngine cleaning and export jobs`
+>
+> Then run `hermes webhook list` and show me the stored prompt verbatim, so I
+> can check the payload references survived.
+
+`--skills` scopes the turn to what the work needs instead of loading all 91.
+On a box with one CPU core that is worth doing.
+
+## 3. Put the same secret in DataEngine
+
+In `apps/web/.env`:
+
+```
+HERMES_WEBHOOK_SECRET=<the same value you passed to --secret>
+HERMES_WEBHOOK_SIGNING=github
+HERMES_WEBHOOK_URL=http://172.16.0.2:8644
+```
 
 Signing is HMAC-SHA256 over the exact raw request body, sent as
-`X-Hub-Signature-256: sha256=<hexdigest>`. DataEngine already does this; the
-`HERMES_WEBHOOK_SIGNING=github` default in `.env.docker.example` selects it.
+`X-Hub-Signature-256: sha256=<hexdigest>` alongside `X-GitHub-Event` — what this
+installation's `hermes-webhook-integrations` skill documents, and what
+`HERMES_WEBHOOK_SIGNING=github` selects.
 
-## 3. Verify before wiring the app
+If you ever do let the gateway generate the secret instead, read it back with
+`hermes webhook list` and copy it rather than retyping it. The case study records
+an afternoon lost to a single letter's case (`LW` against `Lw`), and the only
+symptom was `Invalid signature`.
+
+## 4. Verify the route answers
 
 ```bash
 curl -s http://172.16.0.2:8644/health
