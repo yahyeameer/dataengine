@@ -7,6 +7,11 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "14.5"
+  }
   graphql_public: {
     Tables: {
       [_ in never]: never
@@ -605,6 +610,53 @@ export type Database = {
           },
         ]
       }
+      hermes_answers: {
+        Row: {
+          answer: string | null
+          answered_at: string | null
+          asked_by: string | null
+          created_at: string
+          error: string | null
+          id: string
+          question: string
+          request_id: string
+          status: string
+          workspace_id: string
+        }
+        Insert: {
+          answer?: string | null
+          answered_at?: string | null
+          asked_by?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          question: string
+          request_id: string
+          status?: string
+          workspace_id: string
+        }
+        Update: {
+          answer?: string | null
+          answered_at?: string | null
+          asked_by?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          question?: string
+          request_id?: string
+          status?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hermes_answers_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       mapping_entries: {
         Row: {
           canonical_value: string
@@ -1089,6 +1141,14 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      append_proposed_changes: {
+        Args: {
+          p_dataset_version_id: string
+          p_job_id: string
+          p_proposals: Json
+        }
+        Returns: number
       }
       cancel_agent_job: {
         Args: { p_job_id: string }
@@ -1925,4 +1985,3 @@ export const Constants = {
     },
   },
 } as const
-

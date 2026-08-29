@@ -8,6 +8,7 @@ import {
   type DownloadableJob,
   ExportButton,
 } from '@/components/agent-panel';
+import { AskPanel } from '@/components/ask-panel';
 import {
   DeviationsPanel,
   type Deviation,
@@ -232,6 +233,10 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
           />
         </div>
       ) : null}
+
+      <div className="mb-6">
+        <AskPanel workspaceId={workspace.id} />
+      </div>
 
       {latestVersion && profileColumns.length > 0 ? (
         <div className="mb-6">
