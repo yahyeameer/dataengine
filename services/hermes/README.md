@@ -313,10 +313,20 @@ Idle is not the problem. One core means any single process that wants real work
 gets the whole machine, and sustained is exactly what Hostinger throttles. Two
 consequences worth stating plainly:
 
-**Never run `next build` on this box.** On one core it is minutes of unbroken
-100%, in the daemon, outside every container limit in these compose files. It
-will trip the throttle, and the throttle applies to the whole VPS -- so a deploy
-would take the agent offline as a side effect. Build elsewhere, push, pull.
+**`next build` on this box is a real cost, and sometimes the right one.** It
+runs in the daemon, outside every container limit in these compose files, and on
+one core it is several minutes of unbroken 100%. The throttle applies to the
+whole VPS, so a build can take the agent down with it.
+
+Shipping a prebuilt image (`docker save | ssh | docker load`) avoids that
+entirely and is what a rebuild-often workflow should use.
+
+But building in place needs no second machine and no registry, and one build is
+minutes rather than hours -- so for a first deploy, or a demo, it is a
+defensible trade made knowingly. If you take it: build once rather than
+iterating, prefer a quiet hour, and remember hPanel's **Remove Limitations**
+resets a throttle once a week. What is not defensible is rebuilding on every
+small change and wondering why the box is slow.
 
 **The parse worker and the web app together are a stretch.** Serving pages is
 not CPU-bound and fits fine. Parsing workbooks with polars and duckdb is CPU-
