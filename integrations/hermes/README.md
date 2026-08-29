@@ -87,10 +87,17 @@ On a box with one CPU core that is worth doing.
 In `apps/web/.env`:
 
 ```
-HERMES_WEBHOOK_SECRET=<the same value you passed to --secret>
+HERMES_WEBHOOK_SECRET=<the route's secret>
 HERMES_WEBHOOK_SIGNING=github
 HERMES_WEBHOOK_URL=http://172.16.0.2:8644
+HERMES_JOB_ROUTE=dataengine-job
 ```
+
+`HERMES_JOB_ROUTE` must equal the subscription's **name**. A Hermes route's name
+is its URL -- `dataengine-job` serves `/webhooks/dataengine-job`, and there is no
+generic endpoint. Get it wrong and the gateway answers 404 on every job while
+the failure message talks about the gateway not accepting the job, which sends
+you looking at the secret.
 
 Signing is HMAC-SHA256 over the exact raw request body, sent as
 `X-Hub-Signature-256: sha256=<hexdigest>` alongside `X-GitHub-Event` — what this

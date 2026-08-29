@@ -37,6 +37,18 @@ const GATEWAY_SECRET = process.env.HERMES_WEBHOOK_SECRET;
 const SIGNING = (process.env.HERMES_WEBHOOK_SIGNING ?? 'github').toLowerCase();
 
 /**
+ * The gateway route jobs are pushed to.
+ *
+ * A Hermes subscription's name *is* its URL -- `hermes webhook subscribe
+ * dataengine-job` creates `/webhooks/dataengine-job`, not a generic endpoint.
+ * So this has to match the subscription's name exactly, and it is a variable
+ * rather than a constant because the two live in different systems and a
+ * mismatch is invisible until the first real job: the gateway answers 404, the
+ * job is marked failed, and nothing says the name was the problem.
+ */
+const JOB_ROUTE = process.env.HERMES_JOB_ROUTE ?? 'dataengine-job';
+
+/**
  * The worker id jobs are claimed under. Must match the row seeded by migration
  * 015, because `agent_jobs.claimed_by` is a foreign key into `agent_workers`.
  */
@@ -242,7 +254,7 @@ export type DispatchOutcome =
  */
 export async function dispatchJob(
   payload: HermesJobPayload,
-  path = '/webhooks/ask',
+  route: string = JOB_ROUTE,
 ): Promise<DispatchOutcome> {
   if (!GATEWAY_URL || !GATEWAY_SECRET) {
     return { ok: false, status: null, detail: 'Hermes is not configured on this server' };
@@ -254,7 +266,7 @@ export async function dispatchJob(
   const body = JSON.stringify(payload);
 
   try {
-    const response = await fetch(`${GATEWAY_URL.replace(/\/$/, '')}${path}`, {
+    const response = await fetch(`${GATEWAY_URL.replace(/\/$/, '')}/webhooks/${route}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
