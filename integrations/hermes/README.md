@@ -24,19 +24,31 @@ So the route carries a short template, and the long specification lives on disk:
 | File | Role |
 |---|---|
 | `route-prompt.txt` | Passed as `--prompt`. Short, and every brace in it is a deliberate payload reference. |
-| `prompt.md` | Uploaded to `/opt/data/dataengine-job-prompt.md`. The agent reads it at run time, so no template rendering touches it. |
+| `dataengine-job-prompt.md` | Uploaded as-is to `/opt/data`. The agent reads it at run time, so no template rendering touches it. |
 
-## 1. Upload the runbook
+## 1. Upload both files
 
-Drag `prompt.md` into **FILES** in the Hermes UI and name it
-`dataengine-job-prompt.md`. It cannot be fetched from this repository — the repo
-is private, which is correct and should stay that way.
+In the Hermes UI, open **FILES**, confirm the path reads `/opt/data`, and drag
+both of these in from `integrations/hermes/`:
 
-Confirm it landed intact before continuing. A truncated upload produces a route
-that reports as created and fails halfway through the first real job:
+```
+dataengine-job-prompt.md     6687 bytes
+route-prompt.txt             1240 bytes
+```
+
+They are named for their destination, so there is nothing to rename — drop them
+and they are in the right place under the right names.
+
+Neither can be fetched from this repository: it is private, which is correct and
+should stay that way. Nothing in this integration needs the agent reading the
+source, and granting it access to save an upload would trade a real boundary for
+a small convenience.
+
+Confirm they landed intact. A truncated upload produces a route that reports as
+created and then fails halfway through the first real job:
 
 ```bash
-docker exec hermes-agent-bwlq-hermes-agent-1   wc -c /opt/data/dataengine-job-prompt.md      # expect 6687 or thereabouts
+docker exec hermes-agent-bwlq-hermes-agent-1   wc -c /opt/data/dataengine-job-prompt.md /opt/data/route-prompt.txt
 ```
 
 ## 2. Create the route
@@ -167,7 +179,7 @@ The tool is **`terminal`**, running Python with the standard library —
 package is needed and none should be installed.
 
 That is more capable than a constrained HTTP tool would have been: the whole job
-loop can run as one script, which is why `prompt.md` gives a concrete skeleton
+loop can run as one script, which is why `dataengine-job-prompt.md` gives a concrete skeleton
 for the callback rather than describing it. The single failure mode worth
 guarding is serialising the body twice — signing one JSON encoding and posting
 another produces a valid-looking signature that never verifies, and reads as a
@@ -186,7 +198,7 @@ the same job kinds, a `hermes` module at the same path, and a documented tool
 layer at `/api/tools/{tool}` that was designed and never actually built.
 
 An agent that goes looking for context mid-job will find a contract that no
-longer exists. `prompt.md` opens by telling it the payload is the only source of
+longer exists. `dataengine-job-prompt.md` opens by telling it the payload is the only source of
 truth and naming that directory specifically, which is the cheap fix.
 
 Leave the checkout in place — it is the operator's, and deleting things from a
