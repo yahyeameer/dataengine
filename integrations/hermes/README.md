@@ -11,18 +11,27 @@ this is the same thing pointed at a job instead of a question.
 
 ## 1. Create the route
 
-On the VPS:
+Ask the agent to do it rather than composing the command by hand. The prompt is
+several kilobytes of markdown containing `$`, backticks and quotes, and
+`--prompt "$(cat prompt.md)"` runs all of it through shell expansion first --
+which mangles the prompt silently and leaves a route that looks created and
+behaves oddly.
 
-```bash
-docker exec -it hermes-agent-bwlq-hermes-agent-1 \
-  hermes webhook subscribe dataengine-job \
-    --events job.dispatched \
-    --prompt "$(cat prompt.md)"
-```
+Upload `prompt.md` through **FILES** (it lands in `/opt/data`), then in **CHAT**:
 
-`--events job.dispatched` must match the `X-GitHub-Event` header DataEngine
-sends. That name is set in `apps/web/src/lib/hermes.ts` (`dispatchJob`), and the
-two have to agree or the gateway accepts the POST and routes it nowhere.
+> Run `hermes webhook subscribe --help` and show me the options. Then create a
+> subscription named `dataengine-job` for the event `job.dispatched`, using the
+> full contents of `/opt/data/prompt.md` as its prompt — read it from the file
+> rather than pasting it through the shell. Then run `hermes webhook list` and
+> show me the result.
+
+The agent has `terminal`, so it can read the help, pick the right flag (a
+`--prompt-file` if one exists) and avoid the quoting problem entirely.
+
+**Check the result yourself.** Run `hermes webhook list` in a terminal rather
+than relying on the agent's summary of what it did — a route whose prompt was
+truncated reports as created, and the failure only appears later as an agent
+turn that stops halfway with no explanation.
 
 ## 2. Take the secret it generates
 
@@ -129,3 +138,18 @@ One incidental finding: the agent could not fetch this repository's README over
 HTTP, because the repository is private. That is correct and should stay that
 way — nothing in this integration requires the agent to read the source. Do not
 grant it repository access to make a test pass.
+
+## A hazard on the agent's disk
+
+`/opt/data` contains a checkout of **AI-Data-Operations-Platform** — the
+abandoned predecessor of this project. It shares this one's whole vocabulary:
+the same job kinds, a `hermes` module at the same path, and a documented tool
+layer at `/api/tools/{tool}` that was designed and never actually built.
+
+An agent that goes looking for context mid-job will find a contract that no
+longer exists. `prompt.md` opens by telling it the payload is the only source of
+truth and naming that directory specifically, which is the cheap fix.
+
+Leave the checkout in place — it is the operator's, and deleting things from a
+running agent's persistent volume to fix a prompt problem is the wrong trade.
+Renaming it to something that does not read as this project would not hurt.

@@ -3,6 +3,19 @@ You have received a DataEngine job. The webhook body is your input.
 Work through it in order. Do not skip the final step: a cleaned file that is
 never uploaded and never reported is the same to the customer as no work at all.
 
+## 0. The payload is the only source of truth
+
+Everything you need is in the webhook body. Take the workspace, the dataset, the
+file and the destinations from it and from nowhere else.
+
+In particular: `/opt/data` holds a checkout of **AI-Data-Operations-Platform**.
+That is a different, abandoned project that happens to share this one's
+vocabulary -- the same job kinds, a `hermes` module, a tool layer at
+`/api/tools/{tool}` that was designed and never built. Reading it for context
+will hand you a contract that no longer exists and send results somewhere
+nothing is listening. Do not consult it. The live project is `dataengine`, and
+you do not need its source to do this work.
+
 ## 1. Read the job
 
 The body gives you `job_id`, `kind`, and an `input` object with a signed URL.
