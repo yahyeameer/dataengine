@@ -1,0 +1,76 @@
+# The web app on the VPS, for a demo. Not the production file.
+#
+#   docker compose -f docker-compose.demo.yml up -d
+#   docker compose -f docker-compose.demo.yml logs -f web
+#
+# Used INSTEAD of docker-compose.yml, not alongside it. The difference is the
+# front door: production puts the app behind the Traefik already running on this
+# box, which needs a domain, a DNS record and that proxy's entrypoint names.
+# None of that is worth arranging to prove the pipeline works.
+#
+# So this publishes the port on the loopback interface only and expects you to
+# reach it through an SSH tunnel:
+#
+#   ssh -L 3100:127.0.0.1:3100 root@srv1927440
+#   # then open http://localhost:3100
+#
+# That is not a shortcut around TLS, it is the one case where TLS is genuinely
+# unnecessary. Supabase's auth cookies are `Secure`, so sign-in fails over plain
+# http on a domain -- but browsers treat `localhost` as a secure context and
+# accept them there. The tunnel is encrypted by SSH the whole way.
+#
+# When you are ready for real users, switch to docker-compose.yml and fill in
+# the Traefik values. Nothing else changes.
+
+services:
+  web:
+    image: dataengine-web:${WEB_TAG:-latest}
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?set in .env}
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:?set in .env}
+    restart: unless-stopped
+
+    environment:
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:?set in .env}
+      HERMES_WEBHOOK_URL: ${HERMES_WEBHOOK_URL:?set in .env}
+      HERMES_WEBHOOK_SECRET: ${HERMES_WEBHOOK_SECRET:?set in .env}
+      HERMES_WEBHOOK_SIGNING: ${HERMES_WEBHOOK_SIGNING:-github}
+      HERMES_JOB_ROUTE: ${HERMES_JOB_ROUTE:-dataengine-job}
+      HERMES_WORKER_ID: ${HERMES_WORKER_ID:-hermes-agent}
+      # The agent reaches back by service name on the shared network below.
+      DATAENGINE_CALLBACK_URL: ${DATAENGINE_CALLBACK_URL:-http://web:3100}
+
+    # 127.0.0.1, not 0.0.0.0. Bound to the loopback interface the app is
+    # reachable through an SSH tunnel and from nowhere else -- no firewall rule
+    # to remember, and nothing exposed if ufw is ever flushed.
+    ports:
+      - "127.0.0.1:3100:3100"
+
+    networks:
+      # Hermes must resolve `web` to deliver its callback, and this app must
+      # resolve the gateway to dispatch. One shared network does both.
+      - hermes
+
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "${WEB_CPUS:-0.4}"
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  hermes:
+    external: true
+    name: ${HERMES_NETWORK:-hermes-agent-bwlq_default}
