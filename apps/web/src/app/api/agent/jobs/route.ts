@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { handleRouteError } from '@/lib/api';
+import { dispatchJobToHermes } from '@/lib/hermes-dispatch';
 import { requireWorkspaceAccess } from '@/lib/authz';
 import { createServerSupabase } from '@/lib/supabase/server';
 
@@ -73,6 +74,22 @@ export async function POST(request: Request) {
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
+    // Dispatch after the row is committed, and never in a way that can fail the
+    // request. `enqueue_agent_job` deduplicates, so `data` may be a job that was
+    // already sent -- the claim inside the dispatch is what makes a second click
+    // a no-op rather than a second run.
+    //
+    // A dispatch failure marks the job failed with a readable message rather
+    // than bubbling up here. The work was accepted; answering 500 would tell the
+    // accountant their click did nothing while a row sat queued with nothing
+    // coming for it.
+    if (data?.id) {
+      const outcome = await dispatchJobToHermes(data.id);
+      if (!outcome.dispatched) {
+        console.warn(`[hermes] job ${data.id} not dispatched: ${outcome.reason}`);
+      }
     }
 
     return NextResponse.json({ job: data });

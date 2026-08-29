@@ -1250,6 +1250,43 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      claim_agent_job_by_id: {
+        Args: {
+          p_job_id: string
+          p_lease_seconds?: number
+          p_worker_id: string
+        }
+        Returns: {
+          attempts: number
+          claimed_at: string | null
+          claimed_by: string | null
+          created_at: string
+          dataset_id: string | null
+          dataset_version_id: string | null
+          error: string | null
+          finished_at: string | null
+          id: string
+          kind: Database["public"]["Enums"]["agent_job_kind"]
+          lease_expires_at: string | null
+          max_attempts: number
+          org_id: string
+          payload: Json
+          priority: number
+          progress: Json
+          raw_upload_id: string | null
+          requested_by: string | null
+          result: Json | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["agent_job_status"]
+          workspace_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "agent_jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       create_organization: {
         Args: { p_name: string; p_slug: string }
         Returns: {

@@ -49,7 +49,9 @@ services:
       # not the transport.
       HERMES_WEBHOOK_URL: ${HERMES_WEBHOOK_URL:?set in .env}
       HERMES_WEBHOOK_SECRET: ${HERMES_WEBHOOK_SECRET:?set in .env}
-      HERMES_WEBHOOK_SIGNING: ${HERMES_WEBHOOK_SIGNING:-v2}
+      HERMES_WEBHOOK_SIGNING: ${HERMES_WEBHOOK_SIGNING:-github}
+      HERMES_WORKER_ID: ${HERMES_WORKER_ID:-hermes-agent}
+      DATAENGINE_CALLBACK_URL: ${DATAENGINE_CALLBACK_URL:-http://web:3100}
 
     # `expose`, not `ports`. Publishing 3100 would put the app on the VPS's bare
     # IP with no certificate, beside the proxy that exists to prevent exactly

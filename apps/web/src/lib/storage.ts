@@ -12,6 +12,28 @@
 
 export const RAW_BUCKET = 'raw';
 
+/**
+ * Derived objects. Both are private, both follow the same `{org}/{workspace}/`
+ * opening as `raw` -- the storage policy reads the tenant out of the first two
+ * segments, so a derived object shaped any other way would be unreadable by the
+ * very users who own it.
+ *
+ * `parquet` holds cleaned dataset versions, which are machine-read.
+ * `exports` holds the file a person opens, and is the only bucket the download
+ * route will serve from.
+ */
+export const PARQUET_BUCKET = 'parquet';
+export const EXPORTS_BUCKET = 'exports';
+
+/** Formats a cleaned dataset can be handed back in. */
+export const EXPORT_FORMATS = ['xlsx', 'csv'] as const;
+export type ExportFormat = (typeof EXPORT_FORMATS)[number];
+
+export const EXPORT_CONTENT_TYPES: Record<ExportFormat, string> = {
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  csv: 'text/csv',
+};
+
 /** 50 MB, matching the bucket's own limit. */
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
@@ -75,6 +97,60 @@ export function buildRawObjectPath(params: {
     workspaceId,
     periodSegment(date),
     `${uploadId}__${sanitizeFilename(filename)}`,
+  ].join('/');
+}
+
+/**
+ * Where a cleaned dataset version's Parquet goes.
+ *
+ * Keyed by **job id**, not by version number, and that is not an aesthetic
+ * choice. The version number is allocated inside the transaction that records
+ * the version, which happens *after* the object has to exist -- so naming the
+ * object by a predicted number is a guess, and two uploads into the same
+ * dataset would guess the same number and silently overwrite each other's data.
+ * The job id is already unique and already known before anything is written.
+ *
+ * Ported from `_parquet_path` in services/hermes/hermes/jobs.py so that objects
+ * written by the agent and objects written by the old worker land in the same
+ * place and remain mutually readable.
+ */
+export function buildParquetObjectPath(params: {
+  orgId: string;
+  workspaceId: string;
+  datasetId: string;
+  jobId: string;
+}): string {
+  const { orgId, workspaceId, datasetId, jobId } = params;
+  return [orgId, workspaceId, datasetId, `${jobId}.parquet`].join('/');
+}
+
+/**
+ * Where the file the customer actually downloads goes.
+ *
+ * Mirrors the layout `handle_export_dataset` writes, with one deliberate
+ * difference: the job id is in the key rather than the version number. The
+ * Python worker could use the version number because it had already recorded
+ * the version by the time it exported; here the export is produced by the same
+ * job that produces the version, so the number is not known yet.
+ *
+ * The key is not what the customer sees. The download route rebuilds a readable
+ * filename from the job result and sets it as Content-Disposition, so this only
+ * has to be unique and tenant-scoped.
+ */
+export function buildExportObjectPath(params: {
+  orgId: string;
+  workspaceId: string;
+  datasetId: string;
+  jobId: string;
+  format: ExportFormat;
+  date?: Date;
+}): string {
+  const { orgId, workspaceId, datasetId, jobId, format, date } = params;
+  return [
+    orgId,
+    workspaceId,
+    periodSegment(date),
+    `${datasetId}__${jobId}__export.${format}`,
   ].join('/');
 }
 

@@ -74,17 +74,17 @@ if [ -n "$hermes" ]; then
   # exists and rejected us, which is the answer we want; 404 means wrong port or
   # wrong path. Nothing is created either way -- the HMAC cannot verify, so the
   # agent has nothing to act on.
-  # Generic Webhook V2 headers, since that is the adapter Hermes documents.
-  # The signature is deliberately wrong, so a gateway that is there answers
-  # 401 or 403 -- which is the positive result. 404 means the route does not
-  # exist on that port. 4860 is the public dashboard; it should answer neither.
+  # The header scheme this installation documents: HMAC-SHA256 over the raw
+  # body as X-Hub-Signature-256. The signature here is deliberately wrong, so a
+  # gateway that is there answers 401 or 403 -- the positive result. A 404 means
+  # the route is not on that port. 4860 is the dashboard; it should answer neither.
   echo "  probing /webhooks/ask (401/403 = gateway found, 404 = not this port):"
   for port in $ports; do
     code=$(curl -sS -o /dev/null -m 5 -w '%{http_code}' \
       -X POST "http://${hermes_ip}:${port}/webhooks/ask" \
       -H 'Content-Type: application/json' \
-      -H "X-Webhook-Timestamp: $(date +%s)" \
-      -H 'X-Webhook-Signature-V2: 0000000000000000000000000000000000000000000000000000000000000000' \
+      -H 'X-GitHub-Event: job.dispatched' \
+      -H 'X-Hub-Signature-256: sha256=0000000000000000000000000000000000000000000000000000000000000000' \
       -d '{"request_id":"00000000-0000-0000-0000-000000000000","workspace_id":"00000000-0000-0000-0000-000000000000","question":"preflight"}' \
       2>/dev/null || echo "no answer")
     val "  port $port" "HTTP $code"
