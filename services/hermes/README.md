@@ -150,6 +150,209 @@ offline, so it tells you the truth rather than what it was last told.
 
 Upload a workbook, press **Analyse**, and watch the stages appear.
 
+### 6. Deploying the web app beside it
+
+The dashboard can run on the same VPS as the agent. Nothing about the two
+requires it -- they share a Supabase project and no sockets -- but one host is
+one bill, and the Hostinger-managed **Hermes Agent** application is already
+there, which is the one thing the web app *does* need to reach directly.
+
+Understand what changes before doing it. Step 2 closed every inbound port on the
+argument that the agent needs none. That stops being true the moment a browser
+has to reach this box, and the machine holding the service-role key acquires a
+public attack surface it did not have. That is a real trade, not a formality.
+
+```bash
+su - hermes
+cd ~/dataengine/apps/web
+
+cp .env.docker.example .env
+nano .env
+chmod 600 .env
+```
+
+Four of those values you already have from step 1. The other two describe the
+agent, and only the VPS can tell you them:
+
+```bash
+ssh root@YOUR_SERVER 'bash -s' < scripts/vps-preflight.sh
+```
+
+That script is read-only and prints every host-derived value this deployment
+needs, in one pass: the agent's network and aliases, Traefik's network and its
+entrypoint and certresolver names, the firewall state, and the core count. Each
+of those fails quietly when wrong -- a mistyped entrypoint produces a router
+that is created successfully and never matches a request -- so they are worth
+reading together before the first deploy rather than one outage at a time.
+
+On srv1927440 the agent half resolves to:
+
+```
+HERMES_NETWORK=hermes-agent-bwlq_default
+HERMES_WEBHOOK_URL=http://172.16.0.2:8644
+HERMES_WEBHOOK_SIGNING=v2
+```
+
+Three things about those three lines.
+
+**8644, not 8642.** The agent listens on 4860, 8642 and 8644; only the first two
+are published, which tells you nothing, because the web app reaches all three
+over the shared network. 8644 is the Generic Webhook V2 adapter. 4860 is the
+public dashboard and must not be used as a gateway.
+
+**A base url, with no path.** The route appends `/webhooks/ask` itself. A value
+that already ends in `/webhooks/ask` posts to `/webhooks/ask/webhooks/ask` and
+404s every question.
+
+**A literal container IP is not stable.** Docker reassigns it when a container
+is recreated, so a Hostinger redeploy of that application can silently break
+this line -- it presents as "the agent could not be reached" on every question.
+`http://hermes-agent:8644`, the compose service alias, is the same address and
+survives a recreate.
+
+Create the `ask` route in Hermes and set its HMAC secret *before* deploying:
+`HERMES_WEBHOOK_SECRET` is one half of a pair, and this app cannot define it
+alone. Signing is Generic Webhook V2 -- `X-Webhook-Signature-V2` over a
+timestamped HMAC, with `X-Webhook-Timestamp` beside it. Confirm the canonical
+string the adapter signs against `canonicalV2()` in
+`apps/web/src/app/api/hermes/ask/route.ts`; it is one line and deliberately so,
+because a wrong canonical string produces a well-formed signature that never
+verifies and presents as a bad secret. `HERMES_WEBHOOK_SIGNING=github` falls
+back to the older `X-Hub-Signature-256` receiver if this gateway turns out to
+predate V2.
+
+None of this involves the Python worker in this directory. That queue is a
+separate path -- upload, parse, profile, propose -- that reaches the app only
+through Supabase, and it plays no part in answering a question.
+
+`HERMES_NETWORK` is the network the Hermes Agent container is on.
+`HERMES_WEBHOOK_URL` addresses it by *service* name, not container name --
+`http://hermes-agent:8644`, not `http://hermes-agent-bwlq-hermes-agent-1:8644`.
+Compose registers the service name as a network alias and it survives a
+redeploy; the container name carries a random project suffix that does not, so
+hard-coding it buys an outage the next time Hostinger recreates the app. Plain http is
+correct -- the request never leaves the Docker bridge, and what authenticates it
+is the HMAC in `apps/web/src/app/api/hermes/ask/route.ts`, not the transport.
+`HERMES_WEBHOOK_SECRET` must be the secret that gateway verifies against; a
+mismatch shows up as a 502 on every question and nothing in the app's own logs.
+
+This VPS already runs Traefik as a second Docker Manager application, and it
+owns ports 80 and 443. Do not start another proxy beside it: `apps/web` joins
+Traefik's network and declares its routing as container labels, which Traefik
+picks up on its own. Set `TRAEFIK_NETWORK`, `WEB_DOMAIN`, and -- if Hostinger's
+template names them unconventionally -- the entrypoint and certresolver:
+
+```bash
+docker network ls | grep -i traefik
+docker inspect traefik-traefik-1 -f '{{json .Config.Cmd}}'
+```
+
+Those last two names are the usual failure: a router with the wrong entrypoint
+is created successfully and then never matches a request, so the app looks
+deployed and answers nothing. If `docker port traefik-traefik-1` prints nothing
+at all, Traefik is installed but not serving the internet on this box; in that
+case open the ports yourself and start the bundled Caddy fallback instead, which
+is behind a profile precisely so it cannot collide by accident:
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+docker compose --profile caddy up -d
+```
+
+Either way, point an A record at the server first -- the certificate is obtained
+by proving control of the name, and a domain that does not resolve yet fails
+that and retries with backoff.
+
+TLS is not optional here. Supabase's auth cookies are `Secure`, so over plain
+http sign-in fails silently -- the cookie is set, the browser discards it, and
+the user is returned to the login page with no error to read.
+
+**Build the image somewhere else.** `docker compose up -d --build` on this box
+runs `next build`, which pins every core for minutes at a time. Hostinger reads
+sustained CPU as a possible compromise and throttles the VPS by 25% per hour --
+and the throttle applies to the whole machine, so a deploy takes the agent down
+with it. Build where there is CPU to spare and pull the result:
+
+```bash
+# On a laptop or CI, once per release:
+docker build -t YOUR_REGISTRY/dataengine-web:$(git rev-parse --short HEAD)   --build-arg NEXT_PUBLIC_SUPABASE_URL=...   --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=... apps/web
+docker push YOUR_REGISTRY/dataengine-web:TAG
+```
+
+Then swap `build:` for `image:` in `apps/web/docker-compose.yml` and deploy with
+`docker compose pull && docker compose up -d`, which costs the box a download
+instead of a compile. If you would rather build in place anyway, do it once,
+off-hours, and expect the usage graph to spike.
+
+```bash
+docker compose up -d --build     # or `pull && up -d` with a prebuilt image
+docker compose logs -f web
+```
+
+Open the domain, sign in, and ask the agent a question from a workspace. The
+answer does not come back over the network you just configured: the gateway
+accepts in milliseconds, the agent writes into `hermes_answers`, and the browser
+picks it up over Realtime. If the question is accepted and no answer ever
+arrives, the fault is on the agent's side of Supabase, not in this app.
+
+### One core is the constraint, not memory
+
+`nproc` on srv1927440 prints **1**, against 3.8 GiB of RAM of which under 700 MB
+is in use. Every sizing decision here follows from that asymmetry: memory is not
+the scarce resource on this box and CPU is the only one.
+
+What already runs there, measured at idle:
+
+| container | CPU | RAM |
+|---|---|---|
+| `hermes-agent-…` (Hostinger's) | 0.42% | 642 MiB |
+| `traefik-traefik-1` | 0.00% | 48 MiB |
+
+Idle is not the problem. One core means any single process that wants real work
+gets the whole machine, and sustained is exactly what Hostinger throttles. Two
+consequences worth stating plainly:
+
+**Never run `next build` on this box.** On one core it is minutes of unbroken
+100%, in the daemon, outside every container limit in these compose files. It
+will trip the throttle, and the throttle applies to the whole VPS -- so a deploy
+would take the agent offline as a side effect. Build elsewhere, push, pull.
+
+**The parse worker and the web app together are a stretch.** Serving pages is
+not CPU-bound and fits fine. Parsing workbooks with polars and duckdb is CPU-
+bound by definition, and the caps here (`HERMES_CPUS` 0.35, `WEB_CPUS` 0.4) keep
+it survivable rather than comfortable -- a large workbook will simply take
+longer. If both need to run and jobs start queueing, the answer is a second
+vCPU, not a higher cap: raising a cap on a single core moves the contention, it
+does not remove it.
+
+### Keeping the box off the throttle
+
+Three containers now share one small VPS, and Hostinger throttles the host --
+not the offender -- when sustained CPU looks like a compromise. `top` is the
+wrong first tool on a Docker host: it shows the processes without saying which
+container owns them. Start here instead:
+
+```bash
+docker stats --no-stream       # per-container CPU and memory, attributed
+nproc                          # how many cores there actually are
+```
+
+If CPU reads normal *now* but the dashboard reported a limit, the cause was
+episodic -- a build, or a workbook parse -- and no live command will show it.
+Use **Backups & Monitoring → Server Usage** for the history and match the spike
+against `docker compose logs --since`.
+
+Both compose files cap CPU (`HERMES_CPUS`, `WEB_CPUS`, defaulting to half a core
+each). The worker's cap matters most: polars, duckdb and pyarrow size their
+thread pools from the host's core count and ignore the container's quota, so
+without it one parse fans out across every core until it finishes. Raise the
+caps if `nproc` says there is room; do not remove them.
+
+Two things a cap will not fix, because neither runs inside these limits: an
+image build, which runs in the daemon, and the Hermes Agent application, which
+Hostinger manages and this repository does not configure.
+
 ### Running it without Docker
 
 A 1 GB plan spends a noticeable slice of its memory on the Docker daemon. To

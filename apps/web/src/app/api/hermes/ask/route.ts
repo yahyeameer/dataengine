@@ -43,11 +43,69 @@ const askSchema = z.object({
   question: z.string().min(1).max(4000),
 });
 
+/**
+ * The gateway's BASE url -- `http://172.16.0.2:8644`, with no path. The route
+ * below appends `/webhooks/ask`, so a value that already carries the path posts
+ * to `/webhooks/ask/webhooks/ask` and 404s on every question.
+ */
 const GATEWAY_URL = process.env.HERMES_WEBHOOK_URL;
 const GATEWAY_SECRET = process.env.HERMES_WEBHOOK_SECRET;
 
+/**
+ * Which signing scheme the gateway verifies.
+ *
+ * Hermes' Generic Webhook V2 adapter checks `X-Webhook-Signature-V2` against a
+ * *timestamped* HMAC; the older GitHub-shaped receiver checks
+ * `X-Hub-Signature-256` over the body alone. They are not interchangeable, and
+ * a gateway expecting one rejects the other with a 401 that is indistinguishable
+ * from a wrong secret -- which is why this is an explicit switch rather than
+ * something inferred.
+ */
+const SIGNING = (process.env.HERMES_WEBHOOK_SIGNING ?? 'v2').toLowerCase();
+
 /** The event name the gateway route was subscribed to. */
 const EVENT = 'question.asked';
+
+/**
+ * The exact bytes the V2 signature covers.
+ *
+ * CONFIRM THIS AGAINST THE HERMES DOCS BEFORE THE FIRST DEPLOY. `${timestamp}.${body}`
+ * is the common convention -- Stripe's, and most receivers modelled on it -- but
+ * a canonical string is a property of the receiver, not a standard. Get it wrong
+ * and you produce a perfectly well-formed signature that never verifies, which
+ * presents as a bad secret and sends you looking in entirely the wrong place.
+ *
+ * It is one line, in one place, so correcting it stays a one-line change.
+ */
+function canonicalV2(timestamp: string, payload: string): string {
+  return `${timestamp}.${payload}`;
+}
+
+function signingHeaders(payload: string, secret: string): Record<string, string> {
+  if (SIGNING === 'github') {
+    return {
+      'X-Hub-Signature-256':
+        'sha256=' + createHmac('sha256', secret).update(payload, 'utf8').digest('hex'),
+      'X-GitHub-Event': EVENT,
+    };
+  }
+
+  // Seconds, not milliseconds. A receiver that enforces a replay window compares
+  // this against a Unix timestamp, and one expressed in milliseconds reads as a
+  // date tens of thousands of years out -- rejected as outside the window, with
+  // the same 401 a bad signature produces.
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+
+  return {
+    'X-Webhook-Timestamp': timestamp,
+    'X-Webhook-Signature-V2': createHmac('sha256', secret)
+      .update(canonicalV2(timestamp, payload), 'utf8')
+      .digest('hex'),
+    // Carried over from the GitHub-shaped receiver. Harmless if this gateway
+    // ignores it; the subscription is matched by route, not by header.
+    'X-Webhook-Event': EVENT,
+  };
+}
 
 export async function POST(request: Request) {
   try {
@@ -94,16 +152,12 @@ export async function POST(request: Request) {
       question: body.question,
     });
 
-    const signature =
-      'sha256=' + createHmac('sha256', GATEWAY_SECRET).update(payload, 'utf8').digest('hex');
-
     try {
       const response = await fetch(`${GATEWAY_URL.replace(/\/$/, '')}/webhooks/ask`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Hub-Signature-256': signature,
-          'X-GitHub-Event': EVENT,
+          ...signingHeaders(payload, GATEWAY_SECRET),
         },
         body: payload,
         // The gateway accepts and returns immediately; anything slower than

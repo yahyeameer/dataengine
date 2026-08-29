@@ -34,6 +34,8 @@ yarn-error.log*
 .env*
 # ...and the template is opted in: it documents which variables the app needs.
 !.env.example
+# ...and so is the deployment template, for the same reason.
+!.env.docker.example
 
 # vercel
 .vercel

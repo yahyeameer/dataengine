@@ -1,0 +1,12 @@
+# Replace with the domain or subdomain pointed at this VPS. An A record for it
+# must already resolve to the server's IP before the first start, because Caddy
+# proves control of the name over port 80 to get the certificate -- a domain
+# that does not resolve yet fails the challenge and retries with backoff.
+#
+# For a first run without a domain, replace the whole block with `:80 {` and the
+# same reverse_proxy line. Sign-in will not work over plain http (Supabase's
+# auth cookies are Secure), but the app will serve and the agent path can be
+# tested end to end.
+app.example.com {
+	reverse_proxy web:3100
+}

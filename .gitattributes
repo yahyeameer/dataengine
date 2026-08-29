@@ -1,0 +1,12 @@
+# This repository is edited on Windows and deployed to Linux. Git normalises to
+# LF in the repository either way, but that is a default, not a guarantee -- and
+# the failure it prevents is a bad one: a shell script that reaches the VPS with
+# CRLF endings dies as `bad interpreter: /bin/bash^M`, which names neither the
+# file nor the real cause.
+* text=auto eol=lf
+
+# Binary, never touched.
+*.png binary
+*.jpg binary
+*.parquet binary
+*.xlsx binary

@@ -19,6 +19,19 @@ services:
     restart: unless-stopped
     env_file: .env
 
+    environment:
+      # polars, duckdb and pyarrow each size their thread pool from the host's
+      # core count, not from this container's CPU quota -- so on an unrestricted
+      # box a single workbook parse fans out across every core and holds them
+      # until it finishes. That is exactly the sustained load Hostinger throttles
+      # as "potentially compromised", and the throttle is 25% per hour.
+      #
+      # The `cpus` limit below is what actually caps consumption; these two keep
+      # the library from oversubscribing the quota it has been given, which turns
+      # contention into throughput.
+      POLARS_MAX_THREADS: ${HERMES_THREADS:-1}
+      OMP_NUM_THREADS: ${HERMES_THREADS:-1}
+
     volumes:
       # Scratch space for parsing. Named rather than bind-mounted so it is not
       # affected by the host's permissions, and so `docker compose down -v`
@@ -33,6 +46,19 @@ services:
       resources:
         limits:
           memory: 768M
+          # A third of ONE core, because the documented target box has exactly
+          # one (`nproc` on srv1927440 prints 1) and already runs a reverse
+          # proxy and an agent on it.
+          #
+          # Parsing is bursty and nobody watches it happen, so a job that takes
+          # three times as long costs nothing -- while an hour of throttled CPU
+          # costs everything on the box at once, including the agent that has
+          # nothing to do with this queue. On a single core the cap is not
+          # tuning, it is the only thing standing between one workbook and a
+          # host-level throttle.
+          #
+          # Raise it with `nproc`, not by feel: HERMES_CPUS in .env.
+          cpus: "${HERMES_CPUS:-0.35}"
 
     logging:
       driver: json-file

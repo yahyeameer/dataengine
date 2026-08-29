@@ -1,0 +1,33 @@
+# The build context is uploaded to the daemon before anything runs, so this file
+# is the difference between a two-second context and a gigabyte one. It also
+# keeps a host-built .next out of the image, which would otherwise be copied in
+# and then half-overwritten by the container's own build -- the same stale-build
+# confusion that shows up as unexplained 500s locally.
+
+node_modules
+.next
+out
+build
+coverage
+
+# Secrets. .env.example is the only one that belongs in an image, and even that
+# is only documentation.
+.env
+.env.*
+!.env.example
+
+# Local-only artefacts.
+*.tsbuildinfo
+next-env.d.ts
+.vercel
+.DS_Store
+*.pem
+npm-debug.log*
+
+# Not needed to build, and not worth shipping.
+Dockerfile
+.dockerignore
+docker-compose.yml
+README.md
+CLAUDE.md
+AGENTS.md

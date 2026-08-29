@@ -1,0 +1,172 @@
+# The DataEngine web app on the same Hostinger VPS as the Hermes Agent.
+#
+#   docker compose up -d --build     start, and start again on every reboot
+#   docker compose logs -f web       watch it serve
+#   docker compose down              stop
+#
+# One service that always runs. `web` is the Next.js app; TLS is terminated by
+# the Traefik container Hostinger already runs on this VPS, which this file joins
+# and configures with labels rather than replacing. There is no database here --
+# Supabase is hosted, and the Hermes Agent is likewise a Hostinger-managed
+# application with its own container, joined rather than defined.
+#
+# `proxy` is a Caddy fallback behind a profile, off unless asked for. See the
+# note on it below.
+#
+# Read services/hermes/docker-compose.yml alongside this: that worker and this
+# app never speak to each other directly. They share a Supabase project and
+# nothing else, which is why neither appears in the other's network.
+
+services:
+  web:
+    # `image` beside `build` on purpose. With both set, `docker compose up`
+    # without --build uses a local image of this name if one exists and only
+    # builds when it does not -- which is what makes one file serve both sides
+    # of the deploy: `docker compose build` on a machine with cores to spare,
+    # then `docker compose up -d` on the VPS, which has one core and must never
+    # run `next build`.
+    image: dataengine-web:${WEB_TAG:-latest}
+    build:
+      context: .
+      args:
+        # Build-time, because Next inlines them. See the note in the Dockerfile.
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?set in .env}
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:?set in .env}
+    restart: unless-stopped
+
+    environment:
+      # Also needed at runtime: server components read them too, and a value
+      # baked into the client bundle is not in the server process's environment.
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+
+      # Server-only. Bypasses RLS; never prefixed NEXT_PUBLIC_.
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:?set in .env}
+
+      # The agent's gateway, reached by container name over the shared network.
+      # Plain http is correct here -- the request never leaves the Docker bridge,
+      # and the HMAC in src/app/api/hermes/ask/route.ts is what authenticates it,
+      # not the transport.
+      HERMES_WEBHOOK_URL: ${HERMES_WEBHOOK_URL:?set in .env}
+      HERMES_WEBHOOK_SECRET: ${HERMES_WEBHOOK_SECRET:?set in .env}
+      HERMES_WEBHOOK_SIGNING: ${HERMES_WEBHOOK_SIGNING:-v2}
+
+    # `expose`, not `ports`. Publishing 3100 would put the app on the VPS's bare
+    # IP with no certificate, beside the proxy that exists to prevent exactly
+    # that. Only the proxy binds a host port.
+    expose:
+      - "3100"
+
+    networks:
+      - edge      # to the Caddy fallback, if it is ever enabled
+      - traefik   # to the reverse proxy that is already running
+      - hermes    # to the agent's gateway
+
+    # Traefik configures itself from labels on the containers it can see, so
+    # routing lives here rather than in a config file it would have to be told
+    # to reload. `dataengine` names the router and the service; the two must
+    # match, and must not collide with a router Hostinger's own applications
+    # already define.
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:?see .env.docker.example}"
+      - "traefik.http.routers.dataengine.rule=Host(`${WEB_DOMAIN:?set your domain in .env}`)"
+      - "traefik.http.routers.dataengine.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.dataengine.tls=true"
+      - "traefik.http.routers.dataengine.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      # The port Traefik connects to inside the container. Required whenever a
+      # container exposes more than one port, and harmless when it does not --
+      # without it Traefik guesses, and guesses wrong the day a port is added.
+      - "traefik.http.services.dataengine.loadbalancer.server.port=3100"
+
+    deploy:
+      resources:
+        limits:
+          # Next's server is modest at rest; this is a ceiling against a leak,
+          # sized to leave room for the agent container and the worker.
+          memory: 512M
+          # Capped for the same reason as the worker: this box is throttled by
+          # the host when sustained CPU looks like a compromise, and a throttle
+          # hits every container at once. Serving pages is not CPU-bound, so a
+          # limit this size is invisible in normal use and only bites on a
+          # runaway render loop -- which is precisely when you want it to.
+          #
+          # Note this does NOT cover `docker compose up --build`: the build runs
+          # in the daemon, outside these limits, and `next build` will use every
+          # core for several minutes. See the deployment notes in
+          # services/hermes/README.md for why that build does not belong here.
+          cpus: "${WEB_CPUS:-0.4}"
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    security_opt:
+      - no-new-privileges:true
+
+  proxy:
+    # A fallback, and normally dead weight.
+    #
+    # This VPS already runs Traefik, which owns ports 80 and 443. Starting a
+    # second proxy that wants the same ports fails loudly if you are lucky and
+    # takes Hostinger's own applications offline if you are not -- so this
+    # service sits behind a profile and does not start with a plain
+    # `docker compose up`.
+    #
+    # Enable it only if Traefik turns out not to be serving the internet on this
+    # box (`docker port traefik-traefik-1` prints nothing), and only after
+    # confirming nothing else holds those ports:
+    #
+    #   docker compose --profile caddy up -d
+    #
+    profiles: ["caddy"]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates survive a rebuild. Without this, every `up --build` asks
+      # Let's Encrypt again and eventually hits the rate limit.
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - edge
+    depends_on:
+      - web
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          # Traefik idles at 0.00% on this box; a fallback proxy has no reason
+          # to be allowed more.
+          cpus: "0.1"
+
+networks:
+  # Created by this file. Only used by the Caddy fallback; with Traefik in front
+  # the app has no other member to talk to here.
+  edge:
+
+  # Created by Hostinger for the Traefik application. Traefik can only route to
+  # containers it shares a network with, so joining this is what makes the app
+  # reachable at all -- the labels above are ignored otherwise, silently.
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:?run `docker network ls` on the VPS and set this in .env}
+
+  # Created by Hostinger for the Hermes Agent application. Joined, not defined:
+  # `docker network ls` on the VPS gives the real name, which goes in .env as
+  # HERMES_NETWORK. If Hostinger redeploys that application the name can change,
+  # and this compose file will refuse to start rather than start without a route
+  # to the agent -- which is the failure you want, since the alternative is an
+  # app that boots and then 502s every question.
+  hermes:
+    external: true
+    name: ${HERMES_NETWORK:?run `docker network ls` on the VPS and set this in .env}
+
+volumes:
+  caddy-data:
+  caddy-config:
