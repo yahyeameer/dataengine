@@ -65,34 +65,63 @@ destination, not asked to choose one.
 
 ## 5. Report the result
 
-POST to `callback_url` with `X-GitHub-Event: job.result` and an
-`X-Hub-Signature-256` header — HMAC-SHA256 of the exact raw body you send, using
-this route's webhook secret, formatted `sha256=<hexdigest>`. Same scheme
-DataEngine used to reach you, in the other direction.
+Use the `terminal` tool and Python's standard library. `urllib.request` for the
+HTTP, `hmac` and `hashlib` for the signature — no third-party packages are
+needed and none should be installed.
 
-On success:
+**Sign the exact bytes you send.** This is the one place where a reasonable-
+looking shortcut breaks everything: build the body once, sign that object, and
+post that same object. Serialising a second time for the request can reorder
+keys or change spacing, and the signature then fails verification on a payload
+that is otherwise perfectly correct — presenting as a wrong secret and sending
+whoever debugs it in the wrong direction entirely.
 
-```json
-{
-  "job_id": "<from the input>",
-  "status": "succeeded",
-  "result": {
-    "export_path": "<output.export_path, verbatim>",
-    "parquet_path": "<output.parquet_path, if you uploaded one>",
-    "bucket": "exports",
-    "row_count": 1204,
-    "dataset_name": "<a human name for this dataset>",
-    "source_filename": "<input.filename, verbatim>",
-    "summary": "<one or two sentences: what you changed and why>"
-  }
+```python
+import hmac, hashlib, json, urllib.request
+
+secret = "<this route's webhook secret>"
+callback = "<callback_url from the job payload>"
+
+result = {
+    "job_id": job["job_id"],
+    "status": "succeeded",
+    "result": {
+        "export_path": job["output"]["export_path"],   # verbatim
+        "parquet_path": job["output"].get("parquet_path"),
+        "bucket": "exports",
+        "row_count": row_count,
+        "dataset_name": dataset_name,
+        "source_filename": job["input"]["filename"],   # verbatim
+        "summary": "…what you changed and why…",
+    },
 }
+
+body = json.dumps(result).encode()          # serialise ONCE
+sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+req = urllib.request.Request(
+    callback,
+    data=body,                              # the same bytes that were signed
+    headers={
+        "Content-Type": "application/json",
+        "X-GitHub-Event": "job.result",
+        "X-Hub-Signature-256": f"sha256={sig}",
+    },
+    method="POST",
+)
+urllib.request.urlopen(req, timeout=30)
 ```
 
 `source_filename` matters more than it looks: DataEngine names the customer's
 download after the workbook they originally sent, not after the dataset. Pass it
 back unchanged.
 
-On failure:
+Send the same shape with `"status": "running"` and a `progress` object as work
+proceeds — it renews the job's lease and drives the text the accountant is
+watching. A job that goes silent for four minutes looks broken even when it is
+fine.
+
+On failure, the same call with:
 
 ```json
 {
@@ -108,5 +137,11 @@ A malformed workbook fails identically on every attempt, and retrying it wastes
 minutes of the only core this machine has.
 
 Write the error the way you would explain it to the person who uploaded the
-file. "The Total column contains text in 14 rows" is useful. "ValueError at
-line 812" is not.
+file. "The Total column contains text in 14 rows" is useful. "ValueError at line
+812" is not.
+
+## If something goes wrong before you can report
+
+Report it anyway. A job that is never reported stays `running` until its lease
+expires, and for the customer that is a spinner with no end and no explanation.
+A `failed` status with a plain sentence is always better than silence.

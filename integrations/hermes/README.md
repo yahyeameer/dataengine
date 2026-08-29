@@ -99,17 +99,33 @@ unchanged rather than corrupted.
 `job_id` is the only field read from the body. Workspace, org and dataset come
 from the job row, so a report cannot name a tenancy it was not given.
 
-## ⚠ The one thing still unverified
+## Verified against the running agent (2026-08-29)
 
-**Whether an agent turn can make an outbound HTTP POST**, and whether it can
-HMAC-sign it with the route's secret. Everything above assumes it can. The case
-study does not say either way, and the old repo's planned tool layer — the place
-this would have been proven — was documented but never actually built
-(`scripts/tool-layer-smoke.ts` exists in that repo; the route it tests does not).
+The open question was whether an agent turn could reach back out and sign what
+it sent. It can. Tested against a listener on `hermes-agent-bwlq_default`:
 
-Check the agent's 29 toolsets for an HTTP or fetch tool before relying on this.
+| Capability | Evidence |
+|---|---|
+| Receives job information | Webhook body reaches the turn (case study, and the probe run) |
+| HTTP GET the input | `urllib.request` completed a round trip to an external host |
+| Analyzit cleaning | 91 skills installed and enabled |
+| HTTP PUT the artefact | Same library, same tool |
+| HMAC-SHA256 signing | Digest reproduced exactly, byte for byte |
+| POST the callback | HTTP 200 from `http://probe:9999/` |
+| Report success/failure | Same channel |
 
-**If it cannot**, the fallback needs no change to DataEngine's schema: the agent
-writes its result into `hermes_answers` the way the existing ask path already
-does, and a small poller in the web app forwards that row into the same callback
-handler. Say so and that is a contained change, not a redesign.
+The tool is **`terminal`**, running Python with the standard library —
+`urllib.request` for HTTP, `hmac` and `hashlib` for signatures. No third-party
+package is needed and none should be installed.
+
+That is more capable than a constrained HTTP tool would have been: the whole job
+loop can run as one script, which is why `prompt.md` gives a concrete skeleton
+for the callback rather than describing it. The single failure mode worth
+guarding is serialising the body twice — signing one JSON encoding and posting
+another produces a valid-looking signature that never verifies, and reads as a
+wrong secret. The skeleton serialises once, on purpose.
+
+One incidental finding: the agent could not fetch this repository's README over
+HTTP, because the repository is private. That is correct and should stay that
+way — nothing in this integration requires the agent to read the source. Do not
+grant it repository access to make a test pass.
