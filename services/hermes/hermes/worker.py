@@ -31,6 +31,7 @@ import threading
 import time
 from typing import Any
 
+from . import health
 from .config import Config, ConfigError, load_config
 from .jobs import HANDLERS, JobContext, JobError
 from .llm.router import LLMRouter
@@ -47,6 +48,10 @@ class Worker:
         self._stopping = threading.Event()
         self._jobs_done = 0
         self._jobs_failed = 0
+        # Unknown until the first check runs, and reported as unknown rather
+        # than as healthy -- a monitor that defaults to "fine" is a monitor
+        # that lies for its first interval.
+        self._health = health.HealthReport(checked=False, error="not yet checked")
 
         # HANDLERS is the single source of truth for what this build can run.
         # An empty config means "all of it"; a configured subset is checked
@@ -86,6 +91,18 @@ class Worker:
     # -- database chores -----------------------------------------------------
 
     def announce(self) -> None:
+        # The health verdict rides the heartbeat rather than getting its own
+        # schedule. One fewer thing to run, and it lands in `agent_workers`,
+        # which the dashboard already reads -- so "is the model actually
+        # running" is answerable without knowing a view name in advance.
+        metadata: dict[str, Any] = {
+            "llm_enabled": self.llm.enabled,
+            "reasoning_provider": self.config.llm.provider_for("reasoning"),
+            "jobs_done": self._jobs_done,
+            "jobs_failed": self._jobs_failed,
+        }
+        metadata.update(self._health.summary())
+
         self.supabase.rpc(
             "agent_worker_heartbeat",
             {
@@ -93,14 +110,22 @@ class Worker:
                 "p_hostname": self.config.hostname,
                 "p_version": self.config.version,
                 "p_capabilities": list(self.capabilities),
-                "p_metadata": {
-                    "llm_enabled": self.llm.enabled,
-                    "reasoning_provider": self.config.llm.provider_for("reasoning"),
-                    "jobs_done": self._jobs_done,
-                    "jobs_failed": self._jobs_failed,
-                },
+                "p_metadata": metadata,
             },
         )
+
+    def check_health(self) -> None:
+        """
+        Re-read the degradation view and shout if anything is answering
+        without a model.
+
+        Far less often than the heartbeat: this is a slow-moving condition --
+        once the model stops running it stays stopped until somebody fixes it
+        -- and a warning repeated every thirty seconds is one people learn to
+        scroll past, which defeats the point.
+        """
+        self._health = health.check(self.supabase)
+        health.log_report(self._health)
 
     def claim(self) -> dict[str, Any] | None:
         claimed = self.supabase.rpc(
@@ -236,12 +261,22 @@ class Worker:
             log.error("could not register with Supabase: %s %s", error.status, error.body)
             return 1
 
+        # Checked once at startup so a worker that comes up into an already
+        # degraded system says so immediately, rather than after the first
+        # full interval.
+        self.check_health()
+
         last_announce = time.monotonic()
+        last_health = time.monotonic()
         backoff = self.config.poll_seconds
 
         while not self._stopping.is_set():
             try:
                 now = time.monotonic()
+                if now - last_health >= self.config.health_check_seconds:
+                    self.check_health()
+                    last_health = now
+
                 if now - last_announce >= self.config.heartbeat_seconds:
                     self.announce()
                     last_announce = now

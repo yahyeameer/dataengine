@@ -150,6 +150,9 @@ class Config:
     # come back within a coffee break.
     lease_seconds: int = 300
     heartbeat_seconds: int = 30
+    # How often to re-read the LLM degradation view. Slow-moving condition, and
+    # a warning repeated every thirty seconds is one people learn to ignore.
+    health_check_seconds: int = 600
     # Sleep between claim attempts when the queue is empty. Postgres LISTEN
     # would be tighter, but a 3-second poll on an idle queue is a negligible
     # cost against a job that takes minutes, and it survives connection drops
@@ -217,6 +220,7 @@ def load_config() -> Config:
         ),
         lease_seconds=_int("HERMES_LEASE_SECONDS", 300),
         heartbeat_seconds=_int("HERMES_HEARTBEAT_SECONDS", 30),
+        health_check_seconds=_int("HERMES_HEALTH_CHECK_SECONDS", 600),
         poll_seconds=_int("HERMES_POLL_SECONDS", 3),
         max_download_bytes=_int("HERMES_MAX_DOWNLOAD_BYTES", 50 * 1024 * 1024),
         work_dir=work_dir,
