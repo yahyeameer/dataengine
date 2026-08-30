@@ -55,6 +55,110 @@ RAW_BUCKET = "raw"
 PARQUET_BUCKET = "parquet"
 EXPORTS_BUCKET = "exports"
 
+# -----------------------------------------------------------------------------
+# Categorisation quality floors.
+#
+# Categorisation is the only job where the model decides rather than describes,
+# and the only one whose wrong answers are both plausible and unreviewable at
+# scale -- five hundred mappings shown to a human as eight examples. These are
+# the structural floors below which a result is not worth a reviewer's time.
+#
+# They are deliberately loose. The aim is to reject the two answers that are
+# obviously not categorisations -- one that reaches almost no rows, and one that
+# invents a category per value -- without second-guessing a model that grouped a
+# messy vendor list in a way an accountant would recognise but a rule would not.
+# -----------------------------------------------------------------------------
+
+# Below this share of rows the mapping is a handful of guesses, not a column.
+MIN_CATEGORY_COVERAGE = 0.30
+
+# A category per value groups nothing. Only checked once there are enough
+# values for the ratio to mean anything -- three values in three categories is
+# perfectly reasonable, three hundred in two hundred and ninety is not.
+MAX_CATEGORY_RATIO = 0.80
+MIN_VALUES_FOR_DEGENERACY_CHECK = 10
+
+
+def categorize_quality(
+    *,
+    column: str,
+    offered: int,
+    mapping: dict[str, str],
+    categories: list[str],
+    rows_total: int,
+    rows_covered: int,
+) -> dict[str, Any]:
+    """
+    Structural facts about a categorisation, and the two floors it must clear.
+
+    `router.categorize_values` already refuses anything that was not offered and
+    anything outside a fixed vocabulary -- but it refuses them *silently*, by
+    skipping the entry. So a reply that mangled four hundred of five hundred
+    values arrives looking like a clean hundred-value mapping, and the reviewer
+    is shown eight examples of it.
+
+    Everything returned here is derived from the answer's shape. None of it is a
+    confidence score: the model is never asked how sure it is, because it does
+    not know, and a number invented at this layer would be worse than none --
+    a reviewer trusts a percentage far more than they trust prose.
+
+    Raises `JobError` for the two answers that are not categorisations at all.
+    Both are deliberately non-retryable: the same column and the same values
+    will produce the same shape on the next attempt, and burning two more
+    attempts only delays the message the accountant needs to read.
+    """
+    dropped = offered - len(mapping)
+    coverage = rows_covered / rows_total if rows_total else 0.0
+
+    # Categories holding exactly one value are where a wrong assignment hides:
+    # a plausible-looking bucket nobody else fell into. Counting them gives the
+    # reviewer somewhere to start that is better than the top of the list.
+    per_category: dict[str, int] = {}
+    for category in mapping.values():
+        per_category[category] = per_category.get(category, 0) + 1
+    singletons = sum(1 for count in per_category.values() if count == 1)
+
+    # A mapping that reaches almost none of the rows is not a categorisation, it
+    # is a handful of guesses. Applying it adds a column reading 'Uncategorised'
+    # for nearly every line -- which reads as the tool failing rather than as
+    # the answer being thin, and costs trust that is hard to get back.
+    if coverage < MIN_CATEGORY_COVERAGE:
+        raise JobError(
+            f"The model categorised only {rows_covered} of {rows_total} row(s) "
+            f"({coverage:.0%}) in {column!r}. That is too thin to be worth "
+            f"reviewing -- the column may be free text, or the values may need "
+            f"a hint about what the categories should be.",
+            retryable=False,
+        )
+
+    # One category per value is the degenerate answer: technically a mapping,
+    # semantically a rename. A model handed free text and trying to be helpful
+    # produces it, and it is indistinguishable from a real result until somebody
+    # opens it.
+    if (
+        len(mapping) >= MIN_VALUES_FOR_DEGENERACY_CHECK
+        and len(categories) > len(mapping) * MAX_CATEGORY_RATIO
+    ):
+        raise JobError(
+            f"The model produced {len(categories)} categories for "
+            f"{len(mapping)} distinct value(s) in {column!r} -- close to one "
+            f"category per value, which groups nothing. Supply the categories "
+            f"you want and run it again.",
+            retryable=False,
+        )
+
+    return {
+        "values_offered": offered,
+        "values_mapped": len(mapping),
+        "values_dropped": dropped,
+        "rows_total": rows_total,
+        "rows_covered": rows_covered,
+        "rows_uncovered": rows_total - rows_covered,
+        "row_coverage": round(coverage, 4),
+        "category_count": len(categories),
+        "singleton_categories": singletons,
+    }
+
 
 class JobError(RuntimeError):
     """
@@ -1849,6 +1953,23 @@ def handle_categorize_dataset(context: JobContext) -> dict[str, Any]:
     covered = sum(counts.get(key, 0) for key in mapping)
     uncovered = len(rows) - covered
 
+    quality = categorize_quality(
+        column=column,
+        offered=len(ordered),
+        mapping=mapping,
+        categories=categories,
+        rows_total=len(rows),
+        rows_covered=covered,
+    )
+    dropped = quality["values_dropped"]
+    singletons = quality["singleton_categories"]
+
+    if dropped:
+        log.warning(
+            "job %s: categorize dropped %s of %s value(s) as unusable",
+            context.job_id, dropped, len(ordered),
+        )
+
     examples = [
         {"value": originals[key], "category": mapping[key], "rows": counts.get(key, 0)}
         for key in sorted(mapping, key=lambda k: -counts.get(k, 0))[:8]
@@ -1863,6 +1984,18 @@ def handle_categorize_dataset(context: JobContext) -> dict[str, Any]:
     )
     if uncovered:
         rationale += f" {uncovered} row(s) had no category and would read 'Uncategorised'."
+    if dropped:
+        # Said out loud rather than left in the evidence blob. A reply that lost
+        # a third of its values is one a reviewer should look at harder, and
+        # they will not go looking if nothing tells them to.
+        rationale += (
+            f" {dropped} value(s) the model returned were unusable and were discarded."
+        )
+    if singletons:
+        rationale += (
+            f" {singletons} categor{'y holds' if singletons == 1 else 'ies hold'} "
+            f"a single value -- worth checking first."
+        )
 
     proposal = {
         "group_key": f"category:{column}",
@@ -1881,6 +2014,15 @@ def handle_categorize_dataset(context: JobContext) -> dict[str, Any]:
             "categories": categories,
             "examples": examples,
             "distinct_values": len(counts),
+            # The reviewer sees eight examples out of up to five hundred
+            # mappings. These numbers are what tells them whether those eight
+            # are representative -- and `singleton_categories` is where a wrong
+            # assignment hides, so it is the first thing worth reading.
+            "quality": quality,
+            # The whole mapping, so a reviewer who wants to check the other
+            # four hundred and ninety-two can, rather than being asked to trust
+            # a sample.
+            "mapping": {originals[key]: mapping[key] for key in mapping},
             "model_used": model_used,
         },
         # Review, never Auto: a model's judgement about somebody else's books is

@@ -189,3 +189,95 @@ def test_no_model_configured_means_no_call():
         )
     finally:
         router.close()
+
+
+# -----------------------------------------------------------------------------
+# The quality gate
+#
+# The router's filter is silent by design: a value it will not accept is simply
+# skipped. That is right for one bad row and wrong for four hundred, because the
+# result arrives looking clean and the reviewer is shown eight examples of it.
+#
+# These assert on the two answers that are not categorisations at all, and on
+# the numbers a reviewer needs in order to know whether the sample they are
+# shown is representative. They do not assert on the model's judgement, which is
+# not testable and not the point.
+# -----------------------------------------------------------------------------
+
+import pytest
+
+from hermes.jobs import JobError, categorize_quality
+
+
+def test_it_reports_values_the_router_silently_discarded():
+    quality = categorize_quality(
+        column="vendor",
+        offered=500,
+        mapping={str(i): f"Cat{i % 5}" for i in range(100)},
+        categories=[f"Cat{i}" for i in range(5)],
+        rows_total=1000,
+        rows_covered=900,
+    )
+
+    assert quality["values_dropped"] == 400, "a reply that lost 400 values looked clean"
+    assert quality["values_offered"] == 500
+    assert quality["values_mapped"] == 100
+
+
+def test_it_counts_singleton_categories_because_that_is_where_a_wrong_answer_hides():
+    quality = categorize_quality(
+        column="vendor",
+        offered=5,
+        mapping={"a": "Utilities", "b": "Utilities", "c": "Comms", "d": "Comms", "e": "Travel"},
+        categories=["Utilities", "Comms", "Travel"],
+        rows_total=100,
+        rows_covered=95,
+    )
+
+    assert quality["singleton_categories"] == 1, "Travel holds one value and should be flagged"
+
+
+def test_it_refuses_a_mapping_that_reaches_almost_no_rows():
+    with pytest.raises(JobError) as caught:
+        categorize_quality(
+            column="notes",
+            offered=50,
+            mapping={"a": "X"},
+            categories=["X"],
+            rows_total=1000,
+            rows_covered=50,
+        )
+
+    assert "too thin" in str(caught.value)
+    assert caught.value.retryable is False, "the same column will fail identically next time"
+
+
+def test_it_refuses_one_category_per_value():
+    with pytest.raises(JobError) as caught:
+        categorize_quality(
+            column="notes",
+            offered=20,
+            mapping={str(i): f"C{i}" for i in range(20)},
+            categories=[f"C{i}" for i in range(20)],
+            rows_total=100,
+            rows_covered=100,
+        )
+
+    assert "groups nothing" in str(caught.value)
+    assert caught.value.retryable is False
+
+
+def test_a_genuinely_small_column_is_not_mistaken_for_degeneracy():
+    # Three payment types in three categories is a correct answer, and the
+    # ratio check must not reject it just because the ratio is 1.0.
+    quality = categorize_quality(
+        column="type",
+        offered=3,
+        mapping={"a": "A", "b": "B", "c": "C"},
+        categories=["A", "B", "C"],
+        rows_total=10,
+        rows_covered=10,
+    )
+
+    assert quality["category_count"] == 3
+    assert quality["row_coverage"] == 1.0
