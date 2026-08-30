@@ -82,6 +82,16 @@ jobs:
         working-directory: apps/web
         run: npx tsc --noEmit --skipLibCheck
 
+      # The health banner's verdict logic runs from the root toolchain (tsx),
+      # which is a separate install from the app's. Worth the extra step: it is
+      # the only thing standing between a silent model outage and a customer
+      # noticing the writing got worse.
+      - name: Install root toolchain
+        run: npm ci
+
+      - name: Health banner logic
+        run: npm run test:health
+
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest

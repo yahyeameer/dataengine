@@ -14,7 +14,8 @@
     "test:agent": "tsx scripts/agent-smoke.ts",
     "test:e2e": "tsx scripts/e2e-upload.ts",
     "test:agent:e2e": "tsx scripts/agent-e2e.ts",
-    "fixtures": "python scripts/make_messy_fixture.py"
+    "fixtures": "python scripts/make_messy_fixture.py",
+    "test:health": "tsx scripts/health-banner-smoke.ts"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.112.3",

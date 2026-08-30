@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { requireCurrentOrg } from '@/lib/authz';
+import { SystemHealthBanner } from '@/components/system-health-banner';
 import { secondaryButtonClass } from '@/components/ui';
 
 export default async function AppLayout({ children }: LayoutProps<'/app'>) {
@@ -8,6 +9,11 @@ export default async function AppLayout({ children }: LayoutProps<'/app'>) {
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
+      {/* Renders nothing while the model is running, so its presence is the
+          signal. Above the header because a warning below the fold is a
+          warning nobody reads. */}
+      <SystemHealthBanner role={role} />
+
       <header className="border-b border-black/10 dark:border-white/15">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-3">
           <Link href="/app" className="font-semibold tracking-tight">
