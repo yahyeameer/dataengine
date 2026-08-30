@@ -16,7 +16,7 @@ import {
 } from '@/components/deviations-panel';
 import { ReviewQueue, type ProposedChange } from '@/components/review-queue';
 import { UploadPanel } from '@/components/upload-panel';
-import { Card, EmptyState, PageHeader, StatusBadge } from '@/components/ui';
+import { Card, EmptyState, PageHeader, SectionHeading, StatusBadge } from '@/components/ui';
 import { requireCurrentOrg } from '@/lib/authz';
 import { createServerSupabase } from '@/lib/supabase/server';
 import { formatBytes } from '@/lib/storage';
@@ -177,11 +177,43 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
       (job.kind === 'export_dataset' || job.kind === 'generate_report'),
   ) as DownloadableJob[];
 
+  const needsDecision = (reviewVersionId && changes.length > 0) || Boolean(openRun);
+
   return (
     <>
-      <PageHeader title={workspace.name} subtitle={workspace.client_name ?? 'Client workspace'} />
+      <PageHeader
+        eyebrow="Workspace"
+        title={workspace.name}
+        subtitle={workspace.client_name ?? 'Client workspace'}
+      />
 
-      <div className="mb-6">
+      {/* Ordered by what the reader came to find out, not by what the system
+          does. An accountant opening a client asks "is anything waiting on me"
+          before anything else, so decisions come first and the machinery that
+          produced them comes after. */}
+
+      {needsDecision ? (
+        <div className="mb-9 space-y-6">
+          {openRun ? (
+            <DeviationsPanel
+              workspaceId={workspace.id}
+              run={openRun}
+              deviations={runDeviations}
+            />
+          ) : null}
+
+          {reviewVersionId && changes.length > 0 ? (
+            <ReviewQueue
+              workspaceId={workspace.id}
+              datasetVersionId={reviewVersionId}
+              changes={changes}
+            />
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="mb-8">
+        <SectionHeading hint="Live">What DataEngine is doing</SectionHeading>
         <AgentPanel
           workspaceId={workspace.id}
           initialJobs={jobs ?? []}
@@ -190,119 +222,109 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
       </div>
 
       {latestVersion ? (
-        <section className="mb-6 rounded-lg border border-emerald-600/40 bg-emerald-500/5 px-4 py-5 text-center">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-300">
-            Cleaned data ready
-          </h2>
-          <p className="mt-1 text-xs opacity-70">
-            Version {latestVersion.version_no}
-            {latestVersion.row_count !== null ? ` · ${latestVersion.row_count} rows` : ''} · the
-            original file is untouched
-          </p>
-
-          <div className="mt-3 flex flex-wrap items-center justify-center gap-3">
-            <ExportButton workspaceId={workspace.id} datasetVersionId={latestVersion.id} />
-          </div>
-
-          {readyDownloads.length > 0 ? (
-            <div className="mt-4 border-t border-emerald-600/20 pt-3">
-              <p className="text-xs font-medium opacity-70">
-                Ready to download ({readyDownloads.length})
-              </p>
-              <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-                {readyDownloads.map((job) => (
-                  <DownloadButton key={job.id} job={job} />
-                ))}
-              </div>
-            </div>
-          ) : (
-            <p className="mt-3 text-xs opacity-60">
-              Choose a format above. The file takes a few seconds to prepare, then a download
-              button appears here.
-            </p>
-          )}
-        </section>
-      ) : null}
-
-      {openRun ? (
         <div className="mb-8">
-          <DeviationsPanel
-            workspaceId={workspace.id}
-            run={openRun}
-            deviations={runDeviations}
-          />
+          <SectionHeading
+            hint={`v${latestVersion.version_no}${
+              latestVersion.row_count !== null ? ` · ${latestVersion.row_count} rows` : ''
+            }`}
+          >
+            Cleaned data
+          </SectionHeading>
+
+          <Card className="p-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Ready to export</p>
+                <p className="mt-0.5 text-sm text-muted">
+                  Version {latestVersion.version_no} is the cleaned result. The file you uploaded
+                  is untouched and still available.
+                </p>
+              </div>
+              <ExportButton workspaceId={workspace.id} datasetVersionId={latestVersion.id} />
+            </div>
+
+            {readyDownloads.length > 0 ? (
+              <div className="mt-4 border-t border-border pt-4">
+                <p className="text-xs font-medium text-muted">
+                  Ready to download ({readyDownloads.length})
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {readyDownloads.map((job) => (
+                    <DownloadButton key={job.id} job={job} />
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="mt-4 border-t border-border pt-4 text-xs text-subtle">
+                Choose a format above. The file takes a few seconds to prepare, then a download
+                button appears here.
+              </p>
+            )}
+
+            {profileColumns.length > 0 ? (
+              <div className="mt-4 border-t border-border pt-4">
+                <CategorizeButton
+                  workspaceId={workspace.id}
+                  datasetVersionId={latestVersion.id}
+                  columns={profileColumns}
+                />
+              </div>
+            ) : null}
+          </Card>
         </div>
       ) : null}
 
-      <div className="mb-6">
+      <div className="mb-8">
+        <SectionHeading hint="Reads this workspace only">Ask about this data</SectionHeading>
         <AskPanel workspaceId={workspace.id} />
       </div>
 
-      {latestVersion && profileColumns.length > 0 ? (
-        <div className="mb-6">
-          <CategorizeButton
-            workspaceId={workspace.id}
-            datasetVersionId={latestVersion.id}
-            columns={profileColumns}
-          />
-        </div>
-      ) : null}
-
-      {reviewVersionId && changes.length > 0 ? (
-        <div className="mb-8">
-          <ReviewQueue
-            workspaceId={workspace.id}
-            datasetVersionId={reviewVersionId}
-            changes={changes}
-          />
-        </div>
-      ) : null}
-
       <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
         <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide opacity-60">
-            Upload a file
-          </h2>
+          <SectionHeading>Upload a file</SectionHeading>
           <Card className="p-5">
             <UploadPanel workspaceId={workspace.id} datasets={datasets ?? []} />
           </Card>
-          <p className="mt-3 text-xs opacity-60">
-            Files are stored exactly as they arrived. Nothing is modified in place — cleaning writes
-            a new version and leaves the original intact.
+          <p className="mt-3 text-xs text-subtle">
+            Files are stored exactly as they arrived. Nothing is modified in place — cleaning
+            writes a new version and leaves the original intact.
           </p>
-
-          {latestVersion ? (
-            <>
-              <p className="mt-3 text-xs opacity-60">
-                Latest dataset version: v{latestVersion.version_no}
-                {latestVersion.row_count !== null ? ` · ${latestVersion.row_count} rows` : ''}
-              </p>
-            </>
-          ) : null}
         </section>
 
         <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide opacity-60">Uploads</h2>
+          <SectionHeading hint={uploads && uploads.length > 0 ? `${uploads.length}` : undefined}>
+            Files
+          </SectionHeading>
 
           {!uploads || uploads.length === 0 ? (
             <EmptyState
               title="Nothing uploaded yet"
-              body="Upload the file this client sends you every month. Once it is stored, hand it to the agent and it will read it, profile it and tell you what needs fixing."
+              body="Upload the file this client sends you every month."
+              steps={[
+                'Store the file exactly as it arrived',
+                'Choose Analyse and DataEngine reads it, profiles it and finds the problems',
+                'Review what it proposes and approve what you want',
+              ]}
             />
           ) : (
-            <ul className="divide-y divide-black/10 rounded-lg border border-black/10 dark:divide-white/10 dark:border-white/15">
+            <ul className="divide-y divide-border overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface">
               {uploads.map((upload) => (
-                <li key={upload.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3">
+                <li
+                  key={upload.id}
+                  className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 transition-colors hover:bg-surface-2/60"
+                >
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{upload.original_filename}</p>
-                    <p className="text-xs opacity-60">
+                    <p className="mt-0.5 text-xs text-subtle">
                       {upload.dataset_id
                         ? (datasetNames.get(upload.dataset_id) ?? 'Unknown dataset')
                         : 'No dataset'}
                       {' · '}
-                      {new Date(upload.created_at).toLocaleString('en-GB')}
+                      <span className="tabular">
+                        {new Date(upload.created_at).toLocaleString('en-GB')}
+                      </span>
                       {' · '}
-                      {formatBytes(upload.byte_size)}
+                      <span className="tabular">{formatBytes(upload.byte_size)}</span>
                     </p>
                   </div>
 

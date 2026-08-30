@@ -12,7 +12,7 @@ import {
   isWorkerOnline,
 } from '@/lib/agent';
 import type { Json } from '@/lib/database.types';
-import { buttonClass } from '@/components/ui';
+import { StatusBadge, buttonClass, secondaryButtonClass } from '@/components/ui';
 
 type Job = {
   id: string;
@@ -107,47 +107,48 @@ export function AgentPanel({
   const recent = jobs.slice(0, 5);
 
   return (
-    <section className="rounded-lg border border-black/10 dark:border-white/15">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-black/10 px-4 py-3 dark:border-white/15">
+    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border px-4 py-3">
         <span
           aria-hidden
-          className={`inline-block h-2 w-2 rounded-full ${
-            isOnline ? 'bg-emerald-500' : 'bg-red-500'
-          }`}
+          className={`inline-block h-2 w-2 shrink-0 rounded-full ${
+            isOnline ? 'bg-success' : 'bg-danger'
+          } ${isOnline && active > 0 ? 'pulse-dot' : ''}`}
         />
         <span className="text-sm font-medium">
-          {isOnline ? 'Agent online' : 'Agent offline'}
+          {isOnline ? 'Engine connected' : 'Engine offline'}
         </span>
 
         {isOnline ? (
-          <span className="text-xs opacity-60">
+          <span className="font-mono text-xs text-subtle">
             {online[0].hostname ?? online[0].id}
             {online[0].version ? ` · v${online[0].version}` : ''}
             {describeModels(online[0].metadata)}
           </span>
         ) : (
-          <span className="text-xs opacity-70">
+          <span className="text-xs text-muted">
             Nothing will run until it reconnects. Anything you ask for is queued and
             picked up automatically.
           </span>
         )}
 
         {active > 0 ? (
-          <span className="ml-auto text-xs opacity-70">
-            {active} job{active === 1 ? '' : 's'} running
+          <span className="ml-auto flex items-center gap-1.5 text-xs text-info">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-info pulse-dot" />
+            <span className="tabular font-medium">{active}</span> running
           </span>
         ) : null}
       </div>
 
       {recent.length === 0 ? (
-        <p className="px-4 py-3 text-xs opacity-60">
-          No agent activity yet. Analyse an upload to start.
+        <p className="px-4 py-3.5 text-sm text-muted">
+          Nothing has run yet. Upload a file and choose Analyse to start.
         </p>
       ) : (
-        <ul className="divide-y divide-black/5 dark:divide-white/10">
+        <ul className="divide-y divide-border">
           {recent.map((job) => (
-            <li key={job.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
-              <span className="text-sm">{JOB_KIND_LABELS[job.kind] ?? job.kind}</span>
+            <li key={job.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
+              <span className="text-sm font-medium">{JOB_KIND_LABELS[job.kind] ?? job.kind}</span>
 
               <JobStatus job={job} />
 
@@ -156,7 +157,7 @@ export function AgentPanel({
               <RelativeTime timestamp={job.finished_at ?? job.created_at} />
 
               {job.error ? (
-                <p className="w-full text-xs text-red-700 dark:text-red-300">{job.error}</p>
+                <p className="w-full text-xs text-danger">{job.error}</p>
               ) : null}
             </li>
           ))}
@@ -209,7 +210,7 @@ function RelativeTime({ timestamp }: { timestamp: string | null }) {
 
   return (
     <span
-      className="ml-auto text-xs opacity-50"
+      className="ml-auto text-xs text-subtle tabular"
       title={clock === null ? undefined : new Date(timestamp).toLocaleString('en-GB')}
     >
       {clock === null ? '' : formatAge(timestamp)}
@@ -244,23 +245,15 @@ function JobStatus({ job }: { job: Job }) {
 
   if (job.status === 'queued') {
     return (
-      <span className="rounded bg-black/10 px-2 py-0.5 text-xs opacity-70 dark:bg-white/10">
+      <span className="rounded bg-surface-2 px-2 py-0.5 font-mono text-xs text-muted">
         {job.attempts > 0 ? `retrying (attempt ${job.attempts + 1})` : 'queued'}
       </span>
     );
   }
 
-  const styles: Record<string, string> = {
-    succeeded: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-    failed: 'bg-red-500/15 text-red-700 dark:text-red-300',
-    cancelled: 'bg-black/10 dark:bg-white/10',
-  };
-
-  return (
-    <span className={`rounded px-2 py-0.5 text-xs ${styles[job.status] ?? ''}`}>
-      {job.status}
-    </span>
-  );
+  // One status vocabulary across the product: the same word means the same
+  // colour whether it appears on a job, an upload or a proposal.
+  return <StatusBadge status={job.status} />;
 }
 
 /**
@@ -346,7 +339,7 @@ export function DownloadButton({ job }: { job: DownloadableJob }) {
         onClick={download}
         disabled={busy}
         title={name}
-        className="rounded border border-black/15 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-black/5 disabled:opacity-50 dark:border-white/20 dark:hover:bg-white/10"
+        className={`${secondaryButtonClass} px-2.5 py-1 text-xs`}
       >
         {busy ? 'Preparing…' : `Download ${formatLabel(name)}`}
       </button>
@@ -402,14 +395,14 @@ export function ExportButton({
 
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
-      <span className="text-xs opacity-60">Export cleaned data:</span>
+      <span className="text-xs font-medium text-muted">Export cleaned data</span>
       {(['xlsx', 'csv'] as const).map((format) => (
         <button
           key={format}
           type="button"
           onClick={() => requestExport(format)}
           disabled={busy !== null}
-          className="rounded-md border border-black/15 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-black/5 disabled:opacity-50 dark:border-white/20 dark:hover:bg-white/10"
+          className={`${secondaryButtonClass} px-2.5 py-1 text-xs`}
         >
           {busy === format ? 'Starting…' : format === 'xlsx' ? 'Excel' : 'CSV'}
         </button>
@@ -482,9 +475,9 @@ export function CategorizeButton({
   }
 
   return (
-    <div className="rounded-lg border border-black/10 px-4 py-3 dark:border-white/15">
+    <div className="rounded-[var(--radius-lg)] border border-border bg-surface px-4 py-3.5">
       <p className="text-sm font-medium">Categorise a column</p>
-      <p className="mt-1 text-xs opacity-60">
+      <p className="mt-1 text-xs text-subtle">
         The agent reads the column&rsquo;s distinct values — never the rows — and proposes a
         category for each. It arrives in the review queue as a change you approve.
       </p>
@@ -494,7 +487,7 @@ export function CategorizeButton({
           value={column}
           onChange={(event) => setColumn(event.target.value)}
           disabled={busy}
-          className="rounded border border-black/15 px-2 py-1 text-xs dark:border-white/20 dark:bg-transparent"
+          className="rounded-[var(--radius)] border border-border bg-surface px-2 py-1 text-xs"
         >
           {columns.map((name) => (
             <option key={name} value={name}>
@@ -509,7 +502,7 @@ export function CategorizeButton({
           onChange={(event) => setCategories(event.target.value)}
           disabled={busy}
           placeholder="Categories (optional, comma separated)"
-          className="min-w-56 flex-1 rounded border border-black/15 px-2 py-1 text-xs dark:border-white/20 dark:bg-transparent"
+          className="min-w-56 flex-1 rounded-[var(--radius)] border border-border bg-surface px-2 py-1 text-xs"
         />
 
         <button
@@ -575,7 +568,7 @@ export function AnalyseButton({
 
   if (!datasetId) {
     return (
-      <span className="text-xs opacity-50" title="Attach this upload to a dataset first">
+      <span className="text-xs text-subtle" title="Attach this upload to a dataset first">
         no dataset
       </span>
     );
@@ -587,7 +580,7 @@ export function AnalyseButton({
         type="button"
         onClick={analyse}
         disabled={busy}
-        className="rounded-md border border-black/15 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-black/5 disabled:opacity-50 dark:border-white/20 dark:hover:bg-white/10"
+        className={`${secondaryButtonClass} px-2.5 py-1 text-xs`}
       >
         {busy ? 'Starting…' : 'Analyse'}
       </button>

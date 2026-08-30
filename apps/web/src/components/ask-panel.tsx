@@ -125,9 +125,9 @@ export function AskPanel({ workspaceId }: { workspaceId: string }) {
   }
 
   return (
-    <section className="rounded-lg border border-black/10 px-4 py-3 dark:border-white/15">
+    <section className="rounded-[var(--radius-lg)] border border-border px-4 py-3">
       <p className="text-sm font-medium">Ask about this workspace</p>
-      <p className="mt-1 text-xs opacity-60">
+      <p className="mt-1 text-xs text-subtle">
         Goes to the Hermes agent, which reads the data directly. Answers can take a minute or
         two — you can leave this page and come back.
       </p>
@@ -142,7 +142,7 @@ export function AskPanel({ workspaceId }: { workspaceId: string }) {
           }}
           disabled={busy}
           placeholder="e.g. what changed in the latest version?"
-          className="min-w-64 flex-1 rounded border border-black/15 px-2 py-1.5 text-xs dark:border-white/20 dark:bg-transparent"
+          className="min-w-64 flex-1 rounded border border-border px-2 py-1.5 text-xs  dark:bg-transparent"
         />
         <button
           type="button"
@@ -157,13 +157,13 @@ export function AskPanel({ workspaceId }: { workspaceId: string }) {
       <ErrorText>{error}</ErrorText>
 
       {pending ? (
-        <div className="mt-3 rounded border border-black/10 px-3 py-2 dark:border-white/15">
-          <p className="text-xs opacity-60">{pending.question}</p>
+        <div className="mt-3 rounded border border-border px-3 py-2">
+          <p className="text-xs text-subtle">{pending.question}</p>
 
           {pending.status === 'pending' ? (
-            <p className="mt-2 text-xs opacity-70">Thinking…</p>
+            <p className="mt-2 text-xs text-muted">Thinking…</p>
           ) : pending.status === 'failed' ? (
-            <p className="mt-2 text-xs text-red-700 dark:text-red-300">
+            <p className="mt-2 text-xs text-danger">
               {pending.error ?? 'The agent could not answer.'}
             </p>
           ) : (

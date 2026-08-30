@@ -179,7 +179,7 @@ export function UploadPanel({
         <button className={buttonClass} type="submit" disabled={busy}>
           {busy ? PHASE_LABEL[phase] : 'Upload'}
         </button>
-        {busy ? <span className="text-sm opacity-60">{PHASE_LABEL[phase]}</span> : null}
+        {busy ? <span className="text-sm text-subtle">{PHASE_LABEL[phase]}</span> : null}
       </div>
     </form>
   );

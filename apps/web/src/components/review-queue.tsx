@@ -11,7 +11,13 @@ import {
   isAdvisory,
 } from '@/lib/agent';
 import type { Json } from '@/lib/database.types';
-import { ErrorText, buttonClass, secondaryButtonClass } from '@/components/ui';
+import {
+  Badge,
+  ErrorText,
+  buttonClass,
+  ghostButtonClass,
+  secondaryButtonClass,
+} from '@/components/ui';
 
 export type ProposedChange = {
   id: string;
@@ -128,14 +134,26 @@ export function ReviewQueue({
 
   return (
     <section>
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wide opacity-60">
-          Review queue
-        </h2>
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">Needs your decision</h2>
+          <p className="mt-0.5 text-sm text-muted">
+            DataEngine proposed these. Nothing changes until you approve it.
+          </p>
+        </div>
         {pending.length > 0 ? (
-          <p className="text-xs opacity-60">
-            {pending.length} decision{pending.length === 1 ? '' : 's'} ·{' '}
-            {formatMoney(atStake)} affected
+          <p className="text-sm text-muted">
+            <span className="tabular font-medium text-foreground">{pending.length}</span> to
+            review
+            {atStake > 0 ? (
+              <>
+                {' · '}
+                <span className="tabular font-medium text-foreground">
+                  {formatMoney(atStake)}
+                </span>{' '}
+                affected
+              </>
+            ) : null}
           </p>
         ) : null}
       </div>
@@ -143,16 +161,17 @@ export function ReviewQueue({
       <ErrorText>{error}</ErrorText>
 
       {blocking.length > 0 ? (
-        <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/5">
-          <p className="border-b border-red-500/20 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-red-700 dark:text-red-300">
+        <div className="mb-4 overflow-hidden rounded-[var(--radius-lg)] border border-danger/30 bg-danger-soft/40">
+          <p className="flex items-center gap-2 border-b border-danger/20 px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-danger">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-danger" />
             Blocks the run — resolve before applying anything
           </p>
-          <p className="px-4 pt-2 text-xs opacity-70">
+          <p className="px-4 pt-3 text-sm text-muted">
             A blocking finding carries no change to apply; it is a question. Either answer
             clears the block and both are recorded in the audit log — the difference is what
             you are on record as having decided.
           </p>
-          <ul className="divide-y divide-red-500/15">
+          <ul className="mt-2 divide-y divide-danger/15">
             {blocking.map((change) => (
               <ChangeRow
                 key={change.id}
@@ -166,7 +185,7 @@ export function ReviewQueue({
       ) : null}
 
       {reviewable.length > 0 ? (
-        <ul className="divide-y divide-black/10 rounded-lg border border-black/10 dark:divide-white/10 dark:border-white/15">
+        <ul className="divide-y divide-border overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface">
           {reviewable.map((change) => (
             <ChangeRow key={change.id} change={change} busy={busy} onDecide={decide} />
           ))}
@@ -176,7 +195,7 @@ export function ReviewQueue({
       {reviewable.length > 1 ? (
         <button
           type="button"
-          className="mt-2 text-xs underline opacity-70 hover:opacity-100 disabled:opacity-40"
+          className={`${ghostButtonClass} mt-2 text-xs`}
           disabled={busy !== null}
           onClick={() => decide(reviewable.map((change) => change.group_key), true)}
         >
@@ -185,7 +204,7 @@ export function ReviewQueue({
       ) : null}
 
       {approved.length > 0 ? (
-        <div className="mt-5 flex flex-wrap items-center gap-3 rounded-lg border border-black/10 px-4 py-3 dark:border-white/15">
+        <div className="mt-5 flex flex-wrap items-center gap-3 rounded-[var(--radius-lg)] border border-border bg-surface px-4 py-3.5">
           <p className="text-sm">
             {approvedTransforms.length > 0 ? (
               <>
@@ -228,13 +247,13 @@ export function ReviewQueue({
             // Without this the reviewer approves a review item, presses apply,
             // and gets a run that changes nothing -- which reads as a failure
             // rather than as the correct outcome.
-            <p className="w-full text-xs opacity-60">
+            <p className="w-full text-xs text-subtle">
               Review items record that you have seen a finding. They do not change the data,
               so there is nothing to apply and no new version is written. The finding stays
               visible on this version.
             </p>
           ) : (
-            <p className="w-full text-xs opacity-60">
+            <p className="w-full text-xs text-subtle">
               Nothing is overwritten. Applying writes a new dataset version whose parent is
               this one, so the current figures stay available.
             </p>
@@ -271,23 +290,44 @@ function ChangeRow({
   const blocking = change.confidence === 'low';
 
   return (
-    <li className="px-4 py-3">
-      <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+    <li className="px-4 py-4 transition-colors hover:bg-surface-2/60">
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">{change.title}</p>
-          <p className="mt-0.5 text-xs opacity-70">{change.rationale}</p>
-          <p className="mt-1 text-xs opacity-50">
-            {CONFIDENCE_LABELS[change.confidence]} · {change.affected_rows} row
-            {change.affected_rows === 1 ? '' : 's'}
-            {money !== '—' ? ` · ${money}` : ''}
-            {change.column_name ? ` · ${change.column_name}` : ''}
-          </p>
+          {/* The recommendation. What DataEngine proposes, in the words the
+              rule engine chose -- first and largest, because it is the thing
+              being decided. */}
+          <p className="font-medium tracking-tight">{change.title}</p>
+
+          {/* Why. Full contrast rather than dimmed: this is the reasoning an
+              accountant is being asked to accept, and reasoning printed at
+              70% opacity reads as small print. */}
+          <p className="mt-1 text-sm leading-relaxed text-muted">{change.rationale}</p>
+
+          {/* Impact. A metric strip rather than a sentence, so the numbers can
+              be compared down the column without being read. */}
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+            <Badge tone={blocking ? 'danger' : 'neutral'}>
+              {CONFIDENCE_LABELS[change.confidence]}
+            </Badge>
+            <span className="text-subtle">
+              <span className="tabular font-medium text-muted">{change.affected_rows}</span> row
+              {change.affected_rows === 1 ? '' : 's'}
+            </span>
+            {money !== '—' ? (
+              <span className="text-subtle">
+                <span className="tabular font-medium text-muted">{money}</span> affected
+              </span>
+            ) : null}
+            {change.column_name ? (
+              <span className="font-mono text-[11px] text-subtle">{change.column_name}</span>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
-            className={`${secondaryButtonClass} px-2.5 py-1 text-xs`}
+            className={`${secondaryButtonClass} px-3 py-1.5 text-xs`}
             disabled={busy !== null}
             onClick={() => onDecide([change.group_key], false)}
             title={
@@ -300,7 +340,7 @@ function ChangeRow({
           </button>
           <button
             type="button"
-            className={`${buttonClass} px-2.5 py-1 text-xs`}
+            className={`${buttonClass} px-3 py-1.5 text-xs`}
             disabled={busy !== null}
             onClick={() => onDecide([change.group_key], true)}
             title={
@@ -315,10 +355,11 @@ function ChangeRow({
       </div>
 
       {hasEvidence(change.evidence) ? (
-        <div className="mt-2">
+        <div className="mt-3">
           <button
             type="button"
-            className="text-xs underline opacity-60 hover:opacity-100"
+            className="text-xs font-medium text-accent transition-opacity hover:opacity-70"
+            aria-expanded={open}
             onClick={() => setOpen(!open)}
           >
             {open ? 'Hide evidence' : 'Show evidence'}
@@ -327,7 +368,7 @@ function ChangeRow({
             // Raw evidence, deliberately. Section 7's promise is that a number
             // can be traced, and a curated summary of the evidence is the thing
             // the accountant would have to take on trust.
-            <pre className="mt-2 max-h-64 overflow-auto rounded border border-black/10 bg-black/5 p-3 text-[11px] leading-relaxed dark:border-white/15 dark:bg-white/5">
+            <pre className="mt-2 max-h-64 overflow-auto rounded-[var(--radius)] border border-border bg-surface-2 p-3 font-mono text-[11px] leading-relaxed text-muted">
               {JSON.stringify(change.evidence, null, 2)}
             </pre>
           ) : null}

@@ -135,12 +135,12 @@ export function DeviationsPanel({
   }
 
   return (
-    <section className="rounded-lg border border-amber-500/40 bg-amber-500/5">
-      <div className="border-b border-amber-500/20 px-4 py-3">
+    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-warning/30 bg-warning-soft/40">
+      <div className="border-b border-warning/20 px-4 py-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
           Replay paused — {pending.length} question{pending.length === 1 ? '' : 's'}
         </h2>
-        <p className="mt-1 text-xs opacity-70">
+        <p className="mt-1 text-xs text-muted">
           The saved recipe ran against this file and handled{' '}
           {run.rows_matched ?? 0} of {run.rows_processed ?? 0} rows on its own
           {run.auto_corrections ? `, correcting ${run.auto_corrections}` : ''}
@@ -153,31 +153,31 @@ export function DeviationsPanel({
         <ErrorText>{error}</ErrorText>
       </div>
 
-      <ul className="divide-y divide-amber-500/15">
+      <ul className="divide-y divide-warning/15">
         {pending.map((deviation) => (
           <li key={deviation.id} className="px-4 py-3">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span className="text-sm font-medium">{deviation.title}</span>
-              <span className="rounded bg-amber-500/20 px-2 py-0.5 text-xs">
+              <span className="rounded bg-warning-soft px-2 py-0.5 text-xs font-medium text-warning">
                 {SEVERITY_LABELS[deviation.severity] ?? deviation.severity}
               </span>
               {deviation.affected_rows > 0 ? (
-                <span className="text-xs opacity-60">{deviation.affected_rows} rows</span>
+                <span className="text-xs text-subtle">{deviation.affected_rows} rows</span>
               ) : null}
               {deviation.materiality_gbp ? (
-                <span className="text-xs opacity-60">
+                <span className="text-xs text-subtle">
                   {formatMoney(deviation.materiality_gbp)}
                 </span>
               ) : null}
             </div>
 
-            <p className="mt-1 text-xs opacity-70">
+            <p className="mt-1 text-xs text-muted">
               {TYPE_LABELS[deviation.type] ?? deviation.type}
               {deviation.column_name ? ` · ${deviation.column_name}` : ''}
             </p>
 
             {deviation.detail ? (
-              <p className="mt-1 text-xs opacity-80">{deviation.detail}</p>
+              <p className="mt-1 text-xs text-muted">{deviation.detail}</p>
             ) : null}
 
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -218,7 +218,7 @@ export function DeviationsPanel({
               */}
               {deviation.source_value ? (
                 <span className="inline-flex items-center gap-1">
-                  <span className="text-xs opacity-60">map “{deviation.source_value}” to</span>
+                  <span className="text-xs text-subtle">map “{deviation.source_value}” to</span>
                   <input
                     type="text"
                     value={mapping[deviation.id] ?? deviation.suggested_value ?? ''}
@@ -229,7 +229,7 @@ export function DeviationsPanel({
                       }))
                     }
                     placeholder="canonical value"
-                    className="w-40 rounded border border-black/15 px-2 py-1 text-xs dark:border-white/20 dark:bg-transparent"
+                    className="w-40 rounded border border-border px-2 py-1 text-xs  dark:bg-transparent"
                   />
                   <button
                     type="button"
@@ -250,7 +250,7 @@ export function DeviationsPanel({
         ))}
       </ul>
 
-      <div className="flex flex-wrap items-center gap-3 border-t border-amber-500/20 px-4 py-3">
+      <div className="flex flex-wrap items-center gap-3 border-t border-warning/20 px-4 py-3">
         {pending.length === 0 ? (
           <>
             <p className="text-sm">All questions answered.</p>
@@ -262,14 +262,14 @@ export function DeviationsPanel({
             >
               {busy === 'replay' ? 'Starting…' : 'Replay again'}
             </button>
-            <p className="w-full text-xs opacity-60">
+            <p className="w-full text-xs text-subtle">
               Replaying re-runs the recipe over the same file. Your answers are remembered, so
               the findings you resolved will not stop it a second time, and a cleaned version is
               written.
             </p>
           </>
         ) : (
-          <p className="text-xs opacity-70">
+          <p className="text-xs text-muted">
             {blocking.length > 0
               ? 'A blocking finding has to be answered before the run can go anywhere.'
               : 'Answer these, then replay to finish the run and write a cleaned version.'}
