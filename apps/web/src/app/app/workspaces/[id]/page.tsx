@@ -263,7 +263,7 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide opacity-60">
             Upload a file
           </h2>
-          <Card>
+          <Card className="p-5">
             <UploadPanel workspaceId={workspace.id} datasets={datasets ?? []} />
           </Card>
           <p className="mt-3 text-xs opacity-60">

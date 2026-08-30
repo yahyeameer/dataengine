@@ -8,7 +8,7 @@ export default function SignupPage() {
     <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-6 py-16">
       <h1 className="mb-1 text-2xl font-semibold tracking-tight">Create your account</h1>
       <p className="mb-6 text-sm opacity-70">You will set up your firm on the next screen.</p>
-      <Card>
+      <Card className="p-5">
         <AuthForm mode="signup" />
       </Card>
     </main>

@@ -20,7 +20,7 @@ export default async function OnboardingPage() {
         Each client you work for gets its own workspace inside the firm, so their data, recipes and
         audit trail stay separate.
       </p>
-      <Card>
+      <Card className="p-5">
         <CreateOrgForm />
       </Card>
     </main>
