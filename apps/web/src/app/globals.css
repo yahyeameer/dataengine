@@ -1,26 +1,203 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* ---------------------------------------------------------------------------
+   DataEngine design tokens.
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+   The product asks an accountant to trust it with a client's books, so the
+   visual language is built for confidence rather than for delight: a cool,
+   near-neutral ground, one accent, and semantic colours that stay out of the
+   way until something needs attention.
+
+   The accent is a deep teal. It reads as instrument rather than as brand --
+   closer to a well-made terminal than to a consumer app -- and it survives on
+   both grounds without the saturation that makes an interface feel cheap.
+   There is exactly one. Anything competing with it is either semantic or a
+   mistake.
+   --------------------------------------------------------------------------- */
+
+:root {
+  /* Ground. Not pure white: a hint of blue keeps large surfaces from glaring
+     under the fluorescent light of an actual office. */
+  --background: #f7f9fb;
+  --surface: #ffffff;
+  --surface-2: #f1f5f8;
+  --surface-raised: #ffffff;
+
+  /* Ink. Blue-biased through the whole ramp so text sits in the same family as
+     the ground rather than floating on top of it. */
+  --foreground: #0e1720;
+  --muted: #475763;
+  --subtle: #6b7c88;
+
+  --border: #dde5eb;
+  --border-strong: #c3cfd8;
+
+  --accent: #10706c;
+  --accent-hover: #0c5a57;
+--accent-soft: #e2f1f0;
+  --accent-ring: #10706c33;
+
+  --success: #2f6b47;
+  --success-soft: #e3f0e8;
+  --warning: #8a5a10;
+  --warning-soft: #f8efdc;
+  --danger: #9b3430;
+  --danger-soft: #f9e8e6;
+  --info: #2b5a86;
+  --info-soft: #e5eef6;
+
+  --radius: 8px;
+  --radius-lg: 12px;
+
+  /* Restrained on purpose. Elevation here is a hairline and a whisper of
+     shadow, not a drop-shadow competition. */
+  --shadow-sm: 0 1px 2px 0 rgb(14 23 32 / 0.04);
+  --shadow: 0 1px 3px 0 rgb(14 23 32 / 0.06), 0 1px 2px -1px rgb(14 23 32 / 0.04);
+  --shadow-lg: 0 10px 30px -12px rgb(14 23 32 / 0.18);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0a1016;
+    --surface: #111a22;
+    --surface-2: #16212b;
+    --surface-raised: #16212b;
+
+    --foreground: #e6edf3;
+    --muted: #a3b3c0;
+    --subtle: #7d8f9d;
+
+    --border: #22303c;
+    --border-strong: #334554;
+
+    --accent: #4bb8b0;
+    --accent-hover: #63c9c1;
+    --accent-soft: #12292e;
+    --accent-ring: #4bb8b040;
+
+    --success: #6cb98a;
+    --success-soft: #14251c;
+    --warning: #d3a05a;
+    --warning-soft: #2a2216;
+    --danger: #e08b85;
+    --danger-soft: #2c1a19;
+    --info: #7fb0dc;
+    --info-soft: #16232f;
+
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+    --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.4);
+    --shadow-lg: 0 10px 30px -12px rgb(0 0 0 / 0.6);
   }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
+  /* The layout loads Geist and Geist Mono. Until now `body` overrode both with
+     Arial, so the fonts were downloaded and never used. */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Figures in a column must line up. This is a financial product; a table where
+   the digits wander is a table nobody trusts. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Keyboard focus is never removed, only made to match the palette. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* --- motion -----------------------------------------------------------------
+   Two effects, both earning their place: a shimmer that says "loading" without
+   a spinner, and a slow pulse for a live status dot. Everything else is a
+   transition on a property that was going to change anyway. */
+
+@keyframes de-shimmer {
+  100% { transform: translateX(100%); }
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-2);
+  border-radius: 6px;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(255 255 255 / 0.35),
+    transparent
+  );
+  animation: de-shimmer 1.6s infinite;
+}
+@media (prefers-color-scheme: dark) {
+  .skeleton::after {
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.06), transparent);
+  }
+}
+
+@keyframes de-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.pulse-dot { animation: de-pulse 2.4s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .skeleton::after { display: none; }
+}
+
+/* --- glass ------------------------------------------------------------------
+   Used in three places and nowhere else: the auth panel, the AI status panel,
+   and overlays. A frosted interface is a tiring interface, and glass everywhere
+   means glass signifies nothing. */
+.glass {
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
 }

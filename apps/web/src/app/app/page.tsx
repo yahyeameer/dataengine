@@ -29,7 +29,7 @@ export default async function AppHomePage() {
       <PageHeader
         title="Client workspaces"
         subtitle="One workspace per client. Data, recipes and the audit trail stay separate between them."
-        actions={canCreate ? <CreateWorkspaceForm orgId={org.id} /> : null}
+        action={canCreate ? <CreateWorkspaceForm orgId={org.id} /> : null}
       />
 
       {workspaces.length === 0 ? (
