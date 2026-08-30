@@ -72,6 +72,14 @@ export async function POST(request: Request) {
     });
 
     if (error) {
+      // `enqueue_agent_job` throttles per user and raises SQLSTATE PT429 --
+      // PostgREST's convention for "answer with this HTTP status". Surfacing it
+      // as 400 would tell an accountant their request was malformed when the
+      // truth is that it was fine and they should wait; the message already
+      // carries the number of seconds.
+      if (error.code === 'PT429') {
+        return NextResponse.json({ error: error.message }, { status: 429 });
+      }
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 

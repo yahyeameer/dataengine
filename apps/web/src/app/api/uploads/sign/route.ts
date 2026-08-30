@@ -49,6 +49,21 @@ export async function POST(request: Request) {
     const context = await requireWorkspaceAccess(body.workspaceId);
     const admin = adminFor(context);
 
+    // Throttled per user, and checked after membership so a refusal can never
+    // confirm that someone else's workspace id is real. Counted against
+    // `raw_uploads` rather than a counter table: a reservation that never
+    // completed still counts, which is right, because the reservation is the
+    // cost being limited.
+    const { data: retryAfter } = await admin.rpc('upload_rate_limit_retry_after', {
+      p_user: context.user.id,
+    });
+    if (typeof retryAfter === 'number' && retryAfter > 0) {
+      return NextResponse.json(
+        { error: `Too many uploads. Try again in ${retryAfter} second(s).` },
+        { status: 429, headers: { 'Retry-After': String(retryAfter) } },
+      );
+    }
+
     // A dataset is the recurring thing ("ACME monthly sales"), so an upload
     // either continues an existing one or starts a new one. Week 2 replaces the
     // explicit choice with source_signature matching.

@@ -245,6 +245,13 @@ export type Database = {
             foreignKeyName: "analysis_runs_job_id_fkey"
             columns: ["job_id"]
             isOneToOne: false
+            referencedRelation: "agent_job_telemetry"
+            referencedColumns: ["job_id"]
+          },
+          {
+            foreignKeyName: "analysis_runs_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
             referencedRelation: "agent_jobs"
             referencedColumns: ["id"]
           },
@@ -414,6 +421,13 @@ export type Database = {
             isOneToOne: true
             referencedRelation: "dataset_versions"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dataset_profiles_produced_by_job_id_fkey"
+            columns: ["produced_by_job_id"]
+            isOneToOne: false
+            referencedRelation: "agent_job_telemetry"
+            referencedColumns: ["job_id"]
           },
           {
             foreignKeyName: "dataset_profiles_produced_by_job_id_fkey"
@@ -865,6 +879,13 @@ export type Database = {
             foreignKeyName: "proposed_changes_job_id_fkey"
             columns: ["job_id"]
             isOneToOne: false
+            referencedRelation: "agent_job_telemetry"
+            referencedColumns: ["job_id"]
+          },
+          {
+            foreignKeyName: "proposed_changes_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
             referencedRelation: "agent_jobs"
             referencedColumns: ["id"]
           },
@@ -1011,6 +1032,13 @@ export type Database = {
             foreignKeyName: "recipe_runs_job_id_fkey"
             columns: ["job_id"]
             isOneToOne: false
+            referencedRelation: "agent_job_telemetry"
+            referencedColumns: ["job_id"]
+          },
+          {
+            foreignKeyName: "recipe_runs_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
             referencedRelation: "agent_jobs"
             referencedColumns: ["id"]
           },
@@ -1114,7 +1142,83 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      agent_job_telemetry: {
+        Row: {
+          attempts: number | null
+          created_at: string | null
+          dataset_id: string | null
+          dataset_name: string | null
+          dataset_version_id: string | null
+          duration_seconds: number | null
+          error: string | null
+          finished_at: string | null
+          job_id: string | null
+          kind: Database["public"]["Enums"]["agent_job_kind"] | null
+          lease_expires_at: string | null
+          llm_fell_back: boolean | null
+          max_attempts: number | null
+          model_used: string | null
+          org_id: string | null
+          progress: Json | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["agent_job_status"] | null
+          worker_id: string | null
+          workspace_id: string | null
+          workspace_name: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_jobs_claimed_by_fkey"
+            columns: ["worker_id"]
+            isOneToOne: false
+            referencedRelation: "agent_workers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_jobs_dataset_id_fkey"
+            columns: ["dataset_id"]
+            isOneToOne: false
+            referencedRelation: "datasets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_jobs_dataset_version_id_fkey"
+            columns: ["dataset_version_id"]
+            isOneToOne: false
+            referencedRelation: "dataset_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_jobs_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_jobs_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_llm_health: {
+        Row: {
+          avg_seconds: number | null
+          degraded: number | null
+          failed_jobs: number | null
+          first_degraded_at: string | null
+          kind: Database["public"]["Enums"]["agent_job_kind"] | null
+          last_degraded_at: string | null
+          model_ran: number | null
+          models_seen: string[] | null
+          succeeded: number | null
+          workers_seen: string[] | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       agent_worker_heartbeat: {
@@ -1527,6 +1631,11 @@ export type Database = {
         Returns: boolean
       }
       is_org_member: { Args: { p_org_id: string }; Returns: boolean }
+      llm_backed_kinds: {
+        Args: never
+        Returns: Database["public"]["Enums"]["agent_job_kind"][]
+      }
+      llm_model_used: { Args: { p_result: Json }; Returns: string }
       mark_changes_applied: {
         Args: { p_dataset_version_id: string; p_group_keys: string[] }
         Returns: number
@@ -1548,6 +1657,9 @@ export type Database = {
         Args: { p_org_id: string }
         Returns: Database["public"]["Enums"]["org_role"]
       }
+      rate_limit_jobs_per_window: { Args: never; Returns: number }
+      rate_limit_uploads_per_window: { Args: never; Returns: number }
+      rate_limit_window_seconds: { Args: never; Returns: number }
       record_analysis_run: {
         Args: {
           p_created_by?: string
@@ -1762,6 +1874,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      upload_rate_limit_retry_after: {
+        Args: { p_user?: string }
+        Returns: number
       }
       upsert_mapping_entries: {
         Args: {
