@@ -65,3 +65,50 @@ def test_share_describes_how_much_of_the_workload_degraded():
 
 def test_an_unchecked_report_starts_unknown_not_healthy():
     assert HealthReport(checked=False, error="not yet checked").ok is False
+
+
+# -----------------------------------------------------------------------------
+# The window
+#
+# The view counts for all time on purpose -- "this started on the 30th" is what
+# identifies the change. But an alert on an all-time count never clears, and a
+# monitor that is permanently red is one people stop reading. The record and the
+# alert therefore have different horizons.
+# -----------------------------------------------------------------------------
+
+from datetime import datetime, timedelta, timezone
+
+
+def _iso(hours_ago: float) -> str:
+    return (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
+
+
+def test_a_degradation_that_was_fixed_yesterday_stops_alerting():
+    report = check(_Stub([
+        {"kind": "propose_cleaning", "degraded": 1, "model_ran": 40,
+         "first_degraded_at": _iso(72), "last_degraded_at": _iso(48)},
+    ]))
+
+    assert report.ok, "a resolved degradation kept the monitor permanently red"
+    assert report.summary() == {"llm_health": "ok"}
+
+
+def test_a_degradation_still_happening_does_alert():
+    report = check(_Stub([
+        {"kind": "propose_cleaning", "degraded": 2, "model_ran": 5,
+         "first_degraded_at": _iso(3), "last_degraded_at": _iso(1)},
+    ]))
+
+    assert not report.ok
+    assert report.summary()["llm_degraded_kinds"] == {"propose_cleaning": 2}
+
+
+def test_an_unparseable_timestamp_is_treated_as_current():
+    # Failing open: dropping a real degradation because a date format changed
+    # is the wrong way for a monitor to be wrong.
+    report = check(_Stub([
+        {"kind": "generate_report", "degraded": 1, "model_ran": 0,
+         "first_degraded_at": "not-a-date", "last_degraded_at": "not-a-date"},
+    ]))
+
+    assert not report.ok

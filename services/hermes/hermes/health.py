@@ -27,11 +27,26 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .supabase import SupabaseClient, SupabaseError
 
 log = logging.getLogger("hermes.health")
+
+# How far back a degradation still counts as *current*.
+#
+# `agent_llm_health` deliberately counts for all time -- it is the forensic
+# record, and "this started on the 30th" is the sentence that identifies what
+# changed. But an alert built on an all-time count never clears: one afternoon's
+# outage, fixed the same hour, leaves the monitor red for the life of the
+# system. A permanently red monitor is worse than none, because people stop
+# reading it and then miss the real one.
+#
+# So the alert is windowed and the record is not. A day is long enough that a
+# degradation spanning an overnight gap between jobs is still caught, and short
+# enough that a fixed problem goes quiet on its own.
+DEGRADATION_WINDOW_HOURS = 24
 
 
 @dataclass(frozen=True)
@@ -102,19 +117,47 @@ def check(supabase: SupabaseClient) -> HealthReport:
         log.warning("llm health check could not run: %s %s", error.status, error.body)
         return HealthReport(checked=False, error=f"{error.status}")
 
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=DEGRADATION_WINDOW_HOURS)
+
     degraded = [
-        Degradation(
-            kind=row["kind"],
-            degraded=int(row.get("degraded") or 0),
-            model_ran=int(row.get("model_ran") or 0),
-            first_degraded_at=row.get("first_degraded_at"),
-            last_degraded_at=row.get("last_degraded_at"),
-        )
+        item
         for row in rows
         if int(row.get("degraded") or 0) > 0
+        for item in [
+            Degradation(
+                kind=row["kind"],
+                degraded=int(row.get("degraded") or 0),
+                model_ran=int(row.get("model_ran") or 0),
+                first_degraded_at=row.get("first_degraded_at"),
+                last_degraded_at=row.get("last_degraded_at"),
+            )
+        ]
+        if _within_window(item.last_degraded_at, cutoff)
     ]
 
     return HealthReport(degraded=degraded)
+
+
+def _within_window(timestamp: str | None, cutoff: datetime) -> bool:
+    """
+    Is this degradation recent enough to still be worth shouting about?
+
+    An unparseable or missing timestamp is treated as current. The alternative
+    is silently dropping a real degradation because a date format changed,
+    which is the wrong way for a monitor to fail.
+    """
+    if not timestamp:
+        return True
+    try:
+        # PostgREST renders timestamptz as ISO 8601; `fromisoformat` handles the
+        # offset on 3.11+, and the Z spelling needs the one substitution.
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        log.warning("could not parse degradation timestamp %r; treating as current", timestamp)
+        return True
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed >= cutoff
 
 
 def log_report(report: HealthReport) -> None:
