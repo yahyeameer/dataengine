@@ -197,6 +197,42 @@ ssh -i ~/.ssh/srv1927440 -L 4860:127.0.0.1:32777 root@191.215.42.242
 
 ---
 
+## Turning on out-of-band alerts
+
+The banner reaches an admin who is signed in. Degradation that starts at eleven
+at night reaches nobody until morning, which for a month-end is the difference
+between a fix and an apology.
+
+Add a webhook URL to `services/hermes/.env` and recreate the worker:
+
+```bash
+cd /opt/dataengine/services/hermes
+echo 'HERMES_ALERT_WEBHOOK_URL=https://hooks.slack.com/services/...' >> .env
+docker compose up -d --force-recreate      # --force-recreate: a changed
+                                           # env_file alone may not recreate
+```
+
+Slack and Discord incoming webhooks both work as-is, as does anything that
+accepts JSON — the payload carries `text` and `content` with the same sentence.
+
+**It sends once when a fault starts and once when it clears.** A lasting fault
+does not re-send; verified in production at 5 checks to 1 alert. `unknown` is
+never sent — a check that could not run is logged and shown in the banner, and
+the same blip usually stops the worker claiming jobs anyway.
+
+Confirm it is live:
+
+```bash
+docker exec hermes-hermes-1 python -c   "from hermes.config import load_config; print(bool(load_config().alert_webhook_url))"
+```
+
+To test delivery without waiting for a real fault, run a listener on the host
+and point the worker at `http://172.16.0.1:<port>/` — the docker bridge gateway
+is reachable from the container. Remove it afterwards: a webhook pointing at a
+dead endpoint fails silently, which is the exact failure this is meant to catch.
+
+---
+
 ## Deploying a change
 
 The VPS pulls over a read-only deploy key; it cannot push, which is deliberate.
