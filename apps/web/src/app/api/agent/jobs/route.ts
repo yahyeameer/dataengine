@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { handleRouteError } from '@/lib/api';
-import { dispatchJobToHermes } from '@/lib/hermes-dispatch';
 import { requireWorkspaceAccess } from '@/lib/authz';
 import { createServerSupabase } from '@/lib/supabase/server';
 
@@ -76,22 +75,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    // Dispatch after the row is committed, and never in a way that can fail the
-    // request. `enqueue_agent_job` deduplicates, so `data` may be a job that was
-    // already sent -- the claim inside the dispatch is what makes a second click
-    // a no-op rather than a second run.
+    // The row is left `queued`, and that is the whole handoff. A worker polling
+    // `claim_agent_job` picks it up on its next pass.
     //
-    // A dispatch failure marks the job failed with a readable message rather
-    // than bubbling up here. The work was accepted; answering 500 would tell the
-    // accountant their click did nothing while a row sat queued with nothing
-    // coming for it.
-    if (data?.id) {
-      const outcome = await dispatchJobToHermes(data.id);
-      if (!outcome.dispatched) {
-        console.warn(`[hermes] job ${data.id} not dispatched: ${outcome.reason}`);
-      }
-    }
-
+    // This route used to push the job to the agent's webhook gateway before
+    // returning, and the push began by claiming the row. That claim was the
+    // bug: `claim_agent_job` only considers jobs that are `queued` or whose
+    // lease has lapsed, so a job claimed here was invisible to the worker for
+    // the life of its lease -- and when the push then failed, the job was
+    // marked failed and non-retryable, so no worker ever saw it at all.
+    //
+    // `lib/hermes-dispatch.ts` and `claim_agent_job_by_id` are both still here
+    // and both still correct. Nothing calls them, which is the point: Hermes
+    // does the thinking, but it is reached from the worker over its API server,
+    // not from a request handler over a webhook.
     return NextResponse.json({ job: data });
   } catch (error) {
     return handleRouteError(error);
