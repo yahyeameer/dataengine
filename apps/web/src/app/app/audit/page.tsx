@@ -1,8 +1,8 @@
-import { EmptyState, PageHeader } from '@/components/ui';
+import { EmptyState, PageHeader, TableShell, Td, Th } from '@/components/ui';
 import { requireCurrentOrg } from '@/lib/authz';
 import { createServerSupabase } from '@/lib/supabase/server';
 
-export const metadata = { title: 'Audit log · AI Data Operations' };
+export const metadata = { title: 'Activity · DataEngine' };
 
 /**
  * The audit trail required by section 13. Append-only in the database, so what
@@ -30,43 +30,45 @@ export default async function AuditPage() {
   return (
     <>
       <PageHeader
-        title="Audit log"
+        eyebrow="System"
+        title="Activity"
         subtitle="Every action, in order, with who did it and when. Entries cannot be edited or deleted."
       />
 
       {!entries || entries.length === 0 ? (
-        <EmptyState title="No activity yet" body="Actions appear here as soon as anyone takes them." />
+        <EmptyState
+          title="No activity yet"
+          body="Every upload, job and approval is recorded here the moment it happens, and nothing in this application can edit or remove an entry."
+        />
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/15">
-          <table className="w-full min-w-[46rem] text-sm">
-            <thead className="border-b border-black/10 text-left text-xs uppercase tracking-wide opacity-60 dark:border-white/15">
+        <TableShell>
+          <thead className="border-b border-border bg-surface-2">
               <tr>
-                <th className="px-4 py-2 font-medium">When</th>
-                <th className="px-4 py-2 font-medium">Action</th>
-                <th className="px-4 py-2 font-medium">Workspace</th>
-                <th className="px-4 py-2 font-medium">Detail</th>
+                <Th>When</Th>
+                <Th>Action</Th>
+                <Th>Workspace</Th>
+                <Th>Detail</Th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-black/5 dark:divide-white/10">
+            <tbody className="divide-y divide-border">
               {entries.map((entry) => (
                 <tr key={entry.id}>
-                  <td className="whitespace-nowrap px-4 py-2 align-top opacity-70">
+                  <Td className="whitespace-nowrap text-subtle tabular">
                     {new Date(entry.created_at).toLocaleString('en-GB')}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-2 align-top font-medium">{entry.action}</td>
-                  <td className="px-4 py-2 align-top opacity-70">
+                  </Td>
+                  <Td className="whitespace-nowrap font-medium">{entry.action}</Td>
+                  <Td className="text-muted">
                     {entry.workspace_id ? workspaceNames.get(entry.workspace_id) ?? '—' : '—'}
-                  </td>
-                  <td className="px-4 py-2 align-top">
-                    <code className="break-all text-xs opacity-70">
+                  </Td>
+                  <Td>
+                    <code className="break-all font-mono text-xs text-subtle">
                       {summarise(entry.metadata)}
                     </code>
-                  </td>
+                  </Td>
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
+          </TableShell>
       )}
     </>
   );

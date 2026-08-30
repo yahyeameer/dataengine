@@ -85,7 +85,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
         {pending ? 'Working…' : isSignup ? 'Create account' : 'Sign in'}
       </button>
 
-      <p className="text-center text-sm opacity-70">
+      <p className="text-center text-sm text-muted">
         {isSignup ? 'Already have an account? ' : 'No account yet? '}
         <Link className="underline" href={isSignup ? '/login' : '/signup'}>
           {isSignup ? 'Sign in' : 'Create one'}

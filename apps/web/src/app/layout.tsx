@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Data Operations",
+  title: "DataEngine",
   description:
     "Learn a client's recurring data workflow once, then execute it every month with only exceptions surfaced.",
 };
