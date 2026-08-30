@@ -166,36 +166,71 @@ unchanged rather than corrupted.
 `job_id` is the only field read from the body. Workspace, org and dataset come
 from the job row, so a report cannot name a tenancy it was not given.
 
-## Verified against the running agent (2026-08-29)
+## The webhook turn has no tools (2026-08-30) — this integration does not run
 
-The open question was whether an agent turn could reach back out and sign what
-it sent. It can. Tested against a listener on `hermes-agent-bwlq_default`:
+**This section retracts the one it replaces.** The previous text claimed a
+webhook turn had `terminal`, signed an HMAC and posted a callback that returned
+HTTP 200. That probe was run in a CLI / default-agent context — `docker exec …
+hermes-agent-1`, which carries the `hermes-cli` toolset — not in a
+`webhook:<route>:<delivery>` gateway turn. It validated the wrong session type,
+and it was the assumption this whole integration was shaped around.
 
-| Capability | Evidence |
+What a real webhook turn actually has, measured over five deliveries on
+2026-08-29 and 2026-08-30 (two live jobs, one controlled probe on a route
+recreated without `--skills`, and the history of the two pre-existing routes):
+
+| Capability | In a webhook turn |
 |---|---|
-| Receives job information | Webhook body reaches the turn (case study, and the probe run) |
-| HTTP GET the input | `urllib.request` completed a round trip to an external host |
-| Analyzit cleaning | 91 skills installed and enabled |
-| HTTP PUT the artefact | Same library, same tool |
-| HMAC-SHA256 signing | Digest reproduced exactly, byte for byte |
-| POST the callback | HTTP 200 from `http://probe:9999/` |
-| Report success/failure | Same channel |
+| `terminal` | **Absent** |
+| Filesystem read | **Absent** — it cannot open `/opt/data/dataengine-job-prompt.md` |
+| Outbound HTTP | **Absent** — a controlled listener logged zero requests |
+| Analyzit plugin tools | **Absent** — never fired on any delivery |
+| Supabase MCP | **Present**, and working |
 
-The tool is **`terminal`**, running Python with the standard library —
-`urllib.request` for HTTP, `hmac` and `hashlib` for signatures. No third-party
-package is needed and none should be installed.
+The mechanism is a platform→toolset binding, not anything on the route.
+`hermes_cli/platforms.py` gives the webhook platform a `default_toolset` of
+`hermes-webhook`, and the gateway's `config.yaml` has no `platform_toolsets:
+webhook:` entry to override it. Three things follow that cost a day to learn:
 
-That is more capable than a constrained HTTP tool would have been: the whole job
-loop can run as one script, which is why `dataengine-job-prompt.md` gives a concrete skeleton
-for the callback rather than describing it. The single failure mode worth
-guarding is serialising the body twice — signing one JSON encoding and posting
-another produces a valid-looking signature that never verifies, and reads as a
-wrong secret. The skeleton serialises once, on purpose.
+- **`--skills` is not a tool grant.** Skills are prompt context. Recreating the
+  route with no skills at all changed the tool inventory not at all.
+- **The failure does not look like a failure.** With no tools and no human, the
+  turn asks a clarifying question and spins to its iteration ceiling. DataEngine
+  receives a question where it expects a result. `analyzit-workbook-upload` has
+  dead-ended this way on every delivery since 2026-08-25 and was assumed to work.
+- **`ask` works only because it needs nothing else.** Its whole job is one
+  `execute_sql`, and the Supabase MCP is the one tool the webhook toolset carries.
 
-One incidental finding: the agent could not fetch this repository's README over
-HTTP, because the repository is private. That is correct and should stay that
-way — nothing in this integration requires the agent to read the source. Do not
-grant it repository access to make a test pass.
+So `route-prompt.txt` and `dataengine-job-prompt.md` describe work the receiving
+turn cannot perform. Both are written against `terminal`: read the spec off
+disk, GET the input, PUT the artefacts, sign and POST the callback. Every one of
+those is unavailable. Nothing in this integration will run until the toolset
+question below is settled — and it is a decision, not a bug fix.
+
+### The toolset grant is a security decision
+
+`platform_toolsets` is keyed by **platform, not route** — the webhook store holds
+seven fields per route and none of them is a toolset. So adding `terminal` for
+`dataengine-job` adds it for *every* webhook route on that gateway, present and
+future, including routes the agent creates for itself (`ask` is one).
+
+That has to be weighed against what those turns already hold. The Supabase MCP
+in the webhook toolset is not a database API key. It is a **Management-API OAuth
+credential** (issuer `api.supabase.com`, tokens under `/opt/data/mcp-tokens/`)
+exposing ~20 project-admin tools including `execute_sql`, `apply_migration` and
+`deploy_edge_function`. It runs at admin identity, so **RLS does not constrain
+it** — RLS binds the `anon` and `authenticated` roles behind PostgREST, and this
+connection is neither.
+
+Which means the claim made further up this file — that the agent holds no
+Supabase credentials and the signed URLs are the whole of its access — is **true
+of the `dataengine-job` design and false of the box it runs on**. Tenant
+isolation for `ask` today rests on its prompt saying which `workspace_id` to
+touch and a `WHERE request_id = …` clause. Nothing at the credential or database
+layer would stop that turn writing another firm's rows.
+
+Fix that before granting anything further. Adding shell to a session that
+already holds project-admin SQL is a different proposition from adding shell.
 
 ## A hazard on the agent's disk
 
