@@ -58,8 +58,15 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+          cache-dependency-path: apps/web/package-lock.json
 
+      # Two package.json files and no npm workspaces: the root holds the
+      # tooling for `scripts/`, and apps/web holds the app. Installing only the
+      # root leaves next and @types/* absent, `npx` fetches a bare next, and
+      # typegen fails on missing type packages -- which is exactly how this job
+      # failed on its first six runs.
       - name: Install
+        working-directory: apps/web
         run: npm ci
 
       # Next generates the route/layout/page prop types, and tsc cannot resolve
