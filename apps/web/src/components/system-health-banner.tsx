@@ -1,4 +1,4 @@
-import { getSystemHealth } from '@/lib/system-health';
+import { getSystemHealth, type SystemHealth } from '@/lib/system-health';
 
 /**
  * Says when the model has stopped running, and nothing at all when it has not.
@@ -22,31 +22,39 @@ import { getSystemHealth } from '@/lib/system-health';
  * Admins only. A member cannot act on this and does not need to read that the
  * system they are relying on is having a bad afternoon.
  */
-export async function SystemHealthBanner({ role }: { role: string }) {
+export async function SystemHealthBanner({
+  role,
+  health: provided,
+}: {
+  role: string;
+  /** Passed in by the shell, which already read it for the sidebar status.
+      Two reads of the same row per page load is one too many. */
+  health?: SystemHealth;
+}) {
   if (role !== 'owner' && role !== 'admin') return null;
 
-  const health = await getSystemHealth();
+  const health = provided ?? (await getSystemHealth());
   if (health.state === 'ok') return null;
 
   const degraded = health.state === 'degraded';
 
   const tone = degraded
-    ? 'border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200'
-    : 'border-black/15 bg-black/5 text-black/80 dark:border-white/20 dark:bg-white/5 dark:text-white/80';
+    ? 'border-warning/30 bg-warning-soft text-warning'
+    : 'border-border bg-surface-2 text-muted';
 
   const kinds = Object.entries(health.degradedKinds);
   const total = kinds.reduce((sum, [, n]) => sum + n, 0);
 
   return (
-    <div role="status" className={`border-b px-6 py-2.5 text-sm ${tone}`}>
-      <div className="mx-auto flex max-w-5xl flex-wrap items-baseline gap-x-3 gap-y-1">
+    <div role="status" className={`border-b px-5 py-2.5 text-sm sm:px-8 ${tone}`}>
+      <div className="mx-auto flex max-w-6xl flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="font-semibold">
           {degraded ? 'AI explanations are running without a model' : 'Model status unknown'}
         </span>
 
         {degraded ? (
           <>
-            <span className="opacity-90">
+            <span>
               {total} job{total === 1 ? '' : 's'} in the last 24 hours answered from the rule
               engine
               {kinds.length > 0 && (
@@ -62,17 +70,17 @@ export async function SystemHealthBanner({ role }: { role: string }) {
               . Results are still correct; the wording is plainer.
             </span>
             {health.degradedSince && (
-              <span className="opacity-70">
+              <span className="text-subtle">
                 since {new Date(health.degradedSince).toLocaleString('en-GB')}
               </span>
             )}
           </>
         ) : (
-          <span className="opacity-90">{health.reason}</span>
+          <span>{health.reason}</span>
         )}
 
         {health.workerId && (
-          <span className="ml-auto font-mono text-xs opacity-60">
+          <span className="ml-auto font-mono text-xs text-subtle">
             {health.workerId}
             {health.secondsSinceHeartbeat !== null && ` · ${health.secondsSinceHeartbeat}s ago`}
           </span>
