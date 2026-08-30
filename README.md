@@ -43,8 +43,65 @@ no TLS certificate; it dials out to Supabase and nothing dials in. A reboot or a
 work rather than losing it, because a claimed job whose lease expires simply becomes claimable
 again.
 
+The worker does the computation and the reasoning separately. Parsing, profiling and cleaning are
+deterministic Polars and DuckDB over the customer's rows. The judgment calls — why a proposal
+matters, what a typed question means, which spellings are the same supplier, how the month reads —
+go out to a Hermes profile over its OpenAI-compatible API server:
+
+```
+  worker ──▶ http://<agent>:8642/p/dataengine-supervisor/v1/chat/completions
+```
+
+Rows never make that trip. `llm/redact.py` builds the only context a model is allowed to see:
+names, types, counts, ranges, totals and a handful of frequent values. Every call degrades to the
+rule engine if the model is unreachable, so the agent host being down delays nothing and fails
+nothing — it only makes the explanations plainer.
+
 See [`services/hermes/README.md`](./services/hermes/README.md) for what it does and how to run it
 24/7 on a VPS.
+
+## Where the tenant boundary is, and is not
+
+Two accounting firms share one database, so it is worth being exact about which parts of that
+boundary a machine enforces and which parts people maintain.
+
+**Enforced by the database.** `enqueue_agent_job` is `SECURITY DEFINER` and re-checks membership
+itself rather than trusting its caller, then verifies that the dataset, upload and version named in
+a job all belong to the named workspace. Storage policies read the tenant out of the first two path
+segments. The write RPCs re-derive org and workspace from the dataset rather than the payload, so a
+result cannot name a tenancy it was not given. RLS covers every table reached with a user session.
+
+**Enforced by structure.** The model never computes and never decides. It is handed a `Profile`,
+not a table, and there is no code path from a row to a prompt. For a question it emits a structured
+query that `analyze.compile_query` validates against the real column list before any SQL exists, so
+an invented column fails loudly instead of returning something plausible.
+
+**Maintained by convention.** The worker authenticates with the Supabase service-role key, which
+bypasses RLS. Its reads are correct because `enqueue_agent_job` validated the job row, not because
+the database would refuse a wrong one. `_load_version` in `hermes/jobs.py` selects by id with no
+workspace filter; a job row inserted directly with the service key, bypassing enqueue, would not be
+caught.
+
+### Recorded limitation
+
+> Current Phase 1 implementation uses the existing service-role/database authorization model. This
+> is not the final enterprise tenant-isolation architecture. Before significant customer scale or
+> high-sensitivity production deployment, introduce database-enforced workspace isolation and
+> narrowly scoped worker credentials.
+
+This is a deliberate Phase 1 trade, not an oversight. The shape of the fix is known: an
+`agent_worker` Postgres role with RLS policies keyed on a workspace claim, and a short-lived JWT
+minted per job carrying the workspace id **from the claimed row, never from the payload**, leaving
+`service_role` for the queue RPCs that legitimately span tenants. A wrong id in a payload then
+reads zero rows rather than another firm's, and so does a forgotten `where` clause, and so does a
+future bug.
+
+Two operational secrets belong to the same tier as the service-role key and should be handled the
+same way — generated once, never echoed, never logged, never published on a host port:
+
+- `SUPABASE_SECRET_KEY`, which bypasses RLS.
+- `API_SERVER_KEY`, which authenticates to the Hermes API server. That server grants terminal
+  access to its host, so an exposed port is a remote shell rather than a leaked model quota.
 
 ## Running it
 
