@@ -52,6 +52,10 @@ class Worker:
         # than as healthy -- a monitor that defaults to "fine" is a monitor
         # that lies for its first interval.
         self._health = health.HealthReport(checked=False, error="not yet checked")
+        # Last state actually announced to the webhook. None until the first
+        # successful check, which is what keeps a restart from re-announcing a
+        # fault somebody is already dealing with.
+        self._notified_state: str | None = None
 
         # HANDLERS is the single source of truth for what this build can run.
         # An empty config means "all of it"; a configured subset is checked
@@ -116,8 +120,8 @@ class Worker:
 
     def check_health(self) -> None:
         """
-        Re-read the degradation view and shout if anything is answering
-        without a model.
+        Re-read the degradation view, shout if anything is answering without a
+        model, and notify out of band when that changes.
 
         Far less often than the heartbeat: this is a slow-moving condition --
         once the model stops running it stays stopped until somebody fixes it
@@ -126,6 +130,51 @@ class Worker:
         """
         self._health = health.check(self.supabase)
         health.log_report(self._health)
+        self._notify_health_change()
+
+    def _notify_health_change(self) -> None:
+        """
+        Post to the alert webhook, but only when the answer has changed.
+
+        **Edge-triggered, deliberately.** A level-triggered alert on a condition
+        that lasts twenty-four hours would fire a hundred and forty-four times,
+        and the third one is where somebody mutes the channel. Firing on the
+        transition means the message arrives once, when it is news.
+
+        **`unknown` is not notified.** A check that could not run is logged and
+        shown in the dashboard banner, and it is usually transient -- a blip
+        reaching the database. Paging somebody for it would spend the channel's
+        credibility on a condition that fixes itself, and the same blip stops
+        the worker claiming jobs anyway, which is noticed by louder means.
+
+        **Recovery is notified.** Being told a fault has cleared is what stops
+        somebody driving to a laptop on a Sunday.
+        """
+        url = self.config.alert_webhook_url
+        if not url or not self._health.checked:
+            return
+
+        state = "degraded" if self._health.degraded else "ok"
+        previous = self._notified_state
+
+        if state == previous:
+            return
+
+        # Nothing to announce about a system that came up healthy; the first
+        # interesting transition is into trouble. Coming up *into* trouble is
+        # worth saying, so that case is not suppressed.
+        if previous is None and state == "ok":
+            self._notified_state = state
+            return
+
+        payload = health.build_alert(self._health, recovered=(state == "ok"))
+        if payload and health.send_alert(url, payload):
+            log.info("health alert sent: %s -> %s", previous or "startup", state)
+
+        # Recorded whether or not delivery succeeded. Retrying a failed webhook
+        # on the next pass would turn one unreachable endpoint into an alert
+        # every ten minutes for as long as the fault lasts.
+        self._notified_state = state
 
     def claim(self) -> dict[str, Any] | None:
         claimed = self.supabase.rpc(

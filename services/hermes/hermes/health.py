@@ -160,6 +160,71 @@ def _within_window(timestamp: str | None, cutoff: datetime) -> bool:
     return parsed >= cutoff
 
 
+def build_alert(report: HealthReport, recovered: bool) -> dict[str, Any] | None:
+    """
+    The message body, or None when there is nothing worth sending.
+
+    Carries `text` and `content` with the same sentence because Slack reads the
+    first and Discord the second, and anything else reading JSON gets the
+    structured fields alongside. One payload, three destinations, no adapter.
+
+    Nothing customer-identifying goes out. Job kinds are schema, counts are
+    integers; no workspace, dataset, filename or figure appears -- an alert
+    channel is usually a group chat, and this one describes an operational
+    fault rather than anybody's books.
+    """
+    if recovered:
+        text = "DataEngine: AI explanations are back on the model."
+        return {
+            "text": text, "content": text,
+            "status": "ok", "service": "dataengine-worker",
+        }
+
+    if not report.degraded:
+        return None
+
+    parts = ", ".join(f"{d.kind} x{d.degraded}" for d in report.degraded)
+    since = min(
+        (d.first_degraded_at for d in report.degraded if d.first_degraded_at),
+        default=None,
+    )
+    text = (
+        f"DataEngine: AI explanations are running WITHOUT a model ({parts}). "
+        f"Jobs still succeed and figures are still correct -- the wording is "
+        f"plainer. Since {since or 'unknown'}. Check the worker can reach the "
+        f"agent's network; see docs/RUNBOOK.md."
+    )
+    return {
+        "text": text, "content": text,
+        "status": "degraded", "service": "dataengine-worker",
+        "kinds": {d.kind: d.degraded for d in report.degraded},
+        "since": since,
+    }
+
+
+def send_alert(url: str, payload: dict[str, Any], timeout: float = 10.0) -> bool:
+    """
+    Post the alert. Never raises.
+
+    A monitor that can take the worker down is worse than no monitor: this runs
+    inside the loop that processes an accountant's month-end, and an unreachable
+    webhook must cost a log line, not a job.
+    """
+    try:
+        import httpx
+
+        response = httpx.post(url, json=payload, timeout=timeout)
+        if response.status_code >= 400:
+            # The URL is never logged -- a webhook URL is a bearer credential
+            # for most providers, and log files travel further than they should.
+            log.warning("health alert rejected by webhook: HTTP %s", response.status_code)
+            return False
+        return True
+    except Exception as error:  # noqa: BLE001 - an alert must never break the loop
+        log.warning("health alert could not be delivered: %s", type(error).__name__)
+        return False
+
+
 def log_report(report: HealthReport) -> None:
     """
     Say it once, at a level that stands out in `docker logs`.

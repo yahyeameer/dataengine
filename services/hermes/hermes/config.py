@@ -153,6 +153,9 @@ class Config:
     # How often to re-read the LLM degradation view. Slow-moving condition, and
     # a warning repeated every thirty seconds is one people learn to ignore.
     health_check_seconds: int = 600
+    # Where to post when the model stops running. Unset means no webhook and no
+    # behaviour change -- the log and the dashboard banner still report it.
+    alert_webhook_url: str = ""
     # Sleep between claim attempts when the queue is empty. Postgres LISTEN
     # would be tighter, but a 3-second poll on an idle queue is a negligible
     # cost against a job that takes minutes, and it survives connection drops
@@ -221,6 +224,7 @@ def load_config() -> Config:
         lease_seconds=_int("HERMES_LEASE_SECONDS", 300),
         heartbeat_seconds=_int("HERMES_HEARTBEAT_SECONDS", 30),
         health_check_seconds=_int("HERMES_HEALTH_CHECK_SECONDS", 600),
+        alert_webhook_url=os.environ.get("HERMES_ALERT_WEBHOOK_URL", "").strip(),
         poll_seconds=_int("HERMES_POLL_SECONDS", 3),
         max_download_bytes=_int("HERMES_MAX_DOWNLOAD_BYTES", 50 * 1024 * 1024),
         work_dir=work_dir,
