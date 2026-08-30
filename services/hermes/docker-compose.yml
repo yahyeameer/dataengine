@@ -38,6 +38,16 @@ services:
       # cleans it up.
       - hermes-work:/var/lib/hermes
 
+    networks:
+      # The Hermes agent's network, so the worker can reach its API server for
+      # the reasoning calls. Declared here rather than attached by hand after
+      # the fact, because the failure mode of forgetting is silent: the worker
+      # starts, claims, parses and succeeds, and every explanation quietly
+      # comes from the rule engine instead of the model. Nothing errors, no job
+      # fails, and the only symptom is plainer prose that looks like a working
+      # system. A reboot must not be able to cause that.
+      - hermes
+
     # A single 1 GB VPS is the target. The parser holds a workbook in memory
     # while it reads it, so the cap is set above the 50 MB upload limit with
     # room for Arrow's buffers -- and set at all so that one pathological file
@@ -73,3 +83,10 @@ services:
 
 volumes:
   hermes-work:
+
+networks:
+  # External: the agent's gateway owns this network, not us. Named through a
+  # variable because the agent's compose project name is not ours to depend on.
+  hermes:
+    external: true
+    name: ${HERMES_NETWORK:-hermes-agent-bwlq_default}
