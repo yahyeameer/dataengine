@@ -1,0 +1,106 @@
+# CI for DataEngine.
+#
+# The tests already existed and were good; nothing ran them. That is the gap
+# this closes, and it is deliberately the whole scope -- a pipeline that tries
+# to do everything on day one is a pipeline people start skipping.
+#
+# Two jobs, because they fail for different reasons and a red build should say
+# which half broke without anyone opening the log.
+
+name: CI
+
+on:
+  push:
+    branches: [main, hermes-main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push supersedes the first. Nobody needs the results of a commit that
+# has already been replaced.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  worker:
+    name: Worker (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: services/hermes/requirements.txt
+
+      - name: Install
+        working-directory: services/hermes
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Test
+        working-directory: services/hermes
+        run: python -m pytest tests/ -q
+
+  web:
+    name: Web (TypeScript)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Next generates the route/layout/page prop types, and tsc cannot resolve
+      # LayoutProps or PageProps without them. `typegen` produces exactly those
+      # without running a full build -- which would need the Supabase env, and
+      # that does not belong in CI secrets for a check whose whole job is
+      # catching a bad type.
+      - name: Generate route types
+        working-directory: apps/web
+        run: npx next typegen
+
+      - name: Typecheck
+        working-directory: apps/web
+        run: npx tsc --noEmit --skipLibCheck
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # No .env has ever been committed and that property is worth keeping.
+      # Cheap, exact, and fails loudly rather than warning.
+      # `.env.example` and `.env.docker.example` are documentation and belong in
+      # the repo; anything else named .env does not. Matching on the suffix
+      # rather than the prefix is what keeps that distinction correct.
+      - name: No committed .env files
+        run: |
+          if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -v '\.example$'; then
+            echo "::error::a .env file is tracked in git"
+            exit 1
+          fi
+          echo "no tracked .env files (examples excluded)"
+
+      - name: No key-shaped strings in source
+        run: |
+          if git grep -nIE '(sk-[a-zA-Z0-9]{20,}|AIza[0-9A-Za-z_-]{30,}|ghp_[A-Za-z0-9]{30,}|sbp_[a-f0-9]{40,})' \
+               -- ':!package-lock.json' ':!*.lock'; then
+            echo "::error::a credential-shaped string is committed"
+            exit 1
+          fi
+          echo "no key-shaped strings found"
