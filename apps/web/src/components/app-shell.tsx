@@ -191,7 +191,7 @@ function EngineStatus({ state }: { state: 'ok' | 'degraded' | 'unknown' }) {
   // Same words as the workspace panel's engine strip. The frame said
   // "Operational" while the panel on the page said "Running without a model",
   // about the same worker, from the same row.
-  const label = { ok: 'Connected', degraded: 'No model', unknown: 'Unknown' }[state];
+  const label = { ok: 'Connected', degraded: 'Degraded', unknown: 'Unknown' }[state];
   const dot = {
     ok: 'bg-success',
     degraded: 'bg-warning',

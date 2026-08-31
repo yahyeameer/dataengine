@@ -41,9 +41,13 @@ export function isWorkerOnline(lastSeenAt: string | null | undefined): boolean {
  *
  * So:
  *
- * - `connected` — heartbeat fresh, and the worker says the model is running.
- * - `degraded`  — heartbeat fresh, but work is being answered without a model.
- *                 Results are still correct; the reasoning is the rule engine's.
+ * - `connected` — heartbeat fresh, and no job has fallen back to the rule
+ *                 engine in the last 24 hours.
+ * - `degraded`  — heartbeat fresh, but at least one job in the last 24 hours
+ *                 was answered without a model. Note the tense: this is a
+ *                 windowed record, not a live reachability probe, so it can be
+ *                 true while the model is reachable again. Saying "running
+ *                 without a model" in the present tense overstated it.
  * - `offline`   — no worker has heartbeated inside the window. Work queues.
  * - `unknown`   — a worker is alive but could not determine its own health, or
  *                 no worker has ever reported. Not the same claim as healthy,
@@ -83,7 +87,7 @@ export function engineStateFor(workers: EngineWorker[]): EngineState {
 
 export const ENGINE_STATE_LABELS: Record<EngineState, string> = {
   connected: 'Engine connected',
-  degraded: 'Running without a model',
+  degraded: 'Engine degraded',
   offline: 'Engine offline',
   unknown: 'Engine status unknown',
 };
@@ -92,7 +96,7 @@ export const ENGINE_STATE_LABELS: Record<EngineState, string> = {
 export const ENGINE_STATE_DETAIL: Record<EngineState, string> = {
   connected: '',
   degraded:
-    'Work is being answered by the rule engine instead of the model. Figures are still correct; the explanations are plainer.',
+    'At least one job in the last 24 hours was answered by the rule engine rather than the model. Figures are still correct; those explanations are plainer.',
   offline:
     'Nothing will run until it reconnects. Anything you ask for is queued and picked up automatically.',
   unknown:

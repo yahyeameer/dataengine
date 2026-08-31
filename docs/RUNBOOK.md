@@ -214,6 +214,26 @@ docker compose up -d --force-recreate      # --force-recreate: a changed
 
 Slack and Discord incoming webhooks both work as-is, as does anything that
 accepts JSON — the payload carries `text` and `content` with the same sentence.
+Those URLs authenticate by being secret, so no signature is sent.
+
+**A Hermes webhook route is different: there the HMAC *is* the authentication,
+and an unsigned POST gets `401 {"error": "Invalid signature"}`.** Set
+`HERMES_ALERT_WEBHOOK_SECRET` to that route's own secret and the worker signs
+with the documented V2 scheme — HMAC-SHA256 over `<timestamp>.<body>`, sent as
+`X-Webhook-Signature-V2` with `X-Webhook-Timestamp`. Production is wired this
+way, to a route bound to the supervisor profile:
+
+```bash
+HERMES_ALERT_WEBHOOK_URL=http://172.16.0.2:8644/p/dataengine-supervisor/webhooks/dataengine-health
+HERMES_ALERT_WEBHOOK_SECRET=<the dataengine-health route's secret>
+```
+
+Read the secret from the store rather than inventing one; the route and the
+worker must hold the same value:
+
+```bash
+docker exec hermes-agent-bwlq-hermes-agent-1 python3 -c   "import json;print(json.load(open('/opt/data/webhook_subscriptions.json'))['dataengine-health']['secret'])"
+```
 
 **It sends once when a fault starts and once when it clears.** A lasting fault
 does not re-send; verified in production at 5 checks to 1 alert. `unknown` is
@@ -226,10 +246,95 @@ Confirm it is live:
 docker exec hermes-hermes-1 python -c   "from hermes.config import load_config; print(bool(load_config().alert_webhook_url))"
 ```
 
-To test delivery without waiting for a real fault, run a listener on the host
-and point the worker at `http://172.16.0.1:<port>/` — the docker bridge gateway
-is reachable from the container. Remove it afterwards: a webhook pointing at a
-dead endpoint fails silently, which is the exact failure this is meant to catch.
+To test delivery without waiting for a real fault, send one through the
+worker's own signer — which exercises the secret, the URL and the profile
+binding in one go:
+
+```bash
+docker exec hermes-hermes-1 python3 -c "
+import os,sys; sys.path.insert(0,'/app')
+from hermes import health
+print(health.send_alert(os.environ['HERMES_ALERT_WEBHOOK_URL'],
+      {'text':'probe','status':'ok','service':'dataengine-worker'},
+      secret=os.environ['HERMES_ALERT_WEBHOOK_SECRET']))" < /dev/null
+```
+
+`True` means the gateway accepted it. Prove the authentication is real by
+sending the same payload with `secret=''`: it must return `False` and log
+`HTTP 401`. A webhook that accepts an unsigned body is not authenticated.
+
+---
+
+## The gateway: one process, four profiles
+
+`hermes gateway list` reports **processes**, not the profiles a running gateway
+*serves*. On this box that reads:
+
+```
+✓ default (current)        — PID …
+✗ dataengine-supervisor    — not running
+```
+
+and both lines are true and neither is a fault. `gateway.multiplex_profiles` is
+on in `/opt/data/config.yaml` with the three `dataengine-*` profiles
+allowlisted, so the single `default` gateway serves all of them at
+`/p/<profile>/webhooks/<route>`.
+
+**Do not run `hermes -p dataengine-supervisor gateway start`,** however plainly
+the dashboard suggests it. There is one production gateway and one port 8644; a
+second process contends for it. The gateway is supervised by s6 inside the
+agent container (`/run/service/gateway-default`) and the container is
+`restart: unless-stopped`, so it comes back on its own — measured at ~37
+seconds after `docker restart`, with a fresh PID and 8644 serving again.
+
+The per-profile s6 service directories exist with a `down` flag and are
+deliberately disabled. They live in `/run`, so a container restart clears them.
+
+To check the gateway is *actually* up, probe the port from the container that
+calls it rather than reading a status label:
+
+```bash
+docker exec dataengine-web-1 node -e '
+const net=require("net");const s=net.connect({host:"172.16.0.2",port:8644});
+s.setTimeout(4000);
+s.on("connect",()=>{console.log("8644 OPEN");s.end()});
+s.on("timeout",()=>{console.log("8644 TIMEOUT");s.destroy()});
+s.on("error",e=>console.log("8644",e.code));'
+```
+
+---
+
+## Webhook routes and their secrets
+
+Hermes stores the HMAC secret **per route**, not per gateway
+(`route_config.get("secret", global_secret)`). One shared secret can only ever
+be correct for one route — which is how chat returned 401 for two days while
+job dispatch through the same gateway succeeded.
+
+Compare fingerprints, never values:
+
+```bash
+docker exec hermes-agent-bwlq-hermes-agent-1 python3 -c "
+import json,hashlib
+d=json.load(open('/opt/data/webhook_subscriptions.json'))
+for k,v in sorted(d.items()):
+    print(f'{k:26s} fp={hashlib.sha256(v.get(\"secret\",\"\").encode()).hexdigest()[:16]} profile={v.get(\"profile\",\"(default)\")}')"
+```
+
+against what the web app sends:
+
+```bash
+docker exec dataengine-web-1 node -e "
+const c=require('crypto');
+const fp=s=>s?c.createHash('sha256').update(s).digest('hex').slice(0,16):'(unset)';
+console.log('ask', fp(process.env.HERMES_ASK_SECRET||process.env.HERMES_WEBHOOK_SECRET));
+console.log('job', fp(process.env.HERMES_JOB_SECRET||process.env.HERMES_WEBHOOK_SECRET));"
+```
+
+A route's `profile` field binds it to one profile and **fails closed**: with
+`profile: dataengine-supervisor` the route answers only at
+`/p/dataengine-supervisor/webhooks/<name>` and returns 404 at the unprefixed
+path. Omitting the field binds the route to `default`.
 
 ---
 

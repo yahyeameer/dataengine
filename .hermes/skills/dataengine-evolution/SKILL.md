@@ -303,6 +303,38 @@ Worked examples from this system:
 > **Correct:** toolsets are bound per platform.
 > **Rule:** prove a capability in the exact session type that will use it.
 
+> **Assumed:** one gateway means one HMAC secret, so a 401 on one route means
+> the secret is wrong everywhere.
+> **Evidence:** `/webhooks/dataengine-job` returned 202 and `/webhooks/ask`
+> returned 401 in the same second, from the same container, with the same
+> header and the same secret. `_handle_webhook` resolves
+> `route_config.get("secret", global_secret)`.
+> **Correct:** Hermes keys the secret to the **route**. A shared secret can
+> only ever be right for one of them.
+> **Rule:** compare secret *fingerprints* per route before touching a secret.
+> A symptom that looks intermittent across a product is often deterministic
+> per route — ask which route, not which hour.
+
+> **Assumed:** "the gateway is stopped" because the dashboard and
+> `hermes -p dataengine-supervisor gateway status` both say so.
+> **Evidence:** port 8644 was open and serving from the web container the whole
+> time; `gateway.multiplex_profiles` was on with the three dataengine profiles
+> allowlisted, and the `default` gateway was serving all of them.
+> **Correct:** `gateway list` enumerates gateway *processes*, not the profiles
+> a running gateway *serves*. A multiplexing deployment has one process and
+> N-1 profiles that correctly report "not running".
+> **Rule:** never run `hermes -p <profile> gateway start` on this box to
+> satisfy that message. There is one production gateway; a second would
+> contend for 8644. Test the port, not the label.
+
+> **Assumed:** the worker heartbeats every 30 seconds, so a stale
+> `last_seen_at` means the worker is down.
+> **Evidence:** `run_job()` blocks the same loop that calls `announce()`, and a
+> `propose_cleaning` turn outlasts the dashboard's 90-second threshold.
+> **Correct:** the row went stale *because* the worker was busy.
+> **Rule:** a liveness signal emitted only between units of work reports the
+> opposite of the truth under load. Emit it from inside the work.
+
 ---
 
 ## Before you say it is done
@@ -317,3 +349,6 @@ Worked examples from this system:
 - [ ] Verified in the running deployment, not just the source tree
 - [ ] Every claim labelled verified / measured / inferred / estimated / unverified
 - [ ] Anything you did not check is listed as unverified
+- [ ] For an auth failure: secret fingerprints compared per route, not per gateway
+- [ ] For a "service down" claim: the port probed from the calling container,
+      not the status label read from a CLI or dashboard
