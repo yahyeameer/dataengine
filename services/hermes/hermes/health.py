@@ -25,7 +25,11 @@ should cost less to run than the failure it catches.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -202,21 +206,70 @@ def build_alert(report: HealthReport, recovered: bool) -> dict[str, Any] | None:
     }
 
 
-def send_alert(url: str, payload: dict[str, Any], timeout: float = 10.0) -> bool:
+def sign_alert(secret: str, body: bytes) -> dict[str, str]:
+    """
+    The headers a Hermes generic-webhook route requires.
+
+    The V2 scheme from the Hermes webhook documentation: HMAC-SHA256 over
+    ``<timestamp>.<body>``, sent as ``X-Webhook-Signature-V2`` alongside
+    ``X-Webhook-Timestamp``. The gateway selects V2 purely on the presence of
+    the signature header, and rejects it outright when the timestamp is absent
+    -- so the two are always sent together or not at all.
+
+    Seconds, not milliseconds. A receiver enforcing a replay window reads a
+    millisecond timestamp as a date tens of thousands of years out and rejects
+    it with the same 401 a wrong digest produces.
+    """
+    timestamp = str(int(time.time()))
+    signed = timestamp.encode() + b"." + body
+    digest = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
+    return {
+        "Content-Type": "application/json",
+        "X-Webhook-Timestamp": timestamp,
+        "X-Webhook-Signature-V2": digest,
+        "X-Webhook-Event": "worker.health",
+    }
+
+
+def send_alert(
+    url: str,
+    payload: dict[str, Any],
+    timeout: float = 10.0,
+    secret: str = "",
+) -> bool:
     """
     Post the alert. Never raises.
 
     A monitor that can take the worker down is worse than no monitor: this runs
     inside the loop that processes an accountant's month-end, and an unreachable
     webhook must cost a log line, not a job.
+
+    Signed when a secret is configured. This posted a bare unsigned body until
+    now, which is fine for a Slack-style URL where the URL *is* the credential,
+    and is a guaranteed ``401 {"error": "Invalid signature"}`` against a Hermes
+    route, where authentication is the HMAC. Both destinations are legitimate,
+    so the signature is added when there is a secret to sign with rather than
+    always or never.
+
+    The body is serialised once and both signed and posted, because the digest
+    covers exact bytes: re-serialising for the request could reorder keys and
+    invalidate a signature that was correct when it was computed.
     """
     try:
         import httpx
 
-        response = httpx.post(url, json=payload, timeout=timeout)
+        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+        headers = (
+            sign_alert(secret, body)
+            if secret
+            else {"Content-Type": "application/json"}
+        )
+
+        response = httpx.post(url, content=body, headers=headers, timeout=timeout)
         if response.status_code >= 400:
             # The URL is never logged -- a webhook URL is a bearer credential
             # for most providers, and log files travel further than they should.
+            # Nor is the body: the signature is derived from the secret.
             log.warning("health alert rejected by webhook: HTTP %s", response.status_code)
             return False
         return True

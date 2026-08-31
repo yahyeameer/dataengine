@@ -56,6 +56,10 @@ class Worker:
         # successful check, which is what keeps a restart from re-announcing a
         # fault somebody is already dealing with.
         self._notified_state: str | None = None
+        # When the worker row was last refreshed. Shared by the main loop and
+        # the in-job progress callback so a long job keeps the row fresh
+        # without either path double-writing it.
+        self._last_announce: float = 0.0
 
         # HANDLERS is the single source of truth for what this build can run.
         # An empty config means "all of it"; a configured subset is checked
@@ -168,7 +172,9 @@ class Worker:
             return
 
         payload = health.build_alert(self._health, recovered=(state == "ok"))
-        if payload and health.send_alert(url, payload):
+        if payload and health.send_alert(
+            url, payload, secret=self.config.alert_webhook_secret
+        ):
             log.info("health alert sent: %s -> %s", previous or "startup", state)
 
         # Recorded whether or not delivery succeeded. Retrying a failed webhook
@@ -211,7 +217,33 @@ class Worker:
                 # another worker will have taken the job -- which is correct.
                 log.warning("heartbeat for %s failed: %s", job_id, error)
 
+            # The worker row too, not only the job row.
+            #
+            # `run_job` blocks the loop that calls `announce()`, so a job longer
+            # than the dashboard's 90-second staleness threshold made the
+            # engine read "offline" -- at exactly the moment it was busiest.
+            # A propose_cleaning turn against the model routinely takes longer
+            # than that, so the indicator was reporting the opposite of the
+            # truth on every substantial job.
+            #
+            # Rate-limited to the heartbeat interval so a chatty progress
+            # callback cannot turn one job into hundreds of writes.
+            self._announce_if_due()
+
         return heartbeat
+
+    def _announce_if_due(self) -> None:
+        """Refresh the worker row if a heartbeat interval has passed."""
+        now = time.monotonic()
+        if now - self._last_announce < self.config.heartbeat_seconds:
+            return
+        try:
+            self.announce()
+            self._last_announce = now
+        except SupabaseError as error:
+            # Same reasoning as above: a missed heartbeat is a stale indicator,
+            # never a reason to abandon an accountant's job.
+            log.warning("worker heartbeat failed: %s %s", error.status, error.body)
 
     def finish(
         self,
@@ -315,7 +347,7 @@ class Worker:
         # full interval.
         self.check_health()
 
-        last_announce = time.monotonic()
+        self._last_announce = time.monotonic()
         last_health = time.monotonic()
         backoff = self.config.poll_seconds
 
@@ -326,9 +358,7 @@ class Worker:
                     self.check_health()
                     last_health = now
 
-                if now - last_announce >= self.config.heartbeat_seconds:
-                    self.announce()
-                    last_announce = now
+                self._announce_if_due()
 
                 job = self.claim()
 

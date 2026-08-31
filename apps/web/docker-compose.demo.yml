@@ -38,6 +38,18 @@ services:
       SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:?set in .env}
       HERMES_WEBHOOK_URL: ${HERMES_WEBHOOK_URL:?set in .env}
       HERMES_WEBHOOK_SECRET: ${HERMES_WEBHOOK_SECRET:?set in .env}
+      # Hermes keys the HMAC secret to the *route*, not to the gateway. One
+      # shared secret can only ever be right for one route: it was right for
+      # dataengine-job, so job dispatch worked and every question returned 401.
+      # Unset falls back to HERMES_WEBHOOK_SECRET, so a gateway with a single
+      # global secret is unaffected.
+      HERMES_ASK_SECRET: ${HERMES_ASK_SECRET:-}
+      HERMES_JOB_SECRET: ${HERMES_JOB_SECRET:-}
+      # Selects /p/<profile>/webhooks/<route>. Empty means the unprefixed path,
+      # which the gateway serves from the `default` profile. Only set this once
+      # the route's own JSON names the same profile — the adapter fails closed
+      # with a 404 when the two disagree.
+      HERMES_GATEWAY_PROFILE: ${HERMES_GATEWAY_PROFILE:-}
       HERMES_WEBHOOK_SIGNING: ${HERMES_WEBHOOK_SIGNING:-github}
       HERMES_JOB_ROUTE: ${HERMES_JOB_ROUTE:-dataengine-job}
       HERMES_WORKER_ID: ${HERMES_WORKER_ID:-hermes-agent}

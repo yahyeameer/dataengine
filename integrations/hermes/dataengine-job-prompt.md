@@ -8,13 +8,17 @@ never uploaded and never reported is the same to the customer as no work at all.
 Everything you need is in the webhook body. Take the workspace, the dataset, the
 file and the destinations from it and from nowhere else.
 
-In particular: `/opt/data` holds a checkout of **AI-Data-Operations-Platform**.
-That is a different, abandoned project that happens to share this one's
-vocabulary -- the same job kinds, a `hermes` module, a tool layer at
-`/api/tools/{tool}` that was designed and never built. Reading it for context
-will hand you a contract that no longer exists and send results somewhere
-nothing is listening. Do not consult it. The live project is `dataengine`, and
-you do not need its source to do this work.
+In particular: `/opt/data` holds `aidops-idriss`, a checkout of a fork of
+**AI-Data-Operations-Platform**. That is a different, abandoned project that
+happens to share this one's vocabulary -- the same job kinds, a `hermes`
+module, a tool layer at `/api/tools/{tool}` that was designed and never built.
+Reading it for context will hand you a contract that no longer exists and send
+results somewhere nothing is listening. Do not consult it, under that name or
+any other.
+
+The live project is `dataengine` (`yahyeameer/dataengine`, deployed from
+`/opt/dataengine` on this host), and you do not need its source to do this
+work.
 
 ## 1. Read the job
 

@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { handleRouteError } from '@/lib/api';
-import { signingHeaders } from '@/lib/hermes';
+import { secretForRoute, signingHeaders, webhookUrlFor } from '@/lib/hermes';
 import { adminFor, requireWorkspaceAccess } from '@/lib/authz';
 
 /**
@@ -49,8 +49,22 @@ const askSchema = z.object({
  * now, because the job dispatch and the result callback use the same contract
  * and a signer that drifts from its verifier fails identically to a bad secret.
  */
-const GATEWAY_SECRET = process.env.HERMES_WEBHOOK_SECRET;
 const GATEWAY_URL = process.env.HERMES_WEBHOOK_URL;
+
+/** The gateway route questions are pushed to. */
+const ASK_ROUTE = 'ask';
+
+/**
+ * The `ask` route's own HMAC secret.
+ *
+ * Hermes keys the secret to the route, not to the gateway. This route used to
+ * sign with the shared `HERMES_WEBHOOK_SECRET`, which is the *job* route's
+ * secret on this installation -- so every question returned
+ * `401 {"error": "Invalid signature"}` while job dispatch through the same
+ * gateway succeeded. Resolved through `secretForRoute` so the two can never
+ * drift apart again.
+ */
+const GATEWAY_SECRET = secretForRoute(ASK_ROUTE);
 
 /** The event name the gateway route was subscribed to. */
 const EVENT = 'question.asked';
@@ -101,7 +115,7 @@ export async function POST(request: Request) {
     });
 
     try {
-      const response = await fetch(`${GATEWAY_URL.replace(/\/$/, '')}/webhooks/ask`, {
+      const response = await fetch(webhookUrlFor(ASK_ROUTE), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

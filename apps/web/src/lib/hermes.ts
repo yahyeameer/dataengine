@@ -22,6 +22,58 @@ const GATEWAY_URL = process.env.HERMES_WEBHOOK_URL;
 const GATEWAY_SECRET = process.env.HERMES_WEBHOOK_SECRET;
 
 /**
+ * The secret for one gateway route.
+ *
+ * Hermes stores the HMAC secret **per route**, not per gateway: the adapter
+ * resolves `route_config.get("secret", global_secret)` and every route created
+ * through `hermes webhook subscribe` gets its own generated value. This client
+ * had one `HERMES_WEBHOOK_SECRET` for every route, so it could only ever be
+ * correct for one of them.
+ *
+ * It was correct for `dataengine-job`. `ask` had a different secret, so every
+ * question an accountant asked came back
+ * `401 {"error": "Invalid signature"}` — while job dispatch on the same
+ * gateway, with the same code path and the same header, worked. That is why
+ * the failure read as intermittent: it was not time-dependent, it was
+ * route-dependent.
+ *
+ * Falls back to the shared secret, which is what a gateway configured with a
+ * single global secret and no per-route override actually wants. So this is
+ * additive: a deployment that has not set the per-route variables behaves
+ * exactly as before.
+ */
+const ROUTE_SECRET_ENV: Record<string, string | undefined> = {
+  ask: process.env.HERMES_ASK_SECRET,
+  'dataengine-job': process.env.HERMES_JOB_SECRET,
+};
+
+export function secretForRoute(route: string): string {
+  return ROUTE_SECRET_ENV[route] || GATEWAY_SECRET || '';
+}
+
+/**
+ * The profile a gateway route is served by.
+ *
+ * With `gateway.multiplex_profiles` on, one gateway serves several profiles and
+ * `/p/<profile>/webhooks/<route>` selects which. A route whose JSON carries no
+ * `profile` key is bound to `default` and is reachable **only** at the
+ * unprefixed path — the adapter's `_route_allows_profile` compares the route's
+ * configured profile against the URL's and fails closed.
+ *
+ * Unset means the unprefixed path, which is the profile the routes are bound to
+ * today. Setting it moves the call onto a profile's own URL, and the route's
+ * JSON has to name the same profile or the gateway answers 404.
+ */
+const GATEWAY_PROFILE = process.env.HERMES_GATEWAY_PROFILE?.trim();
+
+export function webhookUrlFor(route: string): string {
+  const base = (GATEWAY_URL ?? '').replace(/\/$/, '');
+  return GATEWAY_PROFILE
+    ? `${base}/p/${GATEWAY_PROFILE}/webhooks/${route}`
+    : `${base}/webhooks/${route}`;
+}
+
+/**
  * Which signing scheme the gateway verifies.
  *
  * `github` is the default because it is what this installation actually
@@ -256,7 +308,7 @@ export async function dispatchJob(
   payload: HermesJobPayload,
   route: string = JOB_ROUTE,
 ): Promise<DispatchOutcome> {
-  if (!GATEWAY_URL || !GATEWAY_SECRET) {
+  if (!GATEWAY_URL || !secretForRoute(route)) {
     return { ok: false, status: null, detail: 'Hermes is not configured on this server' };
   }
 
@@ -266,11 +318,11 @@ export async function dispatchJob(
   const body = JSON.stringify(payload);
 
   try {
-    const response = await fetch(`${GATEWAY_URL.replace(/\/$/, '')}/webhooks/${route}`, {
+    const response = await fetch(webhookUrlFor(route), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...signingHeaders(body, 'job.dispatched'),
+        ...signingHeaders(body, 'job.dispatched', secretForRoute(route)),
       },
       body,
       // Anything slower than this is the network, not the agent thinking.

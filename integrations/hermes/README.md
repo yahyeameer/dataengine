@@ -234,7 +234,8 @@ already holds project-admin SQL is a different proposition from adding shell.
 
 ## A hazard on the agent's disk
 
-`/opt/data` contains a checkout of **AI-Data-Operations-Platform** — the
+`/opt/data` contains `aidops-idriss`, a checkout of a fork of
+**AI-Data-Operations-Platform** — the
 abandoned predecessor of this project. It shares this one's whole vocabulary:
 the same job kinds, a `hermes` module at the same path, and a documented tool
 layer at `/api/tools/{tool}` that was designed and never actually built.
