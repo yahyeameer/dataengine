@@ -188,7 +188,10 @@ export async function AppShell({
  * that confirms nothing is wrong.
  */
 function EngineStatus({ state }: { state: 'ok' | 'degraded' | 'unknown' }) {
-  const label = { ok: 'Operational', degraded: 'Degraded', unknown: 'Unknown' }[state];
+  // Same words as the workspace panel's engine strip. The frame said
+  // "Operational" while the panel on the page said "Running without a model",
+  // about the same worker, from the same row.
+  const label = { ok: 'Connected', degraded: 'No model', unknown: 'Unknown' }[state];
   const dot = {
     ok: 'bg-success',
     degraded: 'bg-warning',

@@ -6,7 +6,11 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import {
   type AgentJobKind,
   type AgentJobStatus,
+  ENGINE_STATE_DETAIL,
+  ENGINE_STATE_LABELS,
+  type EngineState,
   JOB_KIND_LABELS,
+  engineStateFor,
   formatAge,
   isTerminal,
   isWorkerOnline,
@@ -111,32 +115,26 @@ export function AgentPanel({
 
   const online = workers.filter((worker) => isWorkerOnline(worker.last_seen_at));
   const isOnline = online.length > 0;
+  // Four states, from the worker's own report. See engineStateFor: "connected
+  // or offline" reported a worker running with no model behind it as healthy,
+  // which is the one case where the indicator most needed to say something.
+  const state = engineStateFor(workers);
   const recent = jobs.slice(0, 5);
 
   return (
     <section className="overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border bg-surface-2/50 px-5 py-3.5">
-        <span
-          aria-hidden
-          className={`inline-block h-2 w-2 shrink-0 rounded-full ${
-            isOnline ? 'bg-success' : 'bg-danger'
-          } ${isOnline && active > 0 ? 'pulse-dot' : ''}`}
-        />
-        <span className="text-sm font-medium">
-          {isOnline ? 'Engine connected' : 'Engine offline'}
-        </span>
+        <EngineDot state={state} busy={active > 0} />
+        <span className="text-sm font-medium">{ENGINE_STATE_LABELS[state]}</span>
 
-        {isOnline ? (
+        {state === 'connected' && isOnline ? (
           <span className="font-mono text-xs text-subtle">
             {online[0].hostname ?? online[0].id}
             {online[0].version ? ` · v${online[0].version}` : ''}
             {describeModels(online[0].metadata)}
           </span>
         ) : (
-          <span className="text-[13px] text-muted">
-            Nothing will run until it reconnects. Anything you ask for is queued and picked up
-            automatically.
-          </span>
+          <span className="text-[13px] text-muted">{ENGINE_STATE_DETAIL[state]}</span>
         )}
 
         {active > 0 ? (
@@ -174,6 +172,30 @@ export function AgentPanel({
         </ul>
       )}
     </section>
+  );
+}
+
+/**
+ * The state, as one dot.
+ *
+ * Colour carries the state and is never the only carrier -- the label beside it
+ * says the same thing in words, because a green dot and an amber dot are the
+ * same dot to a reader who cannot distinguish them.
+ */
+function EngineDot({ state, busy }: { state: EngineState; busy: boolean }) {
+  const tone: Record<EngineState, string> = {
+    connected: 'bg-success',
+    degraded: 'bg-warning',
+    offline: 'bg-danger',
+    unknown: 'bg-subtle',
+  };
+  return (
+    <span
+      aria-hidden
+      className={`inline-block h-2 w-2 shrink-0 rounded-full ${tone[state]} ${
+        state === 'connected' && busy ? 'pulse-dot' : ''
+      }`}
+    />
   );
 }
 

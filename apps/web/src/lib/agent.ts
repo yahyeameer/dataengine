@@ -29,6 +29,76 @@ export function isWorkerOnline(lastSeenAt: string | null | undefined): boolean {
   return Date.now() - new Date(lastSeenAt).getTime() < WORKER_STALE_AFTER_MS;
 }
 
+/**
+ * What the engine is actually doing, in four states rather than two.
+ *
+ * "Connected or offline" collapsed three different situations into one word.
+ * A worker that is running with no model behind it answered from the rule
+ * engine and reported *connected*, which is true and useless -- the customer's
+ * explanations had quietly got worse and the indicator said everything was
+ * fine. A worker whose health probe could not reach the database reported the
+ * same thing, on no evidence at all.
+ *
+ * So:
+ *
+ * - `connected` — heartbeat fresh, and the worker says the model is running.
+ * - `degraded`  — heartbeat fresh, but work is being answered without a model.
+ *                 Results are still correct; the reasoning is the rule engine's.
+ * - `offline`   — no worker has heartbeated inside the window. Work queues.
+ * - `unknown`   — a worker is alive but could not determine its own health, or
+ *                 no worker has ever reported. Not the same claim as healthy,
+ *                 and reporting it as such is how a monitor starts lying.
+ */
+export type EngineState = 'connected' | 'degraded' | 'offline' | 'unknown';
+
+export type EngineWorker = {
+  last_seen_at: string;
+  metadata?: unknown;
+};
+
+export function engineStateFor(workers: EngineWorker[]): EngineState {
+  const live = workers.filter((worker) => isWorkerOnline(worker.last_seen_at));
+  if (live.length === 0) return workers.length === 0 ? 'unknown' : 'offline';
+
+  // The freshest worker's verdict wins. Several may be alive; the one that
+  // reported most recently is the one whose answer is current.
+  const [freshest] = [...live].sort(
+    (a, b) => new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime(),
+  );
+
+  const metadata =
+    freshest.metadata && typeof freshest.metadata === 'object' && !Array.isArray(freshest.metadata)
+      ? (freshest.metadata as Record<string, unknown>)
+      : {};
+
+  const health = metadata.llm_health;
+
+  // A worker old enough to predate the health check reports nothing here. It is
+  // alive and claiming jobs, and that is all that can honestly be said.
+  if (health === undefined || health === null) return 'unknown';
+  if (health === 'degraded') return 'degraded';
+  if (health === 'ok') return 'connected';
+  return 'unknown';
+}
+
+export const ENGINE_STATE_LABELS: Record<EngineState, string> = {
+  connected: 'Engine connected',
+  degraded: 'Running without a model',
+  offline: 'Engine offline',
+  unknown: 'Engine status unknown',
+};
+
+/** What the reader should understand follows from each state. */
+export const ENGINE_STATE_DETAIL: Record<EngineState, string> = {
+  connected: '',
+  degraded:
+    'Work is being answered by the rule engine instead of the model. Figures are still correct; the explanations are plainer.',
+  offline:
+    'Nothing will run until it reconnects. Anything you ask for is queued and picked up automatically.',
+  unknown:
+    'A worker is running but could not report whether the model is reachable. Results may be coming from the rule engine.',
+};
+
 export const JOB_KIND_LABELS: Record<AgentJobKind, string> = {
   parse_workbook: 'Reading the workbook',
   profile_dataset: 'Profiling the data',
