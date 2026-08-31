@@ -59,11 +59,20 @@ const KINDS = [
  */
 const GATED_KINDS = ['kanban_report'] as const;
 
-const kanbanBridgeEnabled = process.env.KANBAN_BRIDGE_ENABLED === 'true';
-
-const ALLOWED_KINDS: readonly string[] = kanbanBridgeEnabled
-  ? [...KINDS, ...GATED_KINDS]
-  : KINDS;
+/**
+ * Read per request, not once at module load.
+ *
+ * A `const` at module scope is evaluated when the route module is first
+ * imported, which a build is entitled to do — and an inlined `false` is a flag
+ * that cannot be turned on by restarting the container with a different
+ * environment. That is a bad property for the switch that opens a customer
+ * path, and worse for the one that closes it again.
+ */
+function allowedKinds(): readonly string[] {
+  return process.env.KANBAN_BRIDGE_ENABLED === 'true'
+    ? [...KINDS, ...GATED_KINDS]
+    : KINDS;
+}
 
 const createSchema = z.object({
   workspaceId: z.string().uuid(),
@@ -78,7 +87,7 @@ export async function POST(request: Request) {
   try {
     const body = createSchema.parse(await request.json());
 
-    if (!ALLOWED_KINDS.includes(body.kind)) {
+    if (!allowedKinds().includes(body.kind)) {
       // 404 rather than 403: a kind that is not switched on is not a permission
       // the caller could be granted, and saying "forbidden" invites them to ask
       // who can grant it.

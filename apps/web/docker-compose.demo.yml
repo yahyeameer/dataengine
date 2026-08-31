@@ -43,6 +43,10 @@ services:
       # dataengine-job, so job dispatch worked and every question returned 401.
       # Unset falls back to HERMES_WEBHOOK_SECRET, so a gateway with a single
       # global secret is unaffected.
+      # The customer-facing half of the Kanban bridge. Unset, /api/agent/jobs
+      # answers 404 for `kanban_report` and every other kind is untouched. The
+      # agent host has its own switch; both are required, on purpose.
+      KANBAN_BRIDGE_ENABLED: ${KANBAN_BRIDGE_ENABLED:-}
       HERMES_ASK_SECRET: ${HERMES_ASK_SECRET:-}
       HERMES_JOB_SECRET: ${HERMES_JOB_SECRET:-}
       # Selects /p/<profile>/webhooks/<route>. Empty means the unprefixed path,
