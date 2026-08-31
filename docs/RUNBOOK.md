@@ -338,6 +338,65 @@ path. Omitting the field binds the route to `default`.
 
 ---
 
+## Kanban: the internal multi-agent board
+
+Operator-initiated work only. Nothing in a customer request path creates a card,
+and no card touches Supabase — `agent_jobs` remains the queue and the audit
+trail for anything a customer is waiting on. Full contract in
+`integrations/hermes/kanban/README.md`.
+
+The dispatcher runs **inside the gateway that also serves `/webhooks/ask`**
+(`kanban.dispatch_in_gateway`, default on) and sweeps every board once a minute.
+A busy board therefore competes with customer chat for the same single core.
+
+```bash
+hermes kanban --board dataengine list
+hermes kanban --board dataengine runs <id>      # <- the handoff lives here
+scripts/kanban-verdict-audit.sh dataengine      # exit 1 on a status/verdict mismatch
+```
+
+### Reading a handoff: `runs`, not `show`
+
+`kanban show <id>` reports `result: null, metadata: null` for a card that
+completed perfectly. The payload a card hands to its children is stored on the
+**run**, not the task row. Use `kanban runs <id>`; `show --json` also carries
+`latest_summary` at the top level. Debugging a chain from `show` alone leads to
+the conclusion that the handoff is broken when it is working.
+
+### Verifier verdicts
+
+PASS completes the card (`done`); FAIL **blocks** it with a reason prefixed
+`VERDICT=FAIL:`. Status then carries the verdict, so a failed check is visible
+on the board rather than only in metadata. This exists because a verifier once
+detected a real corruption, recorded `verdict: FAIL`, and completed anyway —
+leaving a failed verification that looked exactly like a passing one.
+
+Never `request_changes` a verifier card: it resets to `ready` and re-runs
+against the same unchanged artefact until the recurrence limit trips.
+
+### Two settings this host depends on
+
+`kanban.max_in_progress: 1` and `kanban.auto_decompose: false` in
+`/opt/data/config.yaml`. Unset, `max_in_progress` derives from RAM to **7** —
+seven opus-high workers on one vCPU, alongside the gateway answering customer
+chat. Both are read per dispatch tick, so a change takes effect within a minute
+with no gateway restart.
+
+Adding a board does not raise concurrency: the cap is a host budget, summed
+across boards in `kanban_db.count_running_tasks_other_boards`.
+
+### Recovery
+
+A card that cannot proceed blocks with a reason. Fix the cause, then:
+
+```bash
+hermes kanban --board dataengine unblock <id>
+```
+
+The dispatcher re-claims it on the next tick and the new run starts clean.
+
+---
+
 ## Deploying a change
 
 The VPS pulls over a read-only deploy key; it cannot push, which is deliberate.

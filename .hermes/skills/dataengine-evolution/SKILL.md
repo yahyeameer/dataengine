@@ -327,6 +327,26 @@ Worked examples from this system:
 > satisfy that message. There is one production gateway; a second would
 > contend for 8644. Test the port, not the label.
 
+> **Assumed:** a card that completed did the thing it was asked to do, so
+> `status: done` on a verifier means the verification passed.
+> **Evidence:** a verifier correctly detected a corrupted figure, wrote
+> `{"verdict":"FAIL"}` into its run metadata, and then called
+> `kanban_complete`. The card went to `done`, indistinguishable on the board
+> from a passing check.
+> **Correct:** execution status and business verdict are different facts. A
+> tool that finished successfully can be reporting a failure.
+> **Rule:** make the status carry the verdict — PASS completes, FAIL blocks —
+> and audit the pairing, because a protocol that lives in a prompt is advisory
+> and this model already deviated from it once.
+
+> **Assumed:** `kanban show <id>` shows what a card produced.
+> **Evidence:** `show --json` returned `result: null, metadata: null` for a
+> card whose handoff was intact and had already been consumed by its child.
+> **Correct:** the handoff is stored on the **run**, not the task row.
+> `kanban runs <id>` is where it lives.
+> **Rule:** before concluding a handoff is broken, check you are reading the
+> place it is written.
+
 > **Assumed:** the worker heartbeats every 30 seconds, so a stale
 > `last_seen_at` means the worker is down.
 > **Evidence:** `run_job()` blocks the same loop that calls `announce()`, and a
