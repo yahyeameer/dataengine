@@ -101,42 +101,42 @@ services:
   # compromise would then be the host *and* every tenant's data, and that is not
   # a trade worth making for a report.
   #
-  # So the socket is mounted here instead, read-only, behind a proxy that
-  # allows two endpoint groups and refuses everything else. What the worker can
-  # ask for becomes "exec in a container": not create, not start, not privileged
-  # containers, not binding the host filesystem into a new one.
+  # This was first attempted with `tecnativa/docker-socket-proxy` and
+  # CONTAINERS=1, EXEC=1, POST=1. That was not narrower than mounting the
+  # socket: its container ACL is a single prefix match on /containers, so
+  # CONTAINERS=1 also permits `POST /containers/create`. Verified against the
+  # running proxy -- a create with a nonsense image returned `404 No such image`
+  # from the daemon rather than `403` from the proxy, and a real image with
+  # Privileged plus a bind of `/` would have been root on the host.
   #
-  # Worth stating plainly rather than filing under "secured": exec into the
-  # agent container is still enough to read that container's secrets. This is
-  # narrower than root on the host, not harmless. It is the smallest grant that
-  # makes the bridge work at all, and it is why `kanban-exec` is an internal
-  # network -- the proxy has no route off this box.
+  # So the allowlist is written out by hand in
+  # deploy/kanban-exec-proxy.conf.template, deny-by-default, with the agent's
+  # container name baked into the one rule that names a container. What the
+  # worker can do is: run a command in that container and read the result.
+  #
+  # Worth saying plainly rather than filing under "secured": that is still
+  # enough to read the agent container's secrets. Narrower than root on the
+  # host, not harmless.
   kanban-socket-proxy:
-    image: tecnativa/docker-socket-proxy:0.3.0
+    image: nginx:1.27-alpine
     restart: unless-stopped
     environment:
-      # Everything not named here defaults to off in this image.
-      CONTAINERS: 1   # resolve the agent container by name
-      EXEC: 1         # create and start an exec, and read its exit code
-      POST: 1         # both of the above are POSTs; without this it is read-only
+      # Substituted into the config template at start-up by the nginx image's
+      # own entrypoint. Changing which container the bridge may reach is a
+      # redeploy, not a request parameter.
+      KANBAN_AGENT_CONTAINER: ${HERMES_KANBAN_CONTAINER:-hermes-agent-bwlq-hermes-agent-1}
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/conf.d
     volumes:
+      - ./deploy/kanban-exec-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    # The socket is owned by root:docker and nginx's workers run as `nginx`, so
+    # the group is added rather than the user changed. Reading the socket is the
+    # only privilege this container needs and the only one it gets.
+    group_add:
+      - "${DOCKER_GID:-988}"
     networks:
       - kanban-exec
     # No ports. Reachable only from the worker, over an internal network.
-    # No read_only, and the two attempts it took to learn that are worth
-    # recording. The entrypoint renders haproxy.cfg from a template *in place*,
-    # so a read-only root crash-loops on "can't create haproxy.cfg" -- and a
-    # tmpfs over that directory then masks the template the image ships, which
-    # fails one line later with "no such file". The directory has to be both
-    # writable and the image's own.
-    #
-    # Little is lost. What confines this container is the endpoint allowlist
-    # above, the internal network, the absence of any published port, and
-    # no-new-privileges. A read-only root would have added very little to a
-    # container whose entire job is to proxy one socket.
-    tmpfs:
-      - /run
     security_opt:
       - no-new-privileges:true
     deploy:

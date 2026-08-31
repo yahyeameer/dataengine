@@ -407,12 +407,27 @@ that container root on the host, and that container already holds
 `SUPABASE_SECRET_KEY`. One compromise would then be the host *and* every
 tenant's data.
 
-So `docker-compose.yml` runs a `tecnativa/docker-socket-proxy` with `CONTAINERS`,
-`EXEC` and `POST` enabled and everything else off, on an `internal` network the
-worker shares with it and nothing else. The worker speaks the exec API over
-HTTP; there is no `docker` binary in its image. What it can ask for is "exec in
-a container" -- not create, not start, not a privileged container, not a bind
-mount of the host filesystem.
+So `docker-compose.yml` runs a small nginx in front of the socket, on an
+`internal` network the worker shares with it and nothing else, with the
+allowlist written out by hand in `deploy/kanban-exec-proxy.conf.template`:
+create an exec in **one named container**, start it, read its exit code. Every
+other path returns 403, including whatever the Docker API grows next. The worker
+speaks that API over HTTP; there is no `docker` binary in its image.
+
+This was first attempted with `tecnativa/docker-socket-proxy` and
+`CONTAINERS=1, EXEC=1, POST=1`, and that configuration was **not** narrower than
+mounting the socket. Its container ACL is a single prefix match on
+`/containers`, so `CONTAINERS=1` also permits `POST /containers/create`. The
+check that caught it is worth repeating after any change here:
+
+```bash
+docker exec hermes-hermes-1 python -c "
+import httpx
+b='http://kanban-socket-proxy:2375'
+print(httpx.post(b+'/containers/create', json={'Image':'no-such-image-xyz:none'}).status_code)"
+# 403 = the proxy refused it.  404 = it reached the daemon, and a real image
+#                                    with Privileged would have been host root.
+```
 
 Say the remaining risk out loud rather than filing it under secured: exec into
 the agent container is enough to read that container's secrets, including the

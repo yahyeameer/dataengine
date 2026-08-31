@@ -1,0 +1,67 @@
+# The worker's whole access to the Docker daemon, written as an allowlist.
+#
+# This replaced a `tecnativa/docker-socket-proxy` configured with CONTAINERS=1,
+# EXEC=1, POST=1, which looked right and was not. That image's ACL for the
+# container family is one rule --
+#
+#     http-request allow if { path -m reg -i ^(/v[\d\.]+)?/containers } { env(CONTAINERS) }
+#
+# -- so CONTAINERS=1 permits every path under /containers, including
+# `POST /containers/create`. Measured rather than assumed: a create with a
+# nonsense image came back `404 No such image` from the daemon, not `403` from
+# the proxy. With a real image and `HostConfig.Privileged` plus a bind of `/`,
+# that is root on the host, which is precisely what the proxy was chosen to
+# prevent. It was not narrower than mounting the socket; it was the same grant
+# with more moving parts.
+#
+# So the allowlist is explicit, and the agent's container name is baked into the
+# first rule. The capability this grants is exactly: run a command inside one
+# named container, and read the result. Not create, not start, not stop, not
+# inspect another container, not list images, not touch a volume or a network.
+#
+# Everything not matched below returns 403, including anything the Docker API
+# grows in a future version -- deny-by-default is the only rule here that
+# survives an upgrade nobody read the changelog for.
+
+upstream dockerd {
+    server unix:/var/run/docker.sock;
+}
+
+server {
+    listen 2375;
+
+    # Keep the daemon's own errors intact rather than replacing them with
+    # nginx's. A worker that gets `no such container` should see that sentence.
+    proxy_intercept_errors off;
+    proxy_http_version 1.1;
+    # The exec start response is a stream. Buffering it would still work at the
+    # sizes this bridge deals in, but turning it off keeps a large `runs --json`
+    # from sitting in a buffer waiting to be flushed.
+    proxy_buffering off;
+    proxy_read_timeout 300s;
+
+    # Create an exec in exactly one container. The name is substituted at
+    # start-up, so this proxy cannot be pointed at a different container without
+    # redeploying it.
+    location ~ "^(/v[0-9.]+)?/containers/${KANBAN_AGENT_CONTAINER}/exec$" {
+        limit_except POST { deny all; }
+        proxy_pass http://dockerd;
+    }
+
+    # Start one, and read its exit code. The id is a 64-character hex string the
+    # daemon minted; constraining the shape costs nothing and keeps this from
+    # becoming a general /exec/* passthrough.
+    location ~ "^(/v[0-9.]+)?/exec/[0-9a-f]{64}/start$" {
+        limit_except POST { deny all; }
+        proxy_pass http://dockerd;
+    }
+
+    location ~ "^(/v[0-9.]+)?/exec/[0-9a-f]{64}/json$" {
+        limit_except GET { deny all; }
+        proxy_pass http://dockerd;
+    }
+
+    location / {
+        return 403;
+    }
+}
