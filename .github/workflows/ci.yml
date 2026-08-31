@@ -246,6 +246,31 @@ jobs:
           sparse-checkout: scripts
           sparse-checkout-cone-mode: false
 
+      # How the runner reaches a box that does not answer it on the internet.
+      #
+      # The first version of this job simply ssh'ed to the VPS's public address
+      # and timed out: port 22 there is restricted by source, which is correct
+      # and worth keeping. The alternative was allowing GitHub's published
+      # Actions ranges through the firewall -- 5,625 IPv4 blocks, re-synced on a
+      # schedule, and SSH open to every runner GitHub operates for anyone. That
+      # is a large hole to cut for one deploy a day.
+      #
+      # So the runner joins the tailnet instead and dials a private address.
+      # Port 22 stays closed to the internet, and the box's own firewall does
+      # not move at all.
+      #
+      # `ephemeral` matters: the node is removed from the tailnet when the job
+      # ends, so a month of deploys does not leave a month of dead machines
+      # holding valid credentials. Give the auth key a tag in the Tailscale
+      # admin console and grant that tag reach to this one host -- a key that
+      # can reach the whole tailnet is a worse credential than the SSH key it
+      # is protecting.
+      - name: Join the tailnet
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+          args: --accept-routes
+
       # Plain ssh rather than one of the marketplace deploy actions. This step
       # holds a key that is root-equivalent on the box; a third-party action
       # here means every future release of that action is also root-equivalent

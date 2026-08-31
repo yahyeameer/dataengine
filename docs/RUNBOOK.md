@@ -578,9 +578,39 @@ Repository **secrets** (Settings → Secrets and variables → Actions):
 
 | Secret | Value |
 |---|---|
-| `VPS_HOST` | `srv1927440`, or its IP |
+| `VPS_HOST` | the box's **tailnet** address, not `191.215.42.242` — see below |
 | `VPS_USER` | `root` |
 | `VPS_SSH_KEY` | private half of a key whose public half is in the VPS's `authorized_keys` |
+| `TS_AUTHKEY` | a **reusable, ephemeral, tagged** Tailscale auth key |
+
+### Why the runner goes over Tailscale
+
+Port 22 on this box is restricted by source. That is deliberate, and the first
+deploy proved it by timing out — GitHub's runners are not on the list and never
+will be, because the list of addresses they use is 5,625 IPv4 blocks that
+change. Allowing those would mean SSH open to every runner GitHub operates for
+anybody, which is a large hole to cut for one deploy a day.
+
+So the runner joins the tailnet and dials a private address instead. The box's
+firewall does not move, port 22 stays closed to the internet, and the SSH key
+and host-key pinning work exactly as before — only the address changes.
+
+On the VPS, once:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up --ssh=false
+tailscale ip -4          # this is VPS_HOST
+```
+
+In the Tailscale admin console, once: generate the auth key as **ephemeral**
+(the runner's node disappears when the job ends, so a month of deploys does not
+leave a month of dead machines holding credentials) and **tagged**, with an ACL
+granting that tag reach to this one host on port 22. A key that can reach the
+whole tailnet is a worse credential than the SSH key it is protecting.
+
+`VPS_SSH_KNOWN_HOSTS` must name the tailnet address too — same host keys, since
+it is the same `sshd`; only the address field changes.
 
 Repository **variables** — not secrets, because every one of them is public by
 definition and hiding them would help nobody:
