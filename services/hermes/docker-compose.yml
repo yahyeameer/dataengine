@@ -12,6 +12,11 @@
 
 services:
   hermes:
+    # Registry image beside the build, for the same reason as the web app: CI
+    # builds this on every push to main and the VPS pulls it, so a deploy is a
+    # download rather than a pip install of the Arrow stack on a one-core box.
+    # `build: .` still works and is what produces the image locally.
+    image: ghcr.io/yahyeameer/dataengine-hermes:${HERMES_TAG:-latest}
     build: .
     # `unless-stopped` rather than `always`: it survives reboots and crashes,
     # but a deliberate `docker compose stop` stays stopped instead of coming

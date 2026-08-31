@@ -24,7 +24,11 @@
 
 services:
   web:
-    image: dataengine-web:${WEB_TAG:-latest}
+    # Same registry image as docker-compose.yml, and it has to be: this is the
+    # file actually running on the VPS today (see docs/RUNBOOK.md), so this is
+    # the line CI's deploy pulls. A bare local name here would leave the deploy
+    # silently pulling nothing and restarting the same image forever.
+    image: ghcr.io/yahyeameer/dataengine-web:${WEB_TAG:-latest}
     build:
       context: .
       args:

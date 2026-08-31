@@ -25,7 +25,16 @@ services:
     # of the deploy: `docker compose build` on a machine with cores to spare,
     # then `docker compose up -d` on the VPS, which has one core and must never
     # run `next build`.
-    image: dataengine-web:${WEB_TAG:-latest}
+    #
+    # Now a registry reference rather than a bare name, which is what lets the
+    # VPS `docker compose pull web` and get the image CI built on the push. The
+    # `build` block stays: it is still how the image is produced locally, and it
+    # is what `docker compose up --build` uses when the registry is unreachable.
+    #
+    # WEB_TAG is `latest` from .env by default and the deploy overrides it with
+    # the commit SHA from the environment, which is also the rollback handle:
+    #   WEB_TAG=<older-sha> docker compose up -d web
+    image: ghcr.io/yahyeameer/dataengine-web:${WEB_TAG:-latest}
     build:
       context: .
       args:

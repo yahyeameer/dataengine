@@ -514,33 +514,130 @@ The dispatcher re-claims it on the next tick and the new run starts clean.
 
 ## Deploying a change
 
-The VPS pulls over a read-only deploy key; it cannot push, which is deliberate.
+**Push to `main`.** That is the whole procedure. `.github/workflows/ci.yml`
+runs the tests, builds both images, pushes them to GHCR and restarts the VPS
+onto them — roughly three to four minutes from push to live.
 
-```bash
-cd /opt/dataengine && git pull --ff-only
-cd services/hermes && docker compose up -d --build      # worker
-cd ../../apps/web && docker compose -p dataengine -f docker-compose.demo.yml up -d --build
+```
+push to main
+  └─ worker / web / secret-scan        the checks that already existed
+       └─ images  (web, hermes)        buildx → ghcr.io/yahyeameer/dataengine-*
+            └─ deploy                  ssh → pull → up -d → wait for healthy
 ```
 
-If the web build produces inexplicable 500s, delete `.next` first — a directory
-left by `next dev` and reused by `next build` produces exactly that.
+Nothing is built on the VPS any more, which is the point: `next build` wants
+every core for several minutes and that box has one. The runner builds, the VPS
+downloads. The old `up -d --build` commands still work and are still the right
+tool when the registry is unreachable, but they are no longer the normal path.
 
-Verify the worker came back and can still reach the model:
+**Two things the pipeline does not do**, both deliberate:
+
+- **Database migrations.** A push that adds a migration deploys code that
+  expects a table the database does not have yet. Apply it first, then push:
+  `supabase db push --linked`. This is not automated because a migration that
+  fails halfway needs a person, not a retry.
+- **Anything on a branch other than `main`.** `hermes-main` and pull requests
+  run the checks and build the images to prove the Dockerfiles still work, and
+  push nothing.
+
+### Watching one go out
+
+```bash
+gh run watch --repo yahyeameer/dataengine        # from a machine with gh
+```
+
+The deploy fails loudly if the new web container does not reach `healthy`
+within 200 seconds, and prints the last 50 log lines when it does not. A green
+deploy means the container the workflow started is serving — it does not mean
+the model is reachable, so after a change that touches the worker still run one
+real job and confirm `model_used` is populated. A job that succeeds proves the
+queue works, not that the model ran.
 
 ```bash
 docker logs --tail 5 hermes-hermes-1
 ```
 
-Then run one real job and confirm `model_used` is populated — a job that
-succeeds proves the queue works, not that the model ran.
+### Deploying by hand
+
+The same scripts the workflow uses, run from a checkout:
+
+```bash
+ssh root@srv1927440 "bash -s -- $(git rev-parse HEAD) /opt/dataengine" \
+  < scripts/deploy-remote.sh
+ssh root@srv1927440 "bash -s -- /opt/dataengine" \
+  < scripts/deploy-healthcheck.sh
+```
+
+If a web build ever does run on the box and produces inexplicable 500s, delete
+`.next` first — a directory left by `next dev` and reused by `next build`
+produces exactly that.
+
+### One-time setup
+
+Repository **secrets** (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `VPS_HOST` | `srv1927440`, or its IP |
+| `VPS_USER` | `root` |
+| `VPS_SSH_KEY` | private half of a key whose public half is in the VPS's `authorized_keys` |
+
+Repository **variables** — not secrets, because every one of them is public by
+definition and hiding them would help nobody:
+
+| Variable | Value |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | same as `.env`; Next inlines it into the bundle |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | same as `.env`; likewise |
+| `VPS_APP_DIR` | `/opt/dataengine` |
+| `VPS_SSH_KNOWN_HOSTS` | output of `ssh-keyscan -t ed25519 srv1927440`, run from a network you trust |
+| `VPS_WEB_COMPOSE_FILE` | leave unset for `docker-compose.demo.yml` |
+| `VPS_WEB_PROJECT` | leave unset for `dataengine` |
+
+Those last two are the trap worth knowing about. The VPS serves the *demo*
+compose file under the project name `dataengine`; point the deploy at
+`docker-compose.yml` instead and compose cheerfully builds a second stack, does
+not touch the running one, and reports success while the site serves the old
+build. Set them only when the app moves behind Traefik.
+
+Then, once, on GitHub: make the two packages readable by the VPS. Simplest is
+to flip each to public at
+`github.com/users/yahyeameer/packages/container/dataengine-web/settings` (the
+repository is already public, so the image exposes nothing new). To keep them
+private instead, on the VPS:
+
+```bash
+docker login ghcr.io -u yahyeameer --password-stdin   # a read:packages PAT
+```
+
+The deploy key already on the box stays read-only and is all `git fetch` needs.
 
 ---
 
 ## Rolling back
 
+Fastest first: every deploy tags its image with the commit SHA, so going back a
+build is a tag, not a rebuild. On the VPS:
+
+```bash
+cd /opt/dataengine/apps/web
+WEB_TAG=<previous-sha> docker compose -p dataengine -f docker-compose.demo.yml up -d web
+
+cd /opt/dataengine/services/hermes
+HERMES_TAG=<previous-sha> docker compose up -d hermes
+```
+
+`docker images | grep dataengine` lists what is still on the box.
+`scripts/deploy-remote.sh` prunes images unused for more than a week, so that is
+how far back this reaches; older than that, revert and push.
+
+Note this leaves the checkout on the newer commit while the container runs the
+older image — fine for a few minutes, and worth undoing with a real revert
+rather than living with.
+
 | Change | Rollback |
 |---|---|
-| Any repo change | `git revert <sha>`, pull, rebuild |
+| Any repo change | `git revert <sha>` and push, or the tag above for speed |
 | SSH hardening | `rm /etc/ssh/sshd_config.d/00-dataengine-hardening.conf && systemctl reload ssh` |
 | Firewall | `systemctl disable --now dataengine-firewall.service` then flush the rules |
 | Supervisor toolsets | `hermes tools enable --platform api_server <names>` |

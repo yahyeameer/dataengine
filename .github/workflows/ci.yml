@@ -1,4 +1,4 @@
-# CI for DataEngine.
+# CI and delivery for DataEngine.
 #
 # The tests already existed and were good; nothing ran them. That is the gap
 # this closes, and it is deliberately the whole scope -- a pipeline that tries
@@ -6,6 +6,10 @@
 #
 # Two jobs, because they fail for different reasons and a red build should say
 # which half broke without anyone opening the log.
+#
+# Below them, two more that ship: `images` builds and pushes, `deploy` restarts
+# the VPS onto what was built. They run only on a push to `main` and only after
+# the checks pass -- see the divider before them.
 
 name: CI
 
@@ -121,3 +125,189 @@ jobs:
             exit 1
           fi
           echo "no key-shaped strings found"
+
+  # ===========================================================================
+  # From here down the workflow stops checking and starts shipping.
+  #
+  # The split matters. Everything above runs on every push and every pull
+  # request and never touches anything outside the runner. Everything below
+  # runs only on a push to `main`, and only after all three checks above have
+  # passed -- `needs` is what makes "green" a precondition for deploying rather
+  # than a thing that happens to be true most of the time.
+  # ===========================================================================
+
+  images:
+    name: Image (${{ matrix.app }})
+    needs: [worker, web, secrets]
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      # The only job that gets this. GITHUB_TOKEN is scoped per job, so nothing
+      # in the three jobs above can push an image even if a dependency tried.
+      packages: write
+
+    strategy:
+      # Both images, independently. One failing tells you more if the other
+      # still ran, and they share no build state.
+      fail-fast: false
+      matrix:
+        include:
+          - app: web
+            context: apps/web
+            image: dataengine-web
+          - app: hermes
+            context: services/hermes
+            image: dataengine-hermes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # buildx, for the registry cache below. The stock docker driver cannot
+      # export one, and without a cache every deploy reinstalls node_modules
+      # and the Arrow wheels from scratch.
+      - uses: docker/setup-buildx-action@v3
+
+      # Next inlines NEXT_PUBLIC_* at build time, so an image built without
+      # them is not broken at build -- it is broken in the browser, later, with
+      # `undefined` where the Supabase URL should be and no server-side error
+      # to find. Fail here instead, where the message says what to do.
+      #
+      # Repository *variables*, not secrets, and deliberately: both values ship
+      # inside the client bundle. Storing them as secrets would hide them from
+      # the people maintaining this and from nobody else.
+      - name: Require the public Supabase values
+        if: matrix.app == 'web'
+        run: |
+          test -n "${{ vars.NEXT_PUBLIC_SUPABASE_URL }}" \
+            || { echo "::error::set the NEXT_PUBLIC_SUPABASE_URL repository variable"; exit 1; }
+          test -n "${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}" \
+            || { echo "::error::set the NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY repository variable"; exit 1; }
+
+      # No login on a pull request: the build below runs but does not push, so
+      # a PR can prove the Dockerfile still builds without ever holding a
+      # credential that could write to the registry.
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          # Two tags on purpose. `:latest` is what a hand-run `docker compose
+          # up` on the VPS gets, and the commit SHA is what the deploy job
+          # actually pins -- so a rollback is a tag from last week rather than
+          # a rebuild of a commit you first have to go and find.
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest
+          # Harmless for the worker, whose Dockerfile declares no ARG of these
+          # names and warns that it ignored them. Splitting the matrix in two
+          # to avoid one warning is not worth the duplication.
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          # Scoped per app, or the two builds evict each other's layers and the
+          # cache costs more than it saves.
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+          # The attestation manifest makes the pushed tag a manifest list that
+          # older compose clients resolve badly. Nothing here reads provenance.
+          provenance: false
+
+  deploy:
+    name: Deploy to VPS
+    needs: images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    # Somewhere to hang a required reviewer later without editing this file.
+    environment: production
+
+    # Never two deploys at once, and -- unlike the CI group at the top of this
+    # file -- never cancel one in flight. A deploy killed between `pull` and
+    # `up -d` leaves the box on the old image with a new compose file, which is
+    # a worse state than simply queueing behind the one already running.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+
+    steps:
+      # For scripts/deploy-*.sh, which the two ssh steps below pipe to the VPS.
+      # The runner needs them on disk; the VPS never fetches them itself.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+          sparse-checkout-cone-mode: false
+
+      # Plain ssh rather than one of the marketplace deploy actions. This step
+      # holds a key that is root-equivalent on the box; a third-party action
+      # here means every future release of that action is also root-equivalent
+      # on the box. A few lines of shell is a fair price for not signing up to
+      # that.
+      - name: Prepare the SSH key
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ vars.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Pinned, not scanned. `ssh-keyscan` at deploy time asks whatever is
+          # answering on that address to state its own identity, which is not a
+          # check. Produce the value once, from a trusted network:
+          #   ssh-keyscan -t ed25519 <host>
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          test -s ~/.ssh/known_hosts \
+            || { echo "::error::set the VPS_SSH_KNOWN_HOSTS repository variable"; exit 1; }
+
+      - name: Pull the new images and restart
+        env:
+          VPS: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+          SHA: ${{ github.sha }}
+          APP_DIR: ${{ vars.VPS_APP_DIR }}
+          # Empty is fine and normal: the script defaults these to the demo
+          # stack the VPS runs today. Set them when the app moves behind
+          # Traefik, which is a compose file and a project name away.
+          WEB_FILE: ${{ vars.VPS_WEB_COMPOSE_FILE }}
+          WEB_PROJECT: ${{ vars.VPS_WEB_PROJECT }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes "$VPS" \
+              "bash -s -- '$SHA' '$APP_DIR' '$WEB_FILE' '$WEB_PROJECT'" \
+              < scripts/deploy-remote.sh
+
+      # A deploy that reports success because `up -d` returned 0 reports
+      # success for a container that is crash-looping. The web image already
+      # declares a HEALTHCHECK; this is where something finally reads it.
+      - name: Wait for the app to report healthy
+        env:
+          VPS: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+          APP_DIR: ${{ vars.VPS_APP_DIR }}
+          WEB_FILE: ${{ vars.VPS_WEB_COMPOSE_FILE }}
+          WEB_PROJECT: ${{ vars.VPS_WEB_PROJECT }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes "$VPS" \
+              "bash -s -- '$APP_DIR' '$WEB_FILE' '$WEB_PROJECT'" \
+              < scripts/deploy-healthcheck.sh
+
+      # Only reached when the box is serving the new image.
+      - name: Say what is running
+        run: |
+          {
+            echo "### Deployed"
+            echo ""
+            echo "\`${{ github.sha }}\` is live."
+            echo ""
+            echo "Roll back on the VPS with:"
+            echo ""
+            echo '```'
+            echo "cd \"\$APP_DIR/apps/web\" && WEB_TAG=<previous-sha> docker compose up -d web"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
