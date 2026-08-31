@@ -393,8 +393,37 @@ default and needs two switches**, on two hosts:
 ```
 apps/web/.env            KANBAN_BRIDGE_ENABLED=true
 services/hermes/.env     HERMES_KANBAN_ENABLED=true
-                         HERMES_KANBAN_COMMAND=docker exec -u hermes                            hermes-agent-bwlq-hermes-agent-1 /opt/hermes/.venv/bin/hermes
+                         HERMES_KANBAN_COMMAND=/opt/hermes/.venv/bin/hermes
+                         HERMES_KANBAN_DOCKER_HOST=http://kanban-socket-proxy:2375
+                         HERMES_KANBAN_CONTAINER=hermes-agent-bwlq-hermes-agent-1
 ```
+
+### How the worker reaches the board, and why it is not the socket
+
+The board is a SQLite file inside the agent's container; the worker is in its
+own, with no shared filesystem and no `hermes` CLI. The obvious bridge -- mount
+`/var/run/docker.sock` into the worker and shell out to `docker exec` -- gives
+that container root on the host, and that container already holds
+`SUPABASE_SECRET_KEY`. One compromise would then be the host *and* every
+tenant's data.
+
+So `docker-compose.yml` runs a `tecnativa/docker-socket-proxy` with `CONTAINERS`,
+`EXEC` and `POST` enabled and everything else off, on an `internal` network the
+worker shares with it and nothing else. The worker speaks the exec API over
+HTTP; there is no `docker` binary in its image. What it can ask for is "exec in
+a container" -- not create, not start, not a privileged container, not a bind
+mount of the host filesystem.
+
+Say the remaining risk out loud rather than filing it under secured: exec into
+the agent container is enough to read that container's secrets, including the
+Management-API OAuth tokens under `/opt/data/mcp-tokens`. This is narrower than
+root on the host, not harmless. It is the smallest grant that makes the bridge
+work at all.
+
+To take it away: remove `HERMES_KANBAN_DOCKER_HOST` from `.env` and the bridge
+stops immediately -- a half-configured transport is refused at startup rather
+than silently running the CLI in the wrong container. Remove the
+`kanban-socket-proxy` service to take away the capability itself.
 
 Before the first customer job, on the agent host:
 
