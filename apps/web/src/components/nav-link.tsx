@@ -52,10 +52,31 @@ export function NavLink({
 /* --------------------------------------------------------------------------
    Icons.
 
-   Inline and stroked to match the weight of the wordmark. Two of them, drawn
-   here rather than pulled from a dependency, because two icons is not worth a
+   Inline and stroked to match the weight of the wordmark. Three of them, drawn
+   here rather than pulled from a dependency, because three icons is not worth a
    package and a bundle.
    -------------------------------------------------------------------------- */
+
+/** An arrow into a tray: the upload the whole product starts with. */
+export function CategoriseIcon() {
+  return (
+    <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" aria-hidden>
+      <path
+        d="M8 1.75v7.5M5.25 4.5 8 1.75l2.75 2.75"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M2.25 10.25v2.25a1.5 1.5 0 0 0 1.5 1.5h8.5a1.5 1.5 0 0 0 1.5-1.5v-2.25"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
 
 export function WorkspacesIcon() {
   return (

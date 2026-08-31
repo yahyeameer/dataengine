@@ -346,6 +346,26 @@ function artefactName(job: DownloadableJob): string | null {
   return path?.split('/').pop() ?? null;
 }
 
+/**
+ * Which dataset version this file was made from.
+ *
+ * The single most important fact about an export and the one nothing used to
+ * show. An export is a snapshot of an immutable version, so the moment a
+ * cleaning is applied every file made before it is a picture of the *previous*
+ * figures — still correct, still downloadable, and no longer what anybody
+ * means when they say "the cleaned data".
+ *
+ * That gap is not hypothetical. Approving a categorisation and then exporting
+ * before pressing apply produces a file with no category column in it, sitting
+ * in a list next to the one that has it, under an identical "Download Excel"
+ * label. The reader picks the wrong one and concludes the categorisation was
+ * lost.
+ */
+export function exportVersionNo(job: DownloadableJob): number | null {
+  const result = (job.result ?? {}) as Record<string, unknown>;
+  return typeof result.version_no === 'number' ? result.version_no : null;
+}
+
 export /**
  * "Download Excel" beats "Download" the moment there are two of them.
  *
@@ -360,12 +380,23 @@ function formatLabel(filename: string): string {
   return extension.toUpperCase();
 }
 
-export function DownloadButton({ job }: { job: DownloadableJob }) {
+export function DownloadButton({
+  job,
+  currentVersionNo = null,
+}: {
+  job: DownloadableJob;
+  /** The version the workspace is on now, so an older file can say so. */
+  currentVersionNo?: number | null;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const name = artefactName(job);
   if (!name) return null;
+
+  const versionNo = exportVersionNo(job);
+  const superseded =
+    versionNo !== null && currentVersionNo !== null && versionNo < currentVersionNo;
 
   async function download() {
     setBusy(true);
@@ -392,10 +423,19 @@ export function DownloadButton({ job }: { job: DownloadableJob }) {
         type="button"
         onClick={download}
         disabled={busy}
-        title={name}
-        className={`${secondaryButtonClass('sm')}`}
+        title={
+          superseded
+            ? `${name} — made from version ${versionNo}, before the changes in version ${currentVersionNo} were applied`
+            : name
+        }
+        className={`${secondaryButtonClass('sm')} ${superseded ? 'opacity-60' : ''}`}
       >
-        {busy ? 'Preparing…' : `Download ${formatLabel(name)}`}
+        {busy
+          ? 'Preparing…'
+          : // The version is part of the label, not a tooltip. Two buttons
+            // reading "Download Excel" are indistinguishable at the moment
+            // somebody clicks one, which is the only moment that matters.
+            `Download ${formatLabel(name)}${versionNo !== null ? ` · v${versionNo}` : ''}`}
       </button>
       {error ? <span className="text-xs text-danger">{error}</span> : null}
     </>
@@ -413,9 +453,12 @@ export function DownloadButton({ job }: { job: DownloadableJob }) {
 export function ExportButton({
   workspaceId,
   datasetVersionId,
+  versionNo = null,
 }: {
   workspaceId: string;
   datasetVersionId: string;
+  /** Named on the control, because an export is of one version and no other. */
+  versionNo?: number | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -449,7 +492,9 @@ export function ExportButton({
 
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
-      <span className="text-[13px] font-medium text-muted">Export as</span>
+      <span className="text-[13px] font-medium text-muted">
+        Export {versionNo !== null ? `v${versionNo}` : 'this version'} as
+      </span>
       {(['xlsx', 'csv'] as const).map((format) => (
         <button
           key={format}
@@ -476,12 +521,27 @@ export function ExportButton({
  * same apply. Nothing appears in anyone's data because a model thought it
  * should.
  *
- * The categories box is optional and worth more than it looks. Left empty the
- * model invents a vocabulary, which is fine for a first look and wrong for a
- * practice that already has a chart of accounts. Filled in, it is a closed list
- * -- the worker drops any category outside it rather than quietly adding a
- * fourteenth.
+ * Two vocabularies, and the choice between them is the useful part of this
+ * control.
+ *
+ * **UK tax categories** are HMRC's SA103F boxes. The agent matches most of a
+ * British bank statement from a rule table it ships with, and only asks the
+ * model about what is left — so this option works on an agent host with no
+ * model configured at all, and produces a column that maps onto a return rather
+ * than onto somebody's ad-hoc grouping. It is the default because the product
+ * is for UK accountants and a self-invented vocabulary is work they then have
+ * to redo by hand.
+ *
+ * **Let the agent decide** is the old behaviour, kept for columns that are not
+ * money: the model proposes the vocabulary as well as the assignments, and the
+ * categories box narrows it to a closed list when a practice already has a chart
+ * of accounts.
  */
+const TAXONOMIES = [
+  { value: 'uk_hmrc', label: 'UK tax categories (HMRC)' },
+  { value: '', label: 'Let the agent decide' },
+] as const;
+
 export function CategorizeButton({
   workspaceId,
   datasetVersionId,
@@ -492,12 +552,15 @@ export function CategorizeButton({
   columns: string[];
 }) {
   const router = useRouter();
-  const [column, setColumn] = useState(columns[0] ?? '');
+  const [column, setColumn] = useState(() => bestColumnFor(columns));
+  const [taxonomy, setTaxonomy] = useState<string>('uk_hmrc');
   const [categories, setCategories] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (columns.length === 0) return null;
+
+  const hmrc = taxonomy === 'uk_hmrc';
 
   async function categorize() {
     setBusy(true);
@@ -515,7 +578,20 @@ export function CategorizeButton({
           workspaceId,
           kind: 'categorize_dataset',
           datasetVersionId,
-          payload: { column, ...(wanted.length > 0 ? { categories: wanted } : {}) },
+          payload: {
+            column,
+            ...(taxonomy ? { taxonomy } : {}),
+            // On the HMRC path the vocabulary is fixed and the worker ignores
+            // this, so the box is repurposed as a hint rather than sent as a
+            // list the server would only refuse.
+            ...(hmrc
+              ? categories.trim()
+                ? { hint: categories.trim() }
+                : {}
+              : wanted.length > 0
+                ? { categories: wanted }
+                : {}),
+          },
         }),
       });
       const body = await response.json();
@@ -539,7 +615,7 @@ export function CategorizeButton({
       {/* `grid` rather than `flex-wrap`. A native select sizes itself to its
           widest option and refuses to shrink, so with real column names in it
           this row stretched the whole page to 1,649px on a 1,440px screen. */}
-      <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_auto]">
+      <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,14rem)_minmax(0,14rem)_minmax(0,1fr)_auto]">
         <select
           value={column}
           onChange={(event) => setColumn(event.target.value)}
@@ -554,13 +630,31 @@ export function CategorizeButton({
           ))}
         </select>
 
+        <select
+          value={taxonomy}
+          onChange={(event) => setTaxonomy(event.target.value)}
+          disabled={busy}
+          aria-label="Categories to use"
+          className={selectClassSm}
+        >
+          {TAXONOMIES.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+
         <input
           type="text"
           value={categories}
           onChange={(event) => setCategories(event.target.value)}
           disabled={busy}
-          placeholder="Categories (optional, comma separated)"
-          aria-label="Categories"
+          placeholder={
+            hmrc
+              ? 'What the business does (optional) — e.g. plumbing contractor'
+              : 'Categories (optional, comma separated)'
+          }
+          aria-label={hmrc ? 'What the business does' : 'Categories'}
           className={inputClassSm}
         />
 
@@ -574,9 +668,40 @@ export function CategorizeButton({
         </button>
       </div>
 
+      <p className="mt-2.5 max-w-prose text-xs leading-relaxed text-subtle">
+        {hmrc ? (
+          <>
+            Values are sorted into HMRC&rsquo;s self-employment boxes (SA103F) — travel, premises,
+            office costs and the rest. Personal spending and transfers between the
+            client&rsquo;s own accounts are labelled as such rather than deducted. Most of a UK
+            bank statement is matched from rules, so this runs whether or not a model is
+            connected.
+          </>
+        ) : (
+          <>
+            The agent proposes the vocabulary as well as the assignments. Naming the
+            categories you want makes it a closed list — anything outside it is dropped rather
+            than added. Needs a model.
+          </>
+        )}
+      </p>
+
       {error ? <p className="mt-2 text-xs text-danger">{error}</p> : null}
     </div>
   );
+}
+
+/**
+ * Which column the dropdown should open on.
+ *
+ * It used to open on the first column in the profile, which for a bank
+ * statement is the date — so the obvious next click was to categorise a column
+ * of dates. The description is what anybody categorising a statement means, and
+ * it is worth two lines of guessing to land on it.
+ */
+function bestColumnFor(columns: string[]): string {
+  const preferred = /^(transaction|description|details|narrative|payee|vendor|supplier|merchant|reference|memo|type)/i;
+  return columns.find((name) => preferred.test(name)) ?? columns[0] ?? '';
 }
 
 /**

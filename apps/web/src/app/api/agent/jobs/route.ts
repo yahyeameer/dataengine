@@ -32,6 +32,13 @@ const KINDS = [
   'generate_report',
   'export_dataset',
   'categorize_dataset',
+  // The whole of the simple path. Safe to expose: like every kind here it is
+  // enqueued through `enqueue_agent_job`, which re-checks membership from
+  // `auth.uid()`, and it can only ever act on a version the caller already has
+  // access to. It applies its own change without a review step, which is the
+  // point of it -- and it does so through `auto_approve_proposed_changes`, which
+  // refuses anything at the blocking tier and writes its own audit action.
+  'categorise_statement',
   // Normally chained by parse_workbook when a recipe matches the file's
   // signature, never asked for directly. It is allowed here for one case: a run
   // that stopped at needs_review has to be re-run once its deviations are

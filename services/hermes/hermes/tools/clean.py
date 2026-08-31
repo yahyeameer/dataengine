@@ -284,6 +284,93 @@ def _op_assign_category(table: Table, params: dict[str, Any]) -> OperationResult
     return result
 
 
+def _op_assign_hmrc_categories(table: Table, params: dict[str, Any]) -> OperationResult:
+    """
+    Write the three HMRC columns from one approved set of decisions.
+
+    The sibling of `_op_assign_category`, and separate from it for a reason that
+    is about the audit trail rather than about the code. A tax classification is
+    one judgement with three consequences -- which category, which box on the
+    return, and how much the evidence supports it -- and splitting it into three
+    `assign_category` steps would put one decision in three rows that could
+    afterwards be approved, rejected or replayed independently of each other. A
+    box that disagrees with its category is not a state this should be able to
+    reach.
+
+    Same guards as its sibling, for the same reasons: exact-match on the mapping
+    that was approved, never a re-derivation at apply time; the source column is
+    read and never written; an existing target is left alone rather than
+    overwritten; and rows nothing matched are counted out loud rather than left
+    blank.
+
+    `decisions` maps a normalised source value to `{category, box, confidence}`.
+    That shape comes from `tools.hmrc.Decision.to_row()`, and the operation does
+    not care where it came from -- a rule, a model, or a person editing it -- so
+    replaying last month's recipe writes exactly the columns that were reviewed.
+    """
+    column = params["column"]
+    decisions: dict[str, dict[str, str]] = params.get("decisions", {})
+    fallback: dict[str, str] = params.get("fallback") or {}
+    targets: list[str] = list(params.get("targets") or [])
+
+    values = table.columns.get(column)
+    result = OperationResult(op="assign_hmrc_categories", column=column, rows_changed=0)
+
+    if values is None:
+        result.warnings.append(f"column {column!r} is not present; step skipped")
+        return result
+    if not decisions:
+        result.warnings.append("no categories were approved; step skipped")
+        return result
+    if not targets:
+        result.warnings.append("no output columns were named; step skipped")
+        return result
+
+    existing = [name for name in targets if name in table.columns]
+    if existing:
+        result.warnings.append(
+            f"column(s) {', '.join(repr(name) for name in existing)} already exist; step skipped"
+        )
+        return result
+
+    written: dict[str, list[Any]] = {name: [] for name in targets}
+    unmatched = 0
+
+    for index, value in enumerate(values):
+        key = normalize_text(value).lower() if value is not None else ""
+        decision = decisions.get(key)
+        if decision is None:
+            decision = fallback
+            unmatched += 1
+        else:
+            result.rows_changed += 1
+            if len(result.samples) < 5:
+                result.samples.append(
+                    ChangeRecord(
+                        table.source_rows[index],
+                        targets[0],
+                        None,
+                        str(decision.get(targets[0], "")),
+                    )
+                )
+
+        for name in targets:
+            # "" rather than None: a category with no box on the return is a
+            # real answer, and a blank cell says so where a null reads as a gap
+            # in the data.
+            written[name].append(str(decision.get(name, "") or ""))
+
+    for name in targets:
+        table.columns[name] = written[name]
+
+    if unmatched:
+        result.warnings.append(
+            f"{unmatched} row(s) had no approved category and were left for review"
+        )
+
+    return result
+
+
 def _op_drop_duplicate_rows(table: Table, params: dict[str, Any]) -> OperationResult:
     subset: list[str] | None = params.get("columns")
     keep = params.get("keep", "first")
@@ -434,6 +521,7 @@ _TRANSFORMS: dict[str, Callable[[Table, dict[str, Any]], OperationResult]] = {
     "coerce_number": _op_coerce_number,
     "normalize_date": _op_normalize_date,
     "assign_category": _op_assign_category,
+    "assign_hmrc_categories": _op_assign_hmrc_categories,
 }
 
 # Derived, not hand-listed. A second list of operation names is exactly how the

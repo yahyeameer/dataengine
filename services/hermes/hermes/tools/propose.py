@@ -50,6 +50,7 @@ KNOWN_OPERATIONS = {
     "coerce_number",
     "normalize_date",
     "assign_category",
+    "assign_hmrc_categories",
     "review_ambiguous_dates",
     "review_key_conflicts",
     "block_totals_mismatch",

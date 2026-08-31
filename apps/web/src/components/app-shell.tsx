@@ -1,6 +1,11 @@
 import Link from 'next/link';
 
-import { ActivityIcon, NavLink, WorkspacesIcon } from '@/components/nav-link';
+import {
+  ActivityIcon,
+  CategoriseIcon,
+  NavLink,
+  WorkspacesIcon,
+} from '@/components/nav-link';
 import { Mark } from '@/components/product-story';
 import { SystemHealthBanner } from '@/components/system-health-banner';
 import { getSystemHealth } from '@/lib/system-health';
@@ -28,8 +33,13 @@ import { secondaryButtonClass } from '@/components/ui';
  * current destination.
  */
 
+// Categorise leads because it is the product: upload a file, get it back
+// categorised. Workspaces is everything behind that -- the versions, the
+// review queue, the full history of a run -- and it is one click away rather
+// than in the way.
 const NAV = [
-  { href: '/app', label: 'Workspaces', icon: <WorkspacesIcon /> },
+  { href: '/app', label: 'Categorise', icon: <CategoriseIcon /> },
+  { href: '/app/workspaces', label: 'Workspaces', icon: <WorkspacesIcon /> },
   { href: '/app/audit', label: 'Activity', icon: <ActivityIcon /> },
 ];
 

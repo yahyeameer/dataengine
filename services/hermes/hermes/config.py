@@ -218,6 +218,38 @@ class KanbanConfig:
 
 
 @dataclass(frozen=True)
+class GovUKConfig:
+    """
+    Consulting official guidance, and the switch that keeps it off.
+
+    The agent is allowed to check GOV.UK because a categorisation rule can go
+    out of date and nobody would notice -- guidance changes at every fiscal
+    event and the rule table does not. It is *not* allowed to browse freely:
+    `host` is a single allowlisted origin, redirects are refused, the response
+    is capped, and only GOV.UK's structured content API is read. There is no
+    HTML parsing here and no path that reaches a search engine, a blog or a
+    forum, because the authority hierarchy this agent works to has official
+    guidance at the top and nothing else on the list.
+
+    Disabled by default and inert when disabled: with `enabled` false no socket
+    is opened. Turning it on is a deliberate act on the agent host, the same
+    shape as the Kanban bridge above.
+
+    `refresh_days` is what keeps this cheap. Guidance is re-checked per topic on
+    a cadence, never per transaction -- a run over four thousand rows makes at
+    most a handful of requests, and usually none.
+    """
+
+    enabled: bool = False
+    host: str = "https://www.gov.uk"
+    timeout_seconds: int = 20
+    # 256 KB. A content-API document is a few tens of KB; anything far larger is
+    # not the endpoint we think we are talking to.
+    max_bytes: int = 256 * 1024
+    refresh_days: int = 30
+
+
+@dataclass(frozen=True)
 class Config:
     supabase_url: str
     service_key: str
@@ -270,6 +302,8 @@ class Config:
     llm: LLMConfig = field(default_factory=LLMConfig)
 
     kanban: KanbanConfig = field(default_factory=KanbanConfig)
+
+    govuk: GovUKConfig = field(default_factory=GovUKConfig)
 
     # Section 8's context discipline, enforced as a setting so it is auditable
     # rather than merely intended. Raising it is a deliberate, visible act.
@@ -338,6 +372,14 @@ def load_config() -> Config:
         sweep_seconds=_int("HERMES_KANBAN_SWEEP_SECONDS", 300),
     )
 
+    govuk = GovUKConfig(
+        enabled=_bool("HERMES_GOVUK_ENABLED", False),
+        host=os.environ.get("HERMES_GOVUK_HOST", "").strip() or "https://www.gov.uk",
+        timeout_seconds=_int("HERMES_GOVUK_TIMEOUT_SECONDS", 20),
+        max_bytes=_int("HERMES_GOVUK_MAX_BYTES", 256 * 1024),
+        refresh_days=_int("HERMES_GOVUK_REFRESH_DAYS", 30),
+    )
+
     return Config(
         supabase_url=url,
         service_key=key,
@@ -360,6 +402,7 @@ def load_config() -> Config:
         work_dir=work_dir,
         llm=llm,
         kanban=kanban,
+        govuk=govuk,
         max_sample_values=_int("HERMES_MAX_SAMPLE_VALUES", 5),
         redact_samples=_bool("HERMES_REDACT_SAMPLES", True),
     )

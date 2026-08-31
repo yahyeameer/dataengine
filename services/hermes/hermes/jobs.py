@@ -33,7 +33,7 @@ from typing import Any, Callable
 from .job_types import JobContext, JobDeferred, JobError
 from .llm.redact import build_context
 from .supabase import SupabaseError
-from .tools import analyze, report
+from .tools import analyze, autopilot, govuk, hmrc, report
 from .tools.clean import ADVISORY_OPERATIONS, apply_operations, column_hash, to_parquet
 from .tools.parse import ParsedTable, SheetInterpretation, SkippedRow, parse_workbook
 from .tools.profile import Profile, profile_table
@@ -46,6 +46,7 @@ from .tools.recipe import (
     invariant_status,
     replay,
 )
+from .tools.values import normalize_text
 
 log = logging.getLogger("hermes.jobs")
 
@@ -85,6 +86,7 @@ def categorize_quality(
     categories: list[str],
     rows_total: int,
     rows_covered: int,
+    taxonomy: str | None = None,
 ) -> dict[str, Any]:
     """
     Structural facts about a categorisation, and the two floors it must clear.
@@ -104,6 +106,12 @@ def categorize_quality(
     Both are deliberately non-retryable: the same column and the same values
     will produce the same shape on the next attempt, and burning two more
     attempts only delays the message the accountant needs to read.
+
+    `taxonomy` names a closed vocabulary if one was used. It changes two things:
+    the degeneracy floor is dropped, because "almost one category per value"
+    cannot be a symptom when the categories were fixed before anything ran and
+    there are twenty of them; and the message says who fell short, since a thin
+    result from a rule table is a different problem from a thin one from a model.
     """
     dropped = offered - len(mapping)
     coverage = rows_covered / rows_total if rows_total else 0.0
@@ -121,11 +129,16 @@ def categorize_quality(
     # for nearly every line -- which reads as the tool failing rather than as
     # the answer being thin, and costs trust that is hard to get back.
     if coverage < MIN_CATEGORY_COVERAGE:
+        who = "The UK tax rules recognised" if taxonomy else "The model categorised"
+        remedy = (
+            "the column may hold references rather than descriptions of what was bought"
+            if taxonomy
+            else "the column may be free text, or the values may need a hint about what "
+            "the categories should be"
+        )
         raise JobError(
-            f"The model categorised only {rows_covered} of {rows_total} row(s) "
-            f"({coverage:.0%}) in {column!r}. That is too thin to be worth "
-            f"reviewing -- the column may be free text, or the values may need "
-            f"a hint about what the categories should be.",
+            f"{who} only {rows_covered} of {rows_total} row(s) ({coverage:.0%}) in "
+            f"{column!r}. That is too thin to be worth reviewing -- {remedy}.",
             retryable=False,
         )
 
@@ -134,7 +147,8 @@ def categorize_quality(
     # produces it, and it is indistinguishable from a real result until somebody
     # opens it.
     if (
-        len(mapping) >= MIN_VALUES_FOR_DEGENERACY_CHECK
+        not taxonomy
+        and len(mapping) >= MIN_VALUES_FOR_DEGENERACY_CHECK
         and len(categories) > len(mapping) * MAX_CATEGORY_RATIO
     ):
         raise JobError(
@@ -522,17 +536,36 @@ def handle_parse_workbook(context: JobContext) -> dict[str, Any]:
         {"p_dataset_id": dataset_id, "p_signature": parsed.source_signature},
     )
 
-    # The branch that makes month 2 cheap (MVP criterion 6). If this file's
-    # shape matches a recipe the workspace already has, replay it and surface
-    # only what deviates; otherwise fall through to profiling and proposing
-    # from scratch, which is what month 1 needs.
-    matched = context.supabase.rpc(
-        "match_recipe",
-        {"p_workspace_id": context.workspace_id, "p_source_signature": parsed.source_signature},
-    )
-    recipe = matched[0] if isinstance(matched, list) and matched else None
+    # Autopilot short-circuits both branches below, and deliberately.
+    #
+    # A file uploaded through the categorise screen has one destination: a
+    # categorised workbook. Profiling and proposing would produce a review queue
+    # nobody on that path is going to open, and a recipe replay would apply last
+    # month's cleaning decisions to a file whose owner never saw them. Neither is
+    # wrong in itself; both are answers to a question this customer did not ask.
+    #
+    # The flag comes from the job payload rather than from a workspace setting,
+    # so the same workspace can carry both paths -- one upload categorised
+    # straight through, the next reviewed step by step.
+    autopilot_requested = bool(context.payload.get("autopilot"))
 
-    next_kind = "replay_recipe" if recipe else "profile_dataset"
+    recipe = None
+    if autopilot_requested:
+        next_kind = "categorise_statement"
+    else:
+        # The branch that makes month 2 cheap (MVP criterion 6). If this file's
+        # shape matches a recipe the workspace already has, replay it and surface
+        # only what deviates; otherwise fall through to profiling and proposing
+        # from scratch, which is what month 1 needs.
+        matched = context.supabase.rpc(
+            "match_recipe",
+            {
+                "p_workspace_id": context.workspace_id,
+                "p_source_signature": parsed.source_signature,
+            },
+        )
+        recipe = matched[0] if isinstance(matched, list) and matched else None
+        next_kind = "replay_recipe" if recipe else "profile_dataset"
 
     # Higher priority than a fresh parse so a pipeline in flight finishes
     # before another one starts, which keeps the dashboard's per-dataset
@@ -544,6 +577,18 @@ def handle_parse_workbook(context: JobContext) -> dict[str, Any]:
             "p_kind": next_kind,
             "p_dataset_id": dataset_id,
             "p_dataset_version_id": version["id"],
+            # Carried forward rather than re-derived. A hint the accountant typed
+            # about what the business does is worth as much to the categoriser as
+            # it was to the parse that was asked for.
+            "p_payload": (
+                {
+                    key: context.payload[key]
+                    for key in ("hint", "column")
+                    if context.payload.get(key)
+                }
+                if autopilot_requested
+                else {}
+            ),
             "p_requested_by": context.requested_by(),
             "p_priority": 50,
         },
@@ -553,6 +598,7 @@ def handle_parse_workbook(context: JobContext) -> dict[str, Any]:
         "dataset_version_id": version["id"],
         "version_no": version["version_no"],
         "parquet_path": stored.path,
+        "autopilot": autopilot_requested,
         "rows": table.row_count,
         "columns": len(table.interpretation.columns),
         "source_signature": parsed.source_signature,
@@ -1827,6 +1873,18 @@ def handle_categorize_dataset(context: JobContext) -> dict[str, Any]:
     Filed at the Review tier deliberately, never Auto. A rule that trims
     whitespace can be trusted to a confidence score. A judgement about somebody
     else's accounts cannot, however good the model is on the day.
+
+    Two ways to run it, and the difference is where the vocabulary comes from.
+
+    Ask for the **UK HMRC taxonomy** (`payload.taxonomy = "uk_hmrc"`) and the
+    categories are fixed to the SA103F boxes, `tools.hmrc` decides everything its
+    rules recognise, and the model is asked only about the values left over --
+    constrained to the same closed list on the way back. That path runs with no
+    model at all, which matters: an agent host with no API key used to answer
+    "categorising needs a model" to the question this product exists to answer.
+
+    Leave it off and the behaviour is what it was: the model proposes the
+    vocabulary as well as the assignments, and a model is required.
     """
     version_id = context.job.get("dataset_version_id")
     if not version_id:
@@ -1836,10 +1894,15 @@ def handle_categorize_dataset(context: JobContext) -> dict[str, Any]:
     if not column:
         raise JobError("no column was chosen to categorise")
 
-    if not context.llm.enabled:
+    taxonomy = str(context.payload.get("taxonomy") or "").strip().lower()
+    if taxonomy and taxonomy != hmrc.TAXONOMY:
+        raise JobError(f"unknown taxonomy {taxonomy!r}; expected {hmrc.TAXONOMY!r}")
+
+    if not taxonomy and not context.llm.enabled:
         raise JobError(
-            "Categorising needs a model, and none is configured. Set OPENAI_API_KEY or "
-            "KIMI_API_KEY on the agent host. Every other step runs without one."
+            "Categorising into categories the agent invents needs a model, and none is "
+            "configured. Either set OPENAI_API_KEY or KIMI_API_KEY on the agent host, or "
+            "choose the UK tax categories -- those are decided by rules and need no model."
         )
 
     version = _load_version(context, version_id)
@@ -1856,13 +1919,21 @@ def handle_categorize_dataset(context: JobContext) -> dict[str, Any]:
     # Distinct values and how many rows each covers. The counts are what make
     # the proposal reviewable -- "312 rows" is the number that decides whether
     # this is worth anybody's attention.
+    #
+    # Keyed on `normalize_text(...).lower()`, which is not merely tidier: it is
+    # the exact key `_op_assign_category` looks a row up by when the approved
+    # mapping is applied. Keying on `str(value).strip().lower()` here and on the
+    # normalised form there agrees for almost every value and silently disagrees
+    # for the ones that have been through Word or a PDF -- a non-breaking space
+    # or a doubled space is invisible on screen, and the row it belongs to falls
+    # through to 'Uncategorised' after a reviewer has approved a category for it.
     counts: dict[str, int] = {}
     originals: dict[str, str] = {}
     for row in rows:
         value = row.get(column)
         if value is None:
             continue
-        text = str(value).strip()
+        text = normalize_text(value)
         if not text:
             continue
         key = text.lower()
@@ -1880,26 +1951,81 @@ def handle_categorize_dataset(context: JobContext) -> dict[str, Any]:
     context.heartbeat({"stage": "categorising", "values": len(ordered)})
     requested = context.payload.get("categories")
     categories_in = [str(item) for item in requested] if isinstance(requested, list) else None
+    hint = str(context.payload.get("hint") or "") or None
 
-    mapping, categories, model_used, llm_error = context.llm.categorize_values(
-        column,
-        ordered,
-        categories=categories_in,
-        hint=str(context.payload.get("hint") or "") or None,
-    )
+    rule_mapping: dict[str, str] = {}
+    model_used: str | None = None
+    llm_error: str | None = None
 
-    if llm_error:
-        # Transient by default. A busy free tier, a timeout and a dropped
-        # connection all land here, and telling an accountant their column has
-        # no categories in it because a shared rate limit was hit is a lie the
-        # retry would have corrected.
-        raise JobError(f"The model could not be reached: {llm_error}", retryable=True)
+    if taxonomy == hmrc.TAXONOMY:
+        # The vocabulary is HMRC's, whatever the caller typed. A closed list is
+        # the whole point of filing to a return: an extra category invented for
+        # one supplier is a row that has no box to go in.
+        categories_in = list(hmrc.CATEGORY_NAMES)
+        hint = f"{hmrc.MODEL_HINT} {hint}".strip() if hint else hmrc.MODEL_HINT
 
-    if not mapping:
-        raise JobError(
-            "The model answered but categorised nothing in this column. It may be free text "
-            "rather than something with categories in it."
+        # This job writes a single category column, so it takes the category off
+        # each decision and drops the box and the confidence. That is the older,
+        # narrower answer and it stays that way on purpose: this is the control
+        # in the advanced workspace view, where somebody is choosing a column by
+        # hand, and widening its output would change a column shape people
+        # already have recipes against. The three-column form lives on
+        # `categorise_statement`, which owns the whole file.
+        rule_decisions, unmatched = hmrc.categorise_values(ordered)
+        rule_mapping = {key: decision.category for key, decision in rule_decisions.items()}
+        context.heartbeat(
+            {"stage": "categorising", "values": len(ordered), "by_rule": len(rule_mapping)}
         )
+
+        # The model only ever sees what the rules could not place, so a column of
+        # familiar UK merchants costs one small call or none at all.
+        mapping = dict(rule_mapping)
+        if unmatched and context.llm.enabled:
+            extra, _used, model_used, llm_error = context.llm.categorize_values(
+                column, unmatched, categories=categories_in, hint=hint
+            )
+            if llm_error:
+                # Not fatal here, unlike the model-only path below. The rules
+                # already produced a real answer; failing the whole job because
+                # the tail could not be reached would throw that away and leave
+                # the accountant with nothing.
+                log.warning(
+                    "job %s: hmrc tail not categorised by model: %s", context.job_id, llm_error
+                )
+            # Rules win on conflict. They are the reviewable half -- a pattern
+            # somebody can read -- and the model is filling gaps, not arbitrating.
+            for key, category in extra.items():
+                mapping.setdefault(key, category)
+
+        categories = sorted(set(mapping.values()))
+        if not mapping:
+            raise JobError(
+                f"Nothing in {column!r} matched a UK tax rule"
+                + (
+                    "."
+                    if context.llm.enabled
+                    else ", and no model is configured to judge the rest."
+                )
+                + " It may be a reference or free-text column rather than a description of "
+                "what was bought."
+            )
+    else:
+        mapping, categories, model_used, llm_error = context.llm.categorize_values(
+            column, ordered, categories=categories_in, hint=hint
+        )
+
+        if llm_error:
+            # Transient by default. A busy free tier, a timeout and a dropped
+            # connection all land here, and telling an accountant their column
+            # has no categories in it because a shared rate limit was hit is a
+            # lie the retry would have corrected.
+            raise JobError(f"The model could not be reached: {llm_error}", retryable=True)
+
+        if not mapping:
+            raise JobError(
+                "The model answered but categorised nothing in this column. It may be free text "
+                "rather than something with categories in it."
+            )
 
     target = str(context.payload.get("target") or "").strip() or f"{column}_category"
     covered = sum(counts.get(key, 0) for key in mapping)
@@ -1912,6 +2038,7 @@ def handle_categorize_dataset(context: JobContext) -> dict[str, Any]:
         categories=categories,
         rows_total=len(rows),
         rows_covered=covered,
+        taxonomy=taxonomy or None,
     )
     dropped = quality["values_dropped"]
     singletons = quality["singleton_categories"]
@@ -1934,14 +2061,31 @@ def handle_categorize_dataset(context: JobContext) -> dict[str, Any]:
         f"{'…' if len(categories) > 8 else ''}. "
         f"Approving adds a new {target!r} column and leaves {column!r} untouched."
     )
+    if taxonomy == hmrc.TAXONOMY:
+        # Where each figure ends up is the reason to use this taxonomy at all,
+        # so it is said in the sentence rather than left in the evidence blob.
+        by_model = len(mapping) - len(rule_mapping)
+        rationale += (
+            f" Categories are HMRC's SA103F boxes: {len(rule_mapping)} value(s) were matched "
+            f"by UK tax rules"
+            + (f" and {by_model} by the model" if by_model > 0 else "")
+            + ". Personal spending and transfers are labelled as such rather than deducted."
+        )
     if uncovered:
         rationale += f" {uncovered} row(s) had no category and would read 'Uncategorised'."
     if dropped:
         # Said out loud rather than left in the evidence blob. A reply that lost
         # a third of its values is one a reviewer should look at harder, and
         # they will not go looking if nothing tells them to.
+        #
+        # The same number means two different things. On the open path it is
+        # what the model returned and the filter refused; on the HMRC path
+        # nothing was refused -- those values simply matched no rule and no
+        # model placed them, which is a gap to fill, not an answer to distrust.
         rationale += (
-            f" {dropped} value(s) the model returned were unusable and were discarded."
+            f" {dropped} value(s) matched no rule and were left uncategorised."
+            if taxonomy == hmrc.TAXONOMY
+            else f" {dropped} value(s) the model returned were unusable and were discarded."
         )
     if singletons:
         rationale += (
@@ -1953,7 +2097,11 @@ def handle_categorize_dataset(context: JobContext) -> dict[str, Any]:
         "group_key": f"category:{column}",
         "step_type": "assign_category",
         "column_name": column,
-        "title": f"Add {target}: {len(categories)} categories across {covered} rows",
+        "title": (
+            f"Add {target}: {len(categories)} HMRC tax categories across {covered} rows"
+            if taxonomy == hmrc.TAXONOMY
+            else f"Add {target}: {len(categories)} categories across {covered} rows"
+        ),
         "rationale": rationale,
         "operation": {
             "op": "assign_category",
@@ -1976,6 +2124,20 @@ def handle_categorize_dataset(context: JobContext) -> dict[str, Any]:
             # a sample.
             "mapping": {originals[key]: mapping[key] for key in mapping},
             "model_used": model_used,
+            # Absent on the open-vocabulary path, so a reviewer can tell at a
+            # glance whether the column they are approving is filing-ready or
+            # somebody's ad-hoc grouping.
+            **(
+                {
+                    "taxonomy": hmrc.TAXONOMY,
+                    "boxes": hmrc.boxes_for(categories),
+                    "matched_by_rule": len(rule_mapping),
+                    "matched_by_model": len(mapping) - len(rule_mapping),
+                    "model_error": llm_error,
+                }
+                if taxonomy == hmrc.TAXONOMY
+                else {}
+            ),
         },
         # Review, never Auto: a model's judgement about somebody else's books is
         # exactly the thing a person is here to check.
@@ -2002,9 +2164,523 @@ def handle_categorize_dataset(context: JobContext) -> dict[str, Any]:
         "rows_covered": covered,
         "rows_uncovered": uncovered,
         "model_used": model_used,
+        "taxonomy": taxonomy or None,
+        "matched_by_rule": len(rule_mapping),
         "proposals": count,
     }
 
+
+
+# -----------------------------------------------------------------------------
+# categorise_statement -- the whole simple product, in one job
+# -----------------------------------------------------------------------------
+
+
+def _model_tail(
+    context: JobContext, column: str, unmatched: list[str], hint: str | None
+) -> tuple[dict[str, hmrc.Decision], str | None, str | None]:
+    """
+    Ask the model about the values no rule placed, and about nothing else.
+
+    Three properties, and each one is a rule the brief is explicit about.
+
+    It sees only the tail, so a statement full of familiar UK merchants costs
+    one small call or none at all. It is constrained to the closed HMRC
+    vocabulary, and `router.categorize_values` drops anything outside it. And
+    whatever it returns comes back at medium confidence via
+    `hmrc.decision_for_model_answer` -- it is answering precisely because the
+    evidence was too thin for a rule, so it does not get to claim a certainty
+    the rule could not.
+    """
+    if not unmatched or not context.llm.enabled:
+        return {}, None, None
+
+    mapping, _used, model, error = context.llm.categorize_values(
+        column,
+        unmatched,
+        categories=list(hmrc.CATEGORY_NAMES),
+        hint=f"{hmrc.MODEL_HINT} {hint}".strip() if hint else hmrc.MODEL_HINT,
+    )
+    if error:
+        # Never fatal. The rules have already produced a real answer, and
+        # throwing it away because a shared rate limit was busy would leave the
+        # accountant with nothing rather than with most of their file.
+        log.warning("job %s: model tail unavailable: %s", context.job_id, error)
+        return {}, model, error
+
+    return (
+        {key: hmrc.decision_for_model_answer(category) for key, category in mapping.items()},
+        model,
+        None,
+    )
+
+
+def _official_guidance(context: JobContext, categories: set[str]) -> list[dict[str, Any]]:
+    """
+    Re-read the official guidance behind the tax-sensitive categories in a run.
+
+    Off unless configured, and narrow when on: only the categories in
+    `govuk.TAX_SENSITIVE` that this run actually used, never a page per
+    transaction. What comes back is attached to the proposal as evidence and
+    recorded in `hmrc_sources`, so the next run does not fetch it again.
+
+    It cannot change a classification. A page that has moved raises a change
+    report for a person; the rule that produced the category is unchanged until
+    somebody changes it in code.
+    """
+    if not context.config.govuk.enabled:
+        return []
+
+    wanted = categories & set(govuk.TAX_SENSITIVE)
+    if not wanted:
+        return []
+
+    checked_at = dt.datetime.now(dt.timezone.utc).isoformat()
+    evidence: list[dict[str, Any]] = []
+
+    try:
+        with govuk.GovUKClient(context.config.govuk) as client:
+            for source in client.check_topics(only=frozenset(wanted)):
+                context.supabase.rpc(
+                    "record_hmrc_source",
+                    {
+                        "p_content_path": source.content_path,
+                        "p_url": source.url,
+                        "p_title": source.title,
+                        "p_summary": source.summary,
+                        "p_public_updated_at": source.public_updated_at,
+                        "p_body_hash": source.body_hash,
+                        "p_categories": list(source.categories),
+                    },
+                )
+                evidence.append(source.as_evidence(checked_at))
+    except Exception as error:  # enrichment must never fail a customer run
+        log.warning("job %s: official guidance unavailable: %s", context.job_id, error)
+
+    return evidence
+
+
+def handle_categorise_statement(context: JobContext) -> dict[str, Any]:
+    """
+    Upload to download, in one job.
+
+    The question an accountant is asking is "is my file ready", and until now the
+    product answered it in five parts: parse, profile, propose, approve, apply,
+    export. Every seam between those was a place they had to know something --
+    and one of them, the gap between approving a categorisation and applying it,
+    is where a customer export came out with no category column in it at all.
+
+    So this is one job, and it is finished when there is a validated file. What
+    it does *not* do is skip the record. A proposal is still written with its
+    full evidence, it is still approved before it is applied, and applying it
+    still writes a new immutable version with a parent pointer. The approval is
+    the agent own and is recorded as such -- `auto_approve_proposed_changes`
+    writes a distinct audit action and leaves `decided_by` null, so nothing in
+    the log can be mistaken for a decision a person made.
+
+    The order is deliberate. The file is written, then *opened and checked*, and
+    only then does the job succeed. "The model returned results" is not the same
+    claim as "the accountant has a categorised file", and this is the only place
+    the difference can be established.
+    """
+    version_id = context.job.get("dataset_version_id")
+    if not version_id:
+        raise JobError("this job has no dataset version attached")
+
+    version = _load_version(context, version_id)
+
+    context.heartbeat({"stage": "reading"})
+    parquet_bytes = _load_parquet(context, version)
+    _profile, table = _profile_from_parquet(
+        parquet_bytes, _stored_interpretation(context, version)
+    )
+
+    rows = _rows_from_parquet(parquet_bytes)
+    if not rows:
+        raise JobError("there are no transactions in this file")
+
+    # -- which column holds the merchant --------------------------------------
+    context.heartbeat({"stage": "identifying"})
+    requested = str(context.payload.get("column") or "").strip()
+    column = requested or autopilot.choose_description_column(list(rows[0].keys()), rows)
+    if not column:
+        raise JobError(
+            "We could not find a column of transaction descriptions in this file. It may be "
+            "a summary rather than a list of transactions."
+        )
+    if column not in rows[0]:
+        raise JobError(f"there is no column called {column!r} in this file")
+
+    # -- classify -------------------------------------------------------------
+    counts: dict[str, int] = {}
+    originals: dict[str, str] = {}
+    for row in rows:
+        text = normalize_text(row.get(column))
+        if not text:
+            continue
+        key = text.lower()
+        counts[key] = counts.get(key, 0) + 1
+        originals.setdefault(key, text)
+
+    if not counts:
+        raise JobError(f"the {column!r} column is empty, so there is nothing to categorise")
+
+    ordered = sorted(originals.values(), key=lambda text: -counts[text.lower()])
+
+    context.heartbeat({"stage": "categorising", "values": len(ordered)})
+    decisions, unmatched = hmrc.categorise_values(ordered)
+
+    extra, model_used, model_error = _model_tail(
+        context, column, unmatched, str(context.payload.get("hint") or "") or None
+    )
+    # Rules win on conflict. A rule is prose an accountant can read and argue
+    # with; a model answer is not, and the one that can be checked is the one
+    # that should stand.
+    for key, decision in extra.items():
+        decisions.setdefault(key, decision)
+
+    # Everything still unplaced becomes an explicit "needs review" rather than a
+    # blank. A gap that is visible gets looked at.
+    for value in ordered:
+        decisions.setdefault(normalize_text(value).lower(), hmrc.UNKNOWN)
+
+    categories_used = {decision.category for decision in decisions.values()}
+    sources = _official_guidance(context, categories_used)
+
+    stats = hmrc.summarise(decisions.values())
+    rows_flagged = sum(
+        counts.get(key, 0) for key, decision in decisions.items() if decision.needs_review
+    )
+
+    # -- propose, then approve it as the agent --------------------------------
+    context.heartbeat({"stage": "recording"})
+    group_key = f"hmrc:{column}"
+    proposal = _hmrc_proposal(
+        column=column,
+        group_key=group_key,
+        decisions=decisions,
+        originals=originals,
+        counts=counts,
+        rows_total=len(rows),
+        rows_flagged=rows_flagged,
+        stats=stats,
+        model_used=model_used,
+        model_error=model_error,
+        sources=sources,
+    )
+
+    context.supabase.rpc(
+        "append_proposed_changes",
+        {
+            "p_dataset_version_id": version_id,
+            "p_job_id": context.job_id,
+            "p_proposals": [proposal],
+        },
+    )
+    context.supabase.rpc(
+        "auto_approve_proposed_changes",
+        {
+            "p_dataset_version_id": version_id,
+            "p_group_keys": [group_key],
+            "p_note": (
+                "Applied automatically by the HMRC categorisation agent. The classification "
+                "adds columns beside the original data and changes no existing value; "
+                f"{rows_flagged} row(s) are flagged for review."
+            ),
+        },
+    )
+
+    # -- apply into a new version ---------------------------------------------
+    context.heartbeat({"stage": "applying"})
+    result = apply_operations(table, [proposal["operation"]])
+
+    new_parquet = to_parquet(result.columns, result.source_rows)
+    parquet_object = context.supabase.upload(
+        PARQUET_BUCKET,
+        _parquet_path(
+            context.job["org_id"], context.workspace_id, version["dataset_id"], context.job_id
+        ),
+        new_parquet,
+        content_type="application/vnd.apache.parquet",
+        upsert=True,
+    )
+
+    new_version = context.supabase.rpc(
+        "record_dataset_version",
+        {
+            "p_dataset_id": version["dataset_id"],
+            "p_kind": "cleaned",
+            "p_parquet_path": parquet_object.path,
+            "p_row_count": result.row_count,
+            "p_column_hash": column_hash(result.columns),
+            "p_parent_version_id": version_id,
+            "p_produced_by_job": context.job_id,
+            "p_created_by": context.requested_by(),
+            "p_metadata": {
+                "stage": "categorised",
+                "taxonomy": hmrc.TAXONOMY,
+                "source_column": column,
+                "applied_groups": [group_key],
+                "auto_applied": True,
+                "rows_flagged": rows_flagged,
+            },
+        },
+    )
+
+    context.supabase.rpc(
+        "mark_changes_applied",
+        {"p_dataset_version_id": version_id, "p_group_keys": [group_key]},
+    )
+
+    # -- write the file the accountant opens ----------------------------------
+    context.heartbeat({"stage": "preparing"})
+    export_rows = _rows_from_parquet(new_parquet)
+
+    dataset_rows = context.supabase.select(
+        "datasets", columns="id,name", filters={"id": f"eq.{version['dataset_id']}"}, limit=1
+    )
+    dataset_name = dataset_rows[0]["name"] if dataset_rows else "Transactions"
+    source_filename = _source_filename(context, version)
+
+    workbook = report.rows_to_xlsx(export_rows, sheet_name=dataset_name)
+
+    # -- and prove it is the right file before saying so ----------------------
+    context.heartbeat({"stage": "validating"})
+    try:
+        check = autopilot.validate_export(
+            workbook,
+            expected_rows=result.row_count,
+            source_column=column,
+            source_values=[row.get(column) for row in export_rows],
+        )
+    except autopilot.ValidationError as error:
+        # Deliberately not retryable: the same inputs produce the same file, and
+        # three attempts only delay the message. The version stays -- it is
+        # evidence of what happened -- but no download is offered.
+        raise JobError(
+            "We produced a file but it did not pass our own checks, so we have not offered "
+            f"it for download. ({error})",
+            retryable=False,
+        ) from error
+
+    period = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m")
+    export_object = context.supabase.upload(
+        EXPORTS_BUCKET,
+        (
+            f"{context.job['org_id']}/{context.workspace_id}/{period}/"
+            f"{version['dataset_id']}__v{new_version['version_no']}__categorised.xlsx"
+        ),
+        workbook,
+        content_type=_EXPORT_CONTENT_TYPES["xlsx"],
+        upsert=True,
+    )
+
+    return {
+        # `export_path` and `bucket` are what /api/exports reads. Naming them the
+        # same as export_dataset means the download route needs no special case
+        # and no new trust in this job.
+        "export_path": export_object.path,
+        "bucket": EXPORTS_BUCKET,
+        "format": "xlsx",
+        "byte_size": export_object.size,
+        "dataset_name": dataset_name,
+        "source_filename": source_filename,
+        "version_no": new_version["version_no"],
+        "dataset_version_id": new_version["id"],
+        "parent_version_id": version_id,
+        "source_column": column,
+        "taxonomy": hmrc.TAXONOMY,
+        # The three numbers the result screen shows, computed from the file that
+        # was actually written rather than from what we intended to write.
+        "rows_total": check.rows,
+        "rows_categorised": check.categorised,
+        "rows_flagged": check.flagged,
+        "categories": sorted(categories_used),
+        "values_by_rule": stats["values_by_rule"],
+        "values_by_model": stats["values_by_model"],
+        "model_used": model_used,
+        "official_sources": sources,
+        "validated": True,
+    }
+
+
+def _hmrc_proposal(
+    *,
+    column: str,
+    group_key: str,
+    decisions: dict[str, hmrc.Decision],
+    originals: dict[str, str],
+    counts: dict[str, int],
+    rows_total: int,
+    rows_flagged: int,
+    stats: dict[str, int],
+    model_used: str | None,
+    model_error: str | None,
+    sources: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """
+    The change, written down the way every other change in this product is.
+
+    Medium confidence, never high: this is a judgement about somebody else books,
+    and the tier is what keeps it out of any path that applies findings without a
+    record. The operation carries the decisions verbatim, so what is applied is
+    exactly what was proposed -- no re-derivation, and no second call to a model
+    at apply time.
+    """
+    examples = [
+        {
+            "value": originals[key],
+            "category": decision.category,
+            "box": decision.box,
+            "confidence": decision.confidence,
+            "evidence": decision.evidence,
+            "rows": counts.get(key, 0),
+        }
+        for key, decision in sorted(
+            decisions.items(), key=lambda item: -counts.get(item[0], 0)
+        )[:10]
+    ]
+
+    categories = sorted({decision.category for decision in decisions.values()})
+
+    rationale = (
+        f"{len(decisions)} distinct value(s) in {column!r} were sorted into "
+        f"{len(categories)} HMRC categor{'y' if len(categories) == 1 else 'ies'} across "
+        f"{rows_total} row(s). {stats['values_by_rule']} were matched by UK tax rules"
+        + (f" and {stats['values_by_model']} by the model" if stats["values_by_model"] else "")
+        + f". Adds {', '.join(hmrc.OUTPUT_COLUMNS)} beside the original data and changes "
+        f"nothing that was already there."
+    )
+    if rows_flagged:
+        rationale += (
+            f" {rows_flagged} row(s) are flagged for review: the description does not "
+            f"establish a business purpose, so no deduction is claimed for them."
+        )
+    if model_error:
+        rationale += " Some values could not be sent to the model and were left for review."
+    if sources:
+        rationale += (
+            f" Current GOV.UK guidance was checked for "
+            f"{len(sources)} topic{'' if len(sources) == 1 else 's'}."
+        )
+
+    return {
+        "group_key": group_key,
+        "step_type": "assign_hmrc_categories",
+        "column_name": column,
+        "title": (
+            f"HMRC categories for {rows_total} transactions "
+            f"({len(categories)} categories, {rows_flagged} to review)"
+        ),
+        "rationale": rationale,
+        "operation": {
+            "op": "assign_hmrc_categories",
+            "column": column,
+            "targets": list(hmrc.OUTPUT_COLUMNS),
+            "decisions": {key: decision.to_row() for key, decision in decisions.items()},
+            "fallback": hmrc.UNKNOWN.to_row(),
+        },
+        "evidence": {
+            "taxonomy": hmrc.TAXONOMY,
+            "categories": categories,
+            "boxes": hmrc.boxes_for(categories),
+            "examples": examples,
+            "quality": stats,
+            "rows_flagged": rows_flagged,
+            "model_used": model_used,
+            "model_error": model_error,
+            # Official guidance consulted for this run, if any. Title, URL and
+            # date -- never an extract of the page.
+            "official_sources": sources,
+            # Why each value went where it went. This is what makes the column
+            # auditable at all: eight examples are a sample, and the reviewer who
+            # wants to check the other four hundred can.
+            "reasoning": {
+                key: {
+                    "category": decision.category,
+                    "box": decision.box,
+                    "confidence": decision.confidence,
+                    "evidence": decision.evidence,
+                    "source": decision.source,
+                    "coa": decision.coa,
+                }
+                for key, decision in decisions.items()
+            },
+        },
+        "confidence": "medium",
+        "affected_rows": rows_total,
+    }
+
+
+# -----------------------------------------------------------------------------
+# hmrc_knowledge_check
+# -----------------------------------------------------------------------------
+
+
+def handle_hmrc_knowledge_check(context: JobContext) -> dict[str, Any]:
+    """
+    Re-read official guidance and report what moved. Nothing else.
+
+    There is deliberately no code path from this job to a categorisation rule.
+    It reads GOV.UK, records what it saw, and where a page it had seen before has
+    changed it writes a change report for a person -- what changed, the source,
+    the date, the categories that might be affected, and what to do about it.
+
+    That restraint is the design, not a limitation of it. A government website is
+    edited continuously, and a system that reclassified historical accounts
+    because a paragraph moved would be unauditable: last month return would stop
+    agreeing with itself and nobody could say why. The route from a detected
+    change to a production rule runs through a person, a code change and a test,
+    and it is documented in docs/HMRC_KNOWLEDGE_MONITOR.md.
+    """
+    if not context.config.govuk.enabled:
+        raise JobError(
+            "Checking official guidance is switched off on this agent. Set "
+            "HERMES_GOVUK_ENABLED to turn it on."
+        )
+
+    context.heartbeat({"stage": "checking"})
+    checked = 0
+    changed: list[dict[str, Any]] = []
+
+    with govuk.GovUKClient(context.config.govuk) as client:
+        for source in client.check_topics():
+            checked += 1
+            outcome = context.supabase.rpc(
+                "record_hmrc_source",
+                {
+                    "p_content_path": source.content_path,
+                    "p_url": source.url,
+                    "p_title": source.title,
+                    "p_summary": source.summary,
+                    "p_public_updated_at": source.public_updated_at,
+                    "p_body_hash": source.body_hash,
+                    "p_categories": list(source.categories),
+                },
+            )
+            if isinstance(outcome, dict) and outcome.get("changed"):
+                changed.append(
+                    {
+                        "title": source.title,
+                        "url": source.url,
+                        "published": source.public_updated_at,
+                        "categories": list(source.categories),
+                        "change_report_id": outcome.get("change_report_id"),
+                    }
+                )
+
+    return {
+        "sources_checked": checked,
+        "changes_detected": len(changed),
+        "reports": changed,
+        # Said in the result so it is visible to anyone reading the job row: this
+        # job never touches the rules.
+        "rules_changed": 0,
+        "note": (
+            "Change reports are for human review. Categorisation rules are only ever "
+            "changed in code, with a test, through review."
+        ),
+    }
 
 HANDLERS: dict[str, Callable[[JobContext], dict[str, Any]]] = {
     "parse_workbook": handle_parse_workbook,
@@ -2017,6 +2693,8 @@ HANDLERS: dict[str, Callable[[JobContext], dict[str, Any]]] = {
     "generate_report": handle_generate_report,
     "export_dataset": handle_export_dataset,
     "categorize_dataset": handle_categorize_dataset,
+    "categorise_statement": handle_categorise_statement,
+    "hmrc_knowledge_check": handle_hmrc_knowledge_check,
 }
 
 

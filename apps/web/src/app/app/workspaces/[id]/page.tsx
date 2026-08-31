@@ -7,6 +7,7 @@ import {
   DownloadButton,
   type DownloadableJob,
   ExportButton,
+  exportVersionNo,
 } from '@/components/agent-panel';
 import { AskPanel } from '@/components/ask-panel';
 import {
@@ -23,6 +24,7 @@ import {
   SectionHeading,
   StatusBadge,
 } from '@/components/ui';
+import { isAdvisory } from '@/lib/agent';
 import { requireCurrentOrg } from '@/lib/authz';
 import { createServerSupabase } from '@/lib/supabase/server';
 import { formatBytes } from '@/lib/storage';
@@ -112,6 +114,9 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
   let reviewVersionId: string | null = null;
   let changes: ProposedChange[] = [];
   let latestVersion: { id: string; version_no: number; row_count: number | null } | null = null;
+  // Approved, and not yet written into any version. See the note beside the
+  // banner below: this is the gap an export falls into.
+  let awaitingApply = 0;
 
   if (datasetIds.length > 0) {
     const { data: versions } = await supabase
@@ -126,7 +131,7 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
     const { data: openChanges } = await supabase
       .from('proposed_changes')
       .select(
-        'id, group_key, step_type, column_name, title, rationale, confidence, affected_rows, materiality_gbp, status, evidence, dataset_version_id',
+        'id, group_key, step_type, column_name, title, rationale, confidence, affected_rows, materiality_gbp, status, evidence, dataset_version_id, created_at',
       )
       .eq('workspace_id', workspace.id)
       .in('status', ['pending', 'approved'])
@@ -139,10 +144,31 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
       .limit(100);
 
     if (openChanges && openChanges.length > 0) {
-      reviewVersionId = openChanges[0].dataset_version_id;
+      // The newest proposal decides which version the queue is showing, not
+      // whichever one happened to sort first.
+      //
+      // The order above is confidence then materiality, because that is the
+      // order a reviewer should read the list in. Taking `[0].dataset_version_id`
+      // from it meant the *version* was chosen by confidence too: one stale
+      // blocking finding left on an older version outranked everything, and a
+      // categorisation just proposed against the current version was filtered
+      // out of its own queue. The job succeeded, the proposal existed, and the
+      // screen showed no sign of it.
+      reviewVersionId = openChanges.reduce((newest, change) =>
+        change.created_at > newest.created_at ? change : newest,
+      ).dataset_version_id;
+
       changes = openChanges.filter(
         (change) => change.dataset_version_id === reviewVersionId,
       );
+
+      // Counted across every open version, not just the one on screen. A
+      // proposal leaves this set the moment apply_cleaning marks it applied, so
+      // anything still `approved` is a decision that has been made and has not
+      // reached the data. Advisories are excluded because they never do.
+      awaitingApply = openChanges.filter(
+        (change) => change.status === 'approved' && !isAdvisory(change.step_type),
+      ).length;
     }
   }
 
@@ -182,6 +208,26 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
       job.status === 'succeeded' &&
       (job.kind === 'export_dataset' || job.kind === 'generate_report'),
   ) as DownloadableJob[];
+
+  // Split by the version each file was made from.
+  //
+  // An export is a snapshot of an immutable version, so applying a cleaning
+  // does not update the files already written — it makes them historical. Shown
+  // undifferentiated they are a trap: approve a categorisation, export before
+  // pressing apply, and the resulting file has no category column while sitting
+  // next to one that does under the same "Download Excel" label. Every report of
+  // "the categories are missing from my download" is this list.
+  // Hoisted out of `latestVersion` because narrowing a `let` does not survive
+  // into the callbacks below.
+  const latestVersionNo = latestVersion?.version_no ?? null;
+
+  const currentDownloads = readyDownloads.filter((job) => {
+    const versionNo = exportVersionNo(job);
+    return versionNo === null || latestVersionNo === null || versionNo >= latestVersionNo;
+  });
+  const supersededDownloads = readyDownloads.filter(
+    (job) => !currentDownloads.includes(job),
+  );
 
   const needsDecision = (reviewVersionId && changes.length > 0) || Boolean(openRun);
 
@@ -278,17 +324,50 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
                   available.
                 </p>
               </div>
-              <ExportButton workspaceId={workspace.id} datasetVersionId={latestVersion.id} />
+              <ExportButton
+                workspaceId={workspace.id}
+                datasetVersionId={latestVersion.id}
+                versionNo={latestVersion.version_no}
+              />
             </div>
 
-            {readyDownloads.length > 0 ? (
+            {/* Approving is not applying, and an export taken between the two
+                is the file that started every "where did my categories go"
+                question. Approval records a decision; the column is written
+                when apply_cleaning runs and makes a new version. Saying so at
+                the export control, rather than only in the review queue
+                further up the page, is the difference between a rule somebody
+                knows and a rule somebody meets. */}
+            {awaitingApply > 0 ? (
+              <div className="border-t border-warning/30 bg-warning-soft/40 px-5 py-4">
+                <p className="text-sm leading-relaxed">
+                  <span className="font-medium">
+                    {awaitingApply} approved change{awaitingApply === 1 ? '' : 's'}{' '}
+                    {awaitingApply === 1 ? 'is' : 'are'} not in version{' '}
+                    {latestVersion.version_no} yet.
+                  </span>{' '}
+                  <span className="text-muted">
+                    Approving records the decision; the data changes when you choose{' '}
+                    <em>Apply and create a new version</em> above. Anything exported now will
+                    not contain {awaitingApply === 1 ? 'it' : 'them'}.
+                  </span>
+                </p>
+              </div>
+            ) : null}
+
+            {currentDownloads.length > 0 ? (
               <div className="border-t border-border bg-surface-2/40 px-5 py-4">
                 <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">
-                  Ready to download ({readyDownloads.length})
+                  Ready to download · version {latestVersion.version_no} (
+                  {currentDownloads.length})
                 </p>
                 <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                  {readyDownloads.map((job) => (
-                    <DownloadButton key={job.id} job={job} />
+                  {currentDownloads.map((job) => (
+                    <DownloadButton
+                      key={job.id}
+                      job={job}
+                      currentVersionNo={latestVersionNo}
+                    />
                   ))}
                 </div>
               </div>
@@ -298,6 +377,27 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
                 button appears here.
               </p>
             )}
+
+            {supersededDownloads.length > 0 ? (
+              <details className="border-t border-border px-5 py-4">
+                <summary className="cursor-pointer text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">
+                  Earlier versions ({supersededDownloads.length})
+                </summary>
+                <p className="mt-2 max-w-prose text-xs leading-relaxed text-subtle">
+                  Made before the latest changes were applied. Still correct for the version
+                  they came from, and not what you want if you are after the current figures.
+                </p>
+                <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                  {supersededDownloads.map((job) => (
+                    <DownloadButton
+                      key={job.id}
+                      job={job}
+                      currentVersionNo={latestVersionNo}
+                    />
+                  ))}
+                </div>
+              </details>
+            ) : null}
 
             {profileColumns.length > 0 ? (
               <div className="border-t border-border p-5">

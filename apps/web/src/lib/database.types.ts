@@ -1915,6 +1915,8 @@ export type Database = {
         | "replay_recipe"
         | "export_dataset"
         | "categorize_dataset"
+        | "categorise_statement"
+        | "hmrc_knowledge_check"
         | "kanban_report"
       agent_job_status:
         | "queued"
@@ -2095,6 +2097,8 @@ export const Constants = {
         "replay_recipe",
         "export_dataset",
         "categorize_dataset",
+        "categorise_statement",
+        "hmrc_knowledge_check",
         "kanban_report",
       ],
       agent_job_status: [

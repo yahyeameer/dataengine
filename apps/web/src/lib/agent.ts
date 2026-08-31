@@ -114,6 +114,8 @@ export const JOB_KIND_LABELS: Record<AgentJobKind, string> = {
   generate_report: 'Writing the report',
   export_dataset: 'Preparing the download',
   categorize_dataset: 'Sorting values into categories',
+  categorise_statement: 'Categorising for HMRC',
+  hmrc_knowledge_check: 'Checking official HMRC guidance',
   // Named for what it produces, not for how. "Kanban", "supervisor" and
   // "verifier" are the internal machinery of this one; an accountant is waiting
   // for a report that somebody checked, and that is what the label should say.
