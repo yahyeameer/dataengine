@@ -118,7 +118,13 @@ services:
   # enough to read the agent container's secrets. Narrower than root on the
   # host, not harmless.
   kanban-socket-proxy:
-    image: nginx:1.27-alpine
+    build:
+      context: .
+      dockerfile: deploy/exec-proxy.Dockerfile
+      args:
+        # `stat -c %g /var/run/docker.sock` on the host. See the Dockerfile for
+        # why this cannot be `group_add` alone.
+        DOCKER_GID: ${DOCKER_GID:-988}
     restart: unless-stopped
     environment:
       # Substituted into the config template at start-up by the nginx image's
@@ -129,11 +135,10 @@ services:
     volumes:
       - ./deploy/kanban-exec-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    # The socket is owned by root:docker and nginx's workers run as `nginx`, so
-    # the group is added rather than the user changed. Reading the socket is the
-    # only privilege this container needs and the only one it gets.
-    group_add:
-      - "${DOCKER_GID:-988}"
+    # No group_add: it reaches the container's initial process, and nginx drops
+    # its workers to the `nginx` user, which takes its groups from /etc/group
+    # inside the image. The Dockerfile puts `nginx` in the socket's group, which
+    # is the only privilege this container needs and the only one it gets.
     networks:
       - kanban-exec
     # No ports. Reachable only from the worker, over an internal network.
