@@ -152,6 +152,22 @@ class KanbanConfig:
     # the worker in its own, so on the documented deployment this is a
     # `docker exec` prefix. Split with shlex and run as an argument list.
     command: tuple[str, ...] = ("hermes",)
+
+    # How the worker reaches that command.
+    #
+    # Empty means "run it here" -- the systemd deployment, where the worker sits
+    # beside the CLI. Set, it is the base URL of a docker-socket-proxy and the
+    # CLI is run inside `container` over the exec API.
+    #
+    # The proxy rather than the socket, because this process holds the Supabase
+    # service key: mounting /var/run/docker.sock would put root on the host in
+    # the same place as a credential that bypasses RLS for every tenant. The
+    # proxy narrows that to the container and exec endpoints. Narrower, not
+    # harmless -- exec into the agent container still reaches that container's
+    # secrets.
+    docker_host: str = ""
+    container: str = ""
+    container_user: str = "hermes"
     board: str = "dataengine"
     timeout_seconds: int = 120
 
@@ -301,6 +317,9 @@ def load_config() -> Config:
         enabled=_bool("HERMES_KANBAN_ENABLED", False),
         command=_command("HERMES_KANBAN_COMMAND", "hermes"),
         board=os.environ.get("HERMES_KANBAN_BOARD", "").strip() or "dataengine",
+        docker_host=os.environ.get("HERMES_KANBAN_DOCKER_HOST", "").strip(),
+        container=os.environ.get("HERMES_KANBAN_CONTAINER", "").strip(),
+        container_user=os.environ.get("HERMES_KANBAN_CONTAINER_USER", "").strip() or "hermes",
         timeout_seconds=_int("HERMES_KANBAN_TIMEOUT_SECONDS", 120),
         supervisor_profile=os.environ.get("HERMES_KANBAN_SUPERVISOR", "").strip()
         or "dataengine-supervisor",

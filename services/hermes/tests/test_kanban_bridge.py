@@ -1400,3 +1400,127 @@ def test_the_sweep_does_nothing_when_the_bridge_is_off(monkeypatch):
         worker.llm.close()
 
     assert supabase.rpc_calls == []
+
+
+# =============================================================================
+# The docker-exec transport
+# =============================================================================
+
+
+class FakeHttp:
+    """Just enough of httpx.Client to drive DockerExecRunner."""
+
+    def __init__(self, frames: bytes, exit_code: int | None = 0, create_status: int = 201):
+        self.frames = frames
+        self.exit_code = exit_code
+        self.create_status = create_status
+        self.posts: list[tuple[str, dict[str, Any]]] = []
+
+    def post(self, url, json=None, timeout=None):  # noqa: A002 - mirrors httpx
+        self.posts.append((url, json or {}))
+        if url.endswith("/exec"):
+            return _Response(self.create_status, {"Id": "exec-1"})
+        return _Response(200, content=self.frames)
+
+    def get(self, url, timeout=None):
+        return _Response(200, {"ExitCode": self.exit_code})
+
+
+class _Response:
+    def __init__(self, status_code, payload=None, content=b""):
+        self.status_code = status_code
+        self._payload = payload
+        self.content = content
+        self.text = "" if payload is None else json.dumps(payload)
+
+    def json(self):
+        return self._payload
+
+
+def _frame(stream: int, payload: bytes) -> bytes:
+    return bytes([stream, 0, 0, 0]) + len(payload).to_bytes(4, "big") + payload
+
+
+def test_docker_exec_demultiplexes_stdout_from_stderr():
+    """
+    Without a TTY the daemon interleaves both streams on one connection behind
+    8-byte frame headers. Concatenating the raw body splices those headers into
+    the JSON the CLI printed, and the resulting parse error names the JSON
+    rather than the framing — which is a long way to walk to find a header.
+    """
+    from hermes.kanban import DockerExecRunner
+
+    body = (
+        _frame(1, b'[{"id":"t_0000abcd",')
+        + _frame(2, b"warning: board is busy\n")
+        + _frame(1, b'"status":"done"}]')
+    )
+    http = FakeHttp(body)
+    runner = DockerExecRunner("http://proxy:2375", "agent-1", user="hermes", client=http)
+
+    code, out, err = runner(["hermes", "kanban", "list", "--json"], 30)
+
+    assert code == 0
+    assert json.loads(out) == [{"id": "t_0000abcd", "status": "done"}]
+    assert err.strip() == "warning: board is busy"
+
+
+def test_docker_exec_never_attaches_stdin():
+    """
+    Every `docker exec` in this repo's scripts carries `< /dev/null`, because a
+    CLI waiting on a stdin that never closes is a hang rather than an error.
+    This is the API-level equivalent, and it is worth pinning.
+    """
+    from hermes.kanban import DockerExecRunner
+
+    http = FakeHttp(_frame(1, b"[]"))
+    runner = DockerExecRunner("http://proxy:2375", "agent-1", user="hermes", client=http)
+    runner(["hermes", "kanban", "list"], 30)
+
+    create_url, create_body = http.posts[0]
+    assert create_url.endswith("/containers/agent-1/exec")
+    assert create_body["AttachStdin"] is False
+    assert create_body["Tty"] is False
+    assert create_body["User"] == "hermes"
+    assert create_body["Cmd"] == ["hermes", "kanban", "list"]
+
+
+def test_a_missing_container_is_retryable_not_fatal():
+    """
+    A container that is not there yet — mid-deploy, mid-restart — is a reason to
+    look again, not a reason to fail a customer's report.
+    """
+    from hermes.kanban import DockerExecRunner, KanbanUnavailable
+
+    http = FakeHttp(b"", create_status=404)
+    runner = DockerExecRunner("http://proxy:2375", "agent-1", client=http)
+
+    with pytest.raises(KanbanUnavailable):
+        runner(["hermes", "kanban", "list"], 30)
+
+
+def test_an_unframed_body_is_returned_rather_than_dropped():
+    from hermes.kanban import _demultiplex
+
+    assert _demultiplex(b"plain output") == ("plain output", "")
+    assert _demultiplex(b"") == ("", "")
+
+
+def test_the_transport_is_chosen_from_configuration():
+    from hermes.config import KanbanConfig
+    from hermes.kanban import DockerExecRunner, KanbanError, runner_for
+
+    # No docker host: run it here. That is the systemd deployment, and a
+    # developer with the CLI on their path.
+    assert runner_for(KanbanConfig()) is None
+
+    chosen = runner_for(
+        KanbanConfig(docker_host="http://proxy:2375", container="agent-1")
+    )
+    assert isinstance(chosen, DockerExecRunner)
+    assert chosen.container == "agent-1"
+
+    # Half-configured is refused loudly rather than silently running the CLI in
+    # the worker's own container, where it does not exist.
+    with pytest.raises(KanbanError):
+        runner_for(KanbanConfig(docker_host="http://proxy:2375"))

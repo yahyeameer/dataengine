@@ -49,7 +49,14 @@ import re
 from typing import Any
 
 from .job_types import JobContext, JobDeferred, JobError
-from .kanban import CardSpec, KanbanClient, KanbanError, KanbanTask, KanbanUnavailable
+from .kanban import (
+    CardSpec,
+    KanbanClient,
+    KanbanError,
+    KanbanTask,
+    KanbanUnavailable,
+    runner_for,
+)
 
 log = logging.getLogger("hermes.bridge")
 
@@ -95,6 +102,7 @@ def handle_kanban_report(context: JobContext) -> dict[str, Any]:
         command=settings.command,
         board=settings.board,
         timeout_seconds=settings.timeout_seconds,
+        runner=runner_for(settings),
     )
 
     run = _start_run(context)

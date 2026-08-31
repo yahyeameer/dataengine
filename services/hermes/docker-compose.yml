@@ -32,6 +32,13 @@ services:
       POLARS_MAX_THREADS: ${HERMES_THREADS:-1}
       OMP_NUM_THREADS: ${HERMES_THREADS:-1}
 
+      # The Kanban board lives inside the agent's container, so the bridge runs
+      # the CLI there over the exec API -- through the proxy below, never
+      # against the socket directly. Unset in .env, none of this is reachable
+      # and the bridge is simply off.
+      HERMES_KANBAN_DOCKER_HOST: ${HERMES_KANBAN_DOCKER_HOST:-}
+      HERMES_KANBAN_CONTAINER: ${HERMES_KANBAN_CONTAINER:-}
+
     volumes:
       # Scratch space for parsing. Named rather than bind-mounted so it is not
       # affected by the host's permissions, and so `docker compose down -v`
@@ -39,6 +46,10 @@ services:
       - hermes-work:/var/lib/hermes
 
     networks:
+      # Two networks, and the split is the point. `hermes` reaches the agent's
+      # API server for the reasoning calls; `kanban-exec` reaches the socket
+      # proxy and nothing else.
+      - kanban-exec
       # The Hermes agent's network, so the worker can reach its API server for
       # the reasoning calls. Declared here rather than attached by hand after
       # the fact, because the failure mode of forgetting is silent: the worker
@@ -81,6 +92,54 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # The narrow way to run one command inside the agent's container.
+  #
+  # The worker needs to run `hermes kanban ...`, and that CLI lives in the
+  # agent's container with the board's SQLite file. The obvious way to reach it
+  # -- mount /var/run/docker.sock into the worker and shell out -- hands root on
+  # the host to a process that already holds the Supabase service key. One
+  # compromise would then be the host *and* every tenant's data, and that is not
+  # a trade worth making for a report.
+  #
+  # So the socket is mounted here instead, read-only, behind a proxy that
+  # allows two endpoint groups and refuses everything else. What the worker can
+  # ask for becomes "exec in a container": not create, not start, not privileged
+  # containers, not binding the host filesystem into a new one.
+  #
+  # Worth stating plainly rather than filing under "secured": exec into the
+  # agent container is still enough to read that container's secrets. This is
+  # narrower than root on the host, not harmless. It is the smallest grant that
+  # makes the bridge work at all, and it is why `kanban-exec` is an internal
+  # network -- the proxy has no route off this box.
+  kanban-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    restart: unless-stopped
+    environment:
+      # Everything not named here defaults to off in this image.
+      CONTAINERS: 1   # resolve the agent container by name
+      EXEC: 1         # create and start an exec, and read its exit code
+      POST: 1         # both of the above are POSTs; without this it is read-only
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - kanban-exec
+    # No ports. Reachable only from the worker, over an internal network.
+    read_only: true
+    tmpfs:
+      - /run
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.05"
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
 volumes:
   hermes-work:
 
@@ -90,3 +149,10 @@ networks:
   hermes:
     external: true
     name: ${HERMES_NETWORK:-hermes-agent-bwlq_default}
+
+  # Ours, and deliberately `internal`: the proxy holds a handle on the Docker
+  # socket, so it should not be able to reach anything off this box even if
+  # something inside it were to try.
+  kanban-exec:
+    driver: bridge
+    internal: true

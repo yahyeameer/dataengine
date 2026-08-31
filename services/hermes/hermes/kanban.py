@@ -478,6 +478,173 @@ def _subprocess_runner(argv: Sequence[str], timeout: int) -> tuple[int, str, str
     return completed.returncode, completed.stdout, completed.stderr
 
 
+class DockerExecRunner:
+    """
+    Run the CLI inside another container, over the Docker exec API.
+
+    The board lives in the agent's container and the worker lives in its own,
+    with no shared filesystem. The obvious answer -- mount the Docker socket and
+    shell out to `docker exec` -- gives this process root on the host, and this
+    process already holds the Supabase service key. One compromise would then be
+    the host *and* every tenant's data.
+
+    So the socket is not mounted here. A `docker-socket-proxy` sits in front of
+    it, allowing only the container and exec endpoints, and this class speaks
+    that API directly rather than through a `docker` binary the image does not
+    need to contain. What the worker can do becomes "exec in a container"
+    instead of "anything the daemon can do": no creating privileged containers,
+    no mounting the host filesystem, no reading other containers' images.
+
+    That is still a real privilege, and it is worth saying plainly: exec into the
+    agent container is enough to read that container's secrets. It is narrower
+    than root on the host, not harmless.
+
+    Stdin is never attached, which is the API-level equivalent of the
+    `< /dev/null` that every `docker exec` in this repo's scripts carries -- a
+    CLI waiting on a stdin that never closes is a hang, not an error.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        container: str,
+        user: str = "",
+        client: Any = None,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.container = container
+        self.user = user
+        self._client = client
+
+    def _http(self) -> Any:
+        if self._client is None:
+            import httpx
+
+            self._client = httpx.Client(timeout=httpx.Timeout(120.0, connect=10.0))
+        return self._client
+
+    def __call__(self, argv: Sequence[str], timeout: int) -> tuple[int, str, str]:
+        import httpx
+
+        client = self._http()
+        payload: dict[str, Any] = {
+            "AttachStdin": False,
+            "AttachStdout": True,
+            "AttachStderr": True,
+            "Tty": False,
+            "Cmd": list(argv),
+        }
+        if self.user:
+            payload["User"] = self.user
+
+        try:
+            created = client.post(
+                f"{self.base_url}/containers/{self.container}/exec",
+                json=payload,
+                timeout=timeout,
+            )
+            if created.status_code == 404:
+                raise KanbanUnavailable(
+                    f"no such container {self.container!r} behind the docker proxy"
+                )
+            if created.status_code >= 400:
+                raise KanbanError(
+                    f"docker exec create failed with {created.status_code}: "
+                    f"{created.text[:200]}"
+                )
+            exec_id = (created.json() or {}).get("Id")
+            if not exec_id:
+                raise KanbanError("docker exec create returned no id")
+
+            started = client.post(
+                f"{self.base_url}/exec/{exec_id}/start",
+                json={"Detach": False, "Tty": False},
+                timeout=timeout,
+            )
+            if started.status_code >= 400:
+                raise KanbanError(
+                    f"docker exec start failed with {started.status_code}: "
+                    f"{started.text[:200]}"
+                )
+
+            out, err = _demultiplex(started.content)
+
+            inspected = client.get(f"{self.base_url}/exec/{exec_id}/json", timeout=timeout)
+            code = (inspected.json() or {}).get("ExitCode")
+            # A null ExitCode means the daemon still thinks it is running, which
+            # after a non-detached start means we read the whole stream and the
+            # bookkeeping has not caught up. Treat it as success only if the
+            # command said nothing on stderr.
+            if code is None:
+                code = 0 if not err.strip() else 1
+
+        except httpx.TimeoutException as error:
+            raise KanbanUnavailable(
+                f"the docker proxy did not answer within {timeout}s"
+            ) from error
+        except httpx.HTTPError as error:
+            raise KanbanUnavailable(f"cannot reach the docker proxy: {error}") from error
+
+        return int(code), out, err
+
+
+def _demultiplex(body: bytes) -> tuple[str, str]:
+    """
+    Split Docker's multiplexed stream into stdout and stderr.
+
+    Without a TTY the daemon interleaves both on one connection, framed as an
+    8-byte header -- stream type, three zero bytes, then a big-endian length --
+    followed by that many bytes. Concatenating the raw body instead would splice
+    those headers into the JSON the CLI printed, and the parse error would name
+    the JSON rather than the framing.
+    """
+    if not _is_framed(body):
+        # An older daemon, or a TTY session, or a proxy that unwrapped it.
+        # Returning the body verbatim is better than returning four bytes of it,
+        # which is what reading a length out of ASCII produces.
+        return body.decode("utf-8", "replace"), ""
+
+    stdout: list[bytes] = []
+    stderr: list[bytes] = []
+    offset = 0
+
+    while offset + 8 <= len(body):
+        stream = body[offset]
+        size = int.from_bytes(body[offset + 4:offset + 8], "big")
+        offset += 8
+        chunk = body[offset:offset + size]
+        offset += size
+        if stream == 2:
+            stderr.append(chunk)
+        else:
+            stdout.append(chunk)
+
+    return (
+        b"".join(stdout).decode("utf-8", "replace"),
+        b"".join(stderr).decode("utf-8", "replace"),
+    )
+
+
+def _is_framed(body: bytes) -> bool:
+    """
+    Does this actually look like Docker's frame format?
+
+    Checking rather than assuming, because the failure of assuming is quiet: a
+    plain `[]` is twelve bytes, which is long enough to be read as a header, and
+    the length field then comes out of the ASCII. The result is a few bytes of
+    the real output and no error anywhere.
+
+    A real header is a known stream type followed by three zero bytes, and the
+    frames tile the body exactly.
+    """
+    offset = 0
+    while offset + 8 <= len(body):
+        if body[offset] not in (0, 1, 2) or any(body[offset + 1:offset + 4]):
+            return False
+        offset += 8 + int.from_bytes(body[offset + 4:offset + 8], "big")
+    return offset == len(body) and offset > 0
+
+
 _TRANSIENT = (
     "is not running",
     "no such container",
@@ -486,6 +653,7 @@ _TRANSIENT = (
     "temporarily unavailable",
     "database is locked",
     "resource busy",
+    "no such container",
 )
 
 
@@ -605,6 +773,28 @@ def _probe(client: KanbanClient) -> int:
     return 0
 
 
+def runner_for(settings: Any) -> Callable[[Sequence[str], int], tuple[int, str, str]] | None:
+    """
+    The transport a KanbanConfig asks for.
+
+    None means the default -- run it in this process's own container, which is
+    right for the systemd deployment and for a developer with the CLI on their
+    path. A docker host means go through the proxy.
+    """
+    if not getattr(settings, "docker_host", ""):
+        return None
+    if not getattr(settings, "container", ""):
+        raise KanbanError(
+            "HERMES_KANBAN_DOCKER_HOST is set but HERMES_KANBAN_CONTAINER is not, "
+            "so there is nothing to exec into."
+        )
+    return DockerExecRunner(
+        base_url=settings.docker_host,
+        container=settings.container,
+        user=getattr(settings, "container_user", ""),
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     import argparse
     import os
@@ -616,11 +806,25 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(name)s: %(message)s")
 
+    # Built from the environment exactly the way the worker builds it, so a
+    # green probe means the worker's transport works and not merely that some
+    # transport does.
+    from .config import load_config
+    from .worker import load_local_env
+
+    load_local_env()
+    settings = load_config().kanban
+
     client = KanbanClient(
-        command=split_command(os.environ.get("HERMES_KANBAN_COMMAND", "hermes")),
-        board=args.board,
-        timeout_seconds=int(os.environ.get("HERMES_KANBAN_TIMEOUT_SECONDS", "120")),
+        command=settings.command,
+        board=args.board or settings.board,
+        timeout_seconds=settings.timeout_seconds,
+        runner=runner_for(settings),
     )
+    print(f"board:     {client.board}")
+    print(f"command:   {' '.join(client.command)}")
+    print(f"transport: {'docker exec via ' + settings.docker_host + ' -> ' + settings.container if settings.docker_host else 'local subprocess'}")
+    print()
 
     if args.probe:
         return _probe(client)

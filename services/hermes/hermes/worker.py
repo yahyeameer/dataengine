@@ -316,12 +316,13 @@ class Worker:
         if not isinstance(run, dict) or not run.get("task_ids"):
             return
 
-        from .kanban import KanbanClient
+        from .kanban import KanbanClient, runner_for
 
         client = KanbanClient(
             command=self.config.kanban.command,
             board=run.get("board") or self.config.kanban.board,
             timeout_seconds=self.config.kanban.timeout_seconds,
+            runner=runner_for(self.config.kanban),
         )
         stopped = sum(
             1
