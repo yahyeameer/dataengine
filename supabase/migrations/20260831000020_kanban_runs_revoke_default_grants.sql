@@ -1,0 +1,24 @@
+-- =============================================================================
+-- `enable row level security` was doing all the work here, and it was doing it
+-- alone.
+--
+-- Found by checking rather than by reading: after applying the bridge migration
+-- to production, `has_table_privilege('authenticated','kanban_runs','SELECT')`
+-- came back true. This project's `public` schema carries Supabase's stock
+-- default privileges -- ALTER DEFAULT PRIVILEGES grants `arwdDxtm` on every new
+-- table to both `anon` and `authenticated` -- so `kanban_runs` was created with
+-- full read *and write* grants to both roles. The only thing stopping a
+-- signed-in customer from reading every correlation token in the system was the
+-- absence of a policy.
+--
+-- That is one mistake away from a capability leak: a permissive policy added
+-- later, or RLS switched off during an incident, and the tokens are readable.
+-- The correlation id is the proof that an artefact belongs to a job, so it gets
+-- the same treatment as a secret rather than the same treatment as a row.
+--
+-- Every other table in this schema wants its member-select policy, so this is
+-- not a general change. It is specific to the one table whose intended reader
+-- set is "the worker, and nobody else".
+-- =============================================================================
+
+revoke all on kanban_runs from anon, authenticated;

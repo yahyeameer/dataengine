@@ -264,6 +264,12 @@ create index kanban_runs_workspace_idx on kanban_runs (workspace_id, created_at 
 -- makes an artefact acceptable -- so the smallest possible set of readers is the
 -- right one. If a UI ever needs this, add a view without correlation_id rather
 -- than a policy on the table.
+--
+-- Enabling RLS is not on its own enough, and this comment used to imply it was:
+-- the schema's default privileges hand every new table to `anon` and
+-- `authenticated`, so the grants have to be taken away explicitly. That is the
+-- next migration, 20260831000020, kept separate because it was found by
+-- checking production rather than by writing this file.
 alter table kanban_runs enable row level security;
 grant all on kanban_runs to service_role;
 
