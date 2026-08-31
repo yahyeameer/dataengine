@@ -325,7 +325,18 @@ begin
   )
   values (
     v_job.id, v_job.org_id, v_job.workspace_id,
-    encode(gen_random_bytes(32), 'hex'),
+    -- Schema-qualified: gen_random_bytes is pgcrypto, and on Supabase pgcrypto
+    -- lives in `extensions`, which this function's pinned search_path does not
+    -- include. Unqualified, every bridged job failed all three attempts with
+    -- `function gen_random_bytes(integer) does not exist`.
+    --
+    -- Qualified rather than adding `extensions` to the search path: this is a
+    -- SECURITY DEFINER function that mints a capability, and widening the path
+    -- of one of those is what migration 12 exists to stop.
+    --
+    -- `gen_random_uuid()` in the id default above hid the shape of it by
+    -- working throughout -- that one is core Postgres, not pgcrypto.
+    encode(extensions.gen_random_bytes(32), 'hex'),
     p_board,
     'job-' || v_job.id::text,
     'claimed',
