@@ -124,9 +124,16 @@ services:
     networks:
       - kanban-exec
     # No ports. Reachable only from the worker, over an internal network.
+    # Read-only root, with writable tmpfs exactly where the image needs it.
+    # Its entrypoint generates haproxy.cfg from the environment at start-up, so
+    # a bare read_only crash-loops on "can't create haproxy.cfg" -- which is a
+    # clear message, but only if somebody reads the logs of a container that
+    # never came up.
     read_only: true
     tmpfs:
       - /run
+      - /usr/local/etc/haproxy
+      - /var/lib/haproxy
     security_opt:
       - no-new-privileges:true
     deploy:
