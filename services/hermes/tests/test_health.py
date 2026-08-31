@@ -32,9 +32,19 @@ def test_a_healthy_system_reports_ok():
 
 
 def test_it_reports_the_kind_that_stopped_using_a_model():
+    # Relative to now, not a literal date.
+    #
+    # The alert is windowed on purpose -- `DEGRADATION_WINDOW_HOURS` -- so a
+    # fixed timestamp stops being "recent" a day after it is written, and the
+    # test then fails on its own with an assertion about health that has nothing
+    # to do with any change. It did: this test was red on a clean tree before
+    # the Kanban bridge work began, for exactly that reason.
+    first = _hours_ago(6)
+    last = _hours_ago(4)
+
     report = check(_Stub([
         {"kind": "propose_cleaning", "degraded": 3, "model_ran": 9,
-         "first_degraded_at": "2026-08-30T02:06:39Z", "last_degraded_at": "2026-08-30T04:00:00Z"},
+         "first_degraded_at": first, "last_degraded_at": last},
         {"kind": "generate_report", "degraded": 0, "model_ran": 4},
     ]))
 
@@ -43,7 +53,14 @@ def test_it_reports_the_kind_that_stopped_using_a_model():
     summary = report.summary()
     assert summary["llm_health"] == "degraded"
     assert summary["llm_degraded_kinds"] == {"propose_cleaning": 3}
-    assert summary["llm_degraded_since"] == "2026-08-30T02:06:39Z"
+    assert summary["llm_degraded_since"] == first
+
+
+def _hours_ago(hours: int) -> str:
+    import datetime as dt
+
+    moment = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=hours)
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def test_a_check_that_could_not_run_is_not_reported_as_healthy():
