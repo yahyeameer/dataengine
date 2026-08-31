@@ -28,13 +28,11 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from dataclasses import dataclass
 from typing import Any, Callable
 
-from .config import Config
+from .job_types import JobContext, JobDeferred, JobError
 from .llm.redact import build_context
-from .llm.router import LLMRouter
-from .supabase import SupabaseClient, SupabaseError
+from .supabase import SupabaseError
 from .tools import analyze, report
 from .tools.clean import ADVISORY_OPERATIONS, apply_operations, column_hash, to_parquet
 from .tools.parse import ParsedTable, SheetInterpretation, SkippedRow, parse_workbook
@@ -158,52 +156,6 @@ def categorize_quality(
         "category_count": len(categories),
         "singleton_categories": singletons,
     }
-
-
-class JobError(RuntimeError):
-    """
-    A failure whose message is safe and useful to show the accountant.
-
-    Distinct from an unexpected exception: "Legacy .xls files are not supported"
-    belongs on screen, whereas a KeyError does not. The worker shows the first
-    verbatim and replaces the second with a generic message plus a log line.
-
-    `retryable` defaults to False because a JobError describes a *conclusion*,
-    not an accident -- the file really is an .xls, the blocking issue really is
-    unresolved, and running it twice more produces the same sentence three
-    times while the accountant waits to read it once. Failures worth retrying
-    are the ones that raise something else.
-    """
-
-    def __init__(self, message: str, retryable: bool = False):
-        super().__init__(message)
-        self.retryable = retryable
-
-
-@dataclass
-class JobContext:
-    config: Config
-    supabase: SupabaseClient
-    llm: LLMRouter
-    job: dict[str, Any]
-    # Extends the lease and reports progress. Called by anything slow enough to
-    # risk the lease expiring underneath it.
-    heartbeat: Callable[[dict[str, Any]], None]
-
-    @property
-    def job_id(self) -> str:
-        return self.job["id"]
-
-    @property
-    def workspace_id(self) -> str:
-        return self.job["workspace_id"]
-
-    @property
-    def payload(self) -> dict[str, Any]:
-        return self.job.get("payload") or {}
-
-    def requested_by(self) -> str | None:
-        return self.job.get("requested_by")
 
 
 # -----------------------------------------------------------------------------
@@ -2068,4 +2020,13 @@ HANDLERS: dict[str, Callable[[JobContext], dict[str, Any]]] = {
 }
 
 
-__all__ = ["HANDLERS", "JobContext", "JobError"]
+# Registered here rather than in the literal above only because `hermes.bridge`
+# imports this module's helpers, so it cannot be imported before the table
+# exists. The types both modules share live in `job_types.py`, which is what
+# keeps this a one-line ordering detail rather than an import cycle.
+from .bridge import handle_kanban_report  # noqa: E402
+
+HANDLERS["kanban_report"] = handle_kanban_report
+
+
+__all__ = ["HANDLERS", "JobContext", "JobDeferred", "JobError"]

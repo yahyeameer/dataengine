@@ -323,7 +323,8 @@ def test_advisory_operations_are_proposable():
     assert ADVISORY_OPERATIONS <= KNOWN_OPERATIONS
 
 
-def _worker(capabilities: tuple[str, ...] = ()):
+def _worker(capabilities: tuple[str, ...] = (), kanban: bool = True):
+    from hermes.config import KanbanConfig
     from hermes.worker import Worker
 
     return Worker(
@@ -334,6 +335,7 @@ def _worker(capabilities: tuple[str, ...] = ()):
             hostname="test",
             capabilities=capabilities,
             llm=LLMConfig(),
+            kanban=KanbanConfig(enabled=kanban),
         )
     )
 
@@ -353,6 +355,25 @@ def test_worker_announces_every_kind_it_can_run():
         assert set(worker.capabilities) == set(HANDLERS)
         for required in ("parse_workbook", "apply_cleaning", "replay_recipe", "export_dataset"):
             assert required in worker.capabilities, f"{required} would never be claimed"
+    finally:
+        worker.close()
+
+
+def test_a_disabled_bridge_is_not_announced():
+    """
+    The one deliberate exception to the rule above, and why it is not the bug
+    that rule guards against.
+
+    `kanban_report` is withheld when the bridge is off. That looks like the same
+    failure -- a kind nothing will claim -- but it is the opposite: the job is
+    meant to wait, visibly, until an operator turns the path on. Announcing it
+    would mean claiming it and failing it once a second, which is how "not
+    enabled yet" gets mistaken for "broken".
+    """
+    worker = _worker(kanban=False)
+    try:
+        assert "kanban_report" not in worker.capabilities
+        assert set(worker.capabilities) == set(HANDLERS) - {"kanban_report"}
     finally:
         worker.close()
 

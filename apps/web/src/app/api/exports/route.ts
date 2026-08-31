@@ -36,7 +36,7 @@ const querySchema = z.object({
 const DOWNLOADABLE_BUCKETS = new Set(['exports', 'cleaned']);
 
 /** The job kinds that produce a downloadable artefact. */
-const DOWNLOADABLE_KINDS = new Set(['generate_report', 'export_dataset']);
+const DOWNLOADABLE_KINDS = new Set(['generate_report', 'export_dataset', 'kanban_report']);
 
 /**
  * Sixty seconds. The link is minted in response to a click and handed straight

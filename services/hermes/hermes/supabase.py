@@ -177,6 +177,46 @@ class SupabaseClient:
 
         return b"".join(chunks)
 
+    def create_signed_download_url(self, bucket: str, path: str, expires_in: int) -> str:
+        """
+        A time-limited GET for exactly one object.
+
+        This is how customer data reaches a process that holds no Supabase
+        credentials. What the Kanban worker receives is not a request it can
+        vary -- it is a URL already scoped to one object in one workspace, valid
+        for one run. It cannot reach another firm's data by asking differently,
+        because asking is not what it has.
+        """
+        response = self._request(
+            "POST",
+            f"/storage/v1/object/sign/{bucket}/{path}",
+            headers=self._headers(),
+            content=json.dumps({"expiresIn": int(expires_in)}),
+        )
+        signed = (response.json() or {}).get("signedURL") or (response.json() or {}).get("signedUrl")
+        if not signed:
+            raise SupabaseError(f"no signed URL returned for {bucket}/{path}")
+        return f"{self._url}/storage/v1{signed if signed.startswith('/') else '/' + signed}"
+
+    def create_signed_upload_url(self, bucket: str, path: str) -> str:
+        """
+        A one-shot PUT to exactly one path.
+
+        The path is chosen by the worker, never by the holder of the URL, which
+        is what makes "this artefact belongs to that job" checkable afterwards
+        rather than merely asserted.
+        """
+        response = self._request(
+            "POST",
+            f"/storage/v1/object/upload/sign/{bucket}/{path}",
+            headers=self._headers(),
+            content=json.dumps({}),
+        )
+        signed = (response.json() or {}).get("url")
+        if not signed:
+            raise SupabaseError(f"no signed upload URL returned for {bucket}/{path}")
+        return f"{self._url}/storage/v1{signed if signed.startswith('/') else '/' + signed}"
+
     def upload(
         self,
         bucket: str,

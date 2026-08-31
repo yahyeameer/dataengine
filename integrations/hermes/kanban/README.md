@@ -34,7 +34,50 @@ audit trail for anything a customer is waiting on. If a Kanban chain ever needs
 to touch customer data, an `agent_jobs` row triggers it and the Python worker
 writes the result back — the Kanban worker never talks to Supabase.
 
-Operator-initiated only. Nothing in a customer request path creates a card.
+Operator-initiated, or created by the trusted worker. Nothing in a customer
+request path creates a card **directly**.
+
+### The bridge (2026-08-31)
+
+The conditional sentence above has come true, and it was built the way it was
+written. `services/hermes/hermes/bridge.py` is the whole of it, and the shape is:
+
+```
+agent_jobs (kind: kanban_report)
+  -> the worker claims it, and proves the tenancy by claiming it
+  -> kanban_run_start mints one correlation token, once, in the database
+  -> four cards: supervisor -> analyst -> reporter -> verifier, chained
+  -> the worker hands the job back to the queue between polls
+  -> the verifier passes, and the worker checks that it did
+  -> agent_jobs.result, and the dashboard's existing download control
+```
+
+Three things about it are worth knowing before touching either side:
+
+- **A customer names a job kind, never a card.** The kind is an enum value the
+  database validates and the web route gates behind `KANBAN_BRIDGE_ENABLED`. The
+  card bodies are built by the worker from a template in code; nothing a
+  customer types reaches a title, a flag or an argument list.
+- **The board still holds no credentials.** It gets one signed URL it may read
+  and one it may write, both minted per job, both expiring. It is never told an
+  `org_id` or a `workspace_id` as a field it could act on.
+- **A bridged job is `queued` while it works.** It is handed back between polls
+  so a ten-minute chain does not hold the deployment's only worker. That is why
+  `agent_jobs.available_at` exists, and why the dashboard now shows the stage of
+  a queued job rather than the word "queued".
+
+Every card the bridge creates carries `[de:<16 hex>]` in its title — half the
+run's correlation token, so a human reading the board can tell which job a card
+belongs to. The machine half is stronger: each card is created with
+`--idempotency-key <correlation>:<role>` and tagged `--tenant job-<uuid>`. A
+worker that died mid-creation re-runs the same four creates and gets the same
+four ids back, and `list --tenant job-<uuid>` reads exactly that job's cards on
+a board shared with operator work.
+
+The verifier card is the one in `verifier-card.md`, with three fields added to
+its PASS metadata — `job_id`, `correlation_id` and `artifact`. A PASS without
+them is rejected by the worker, because they are the only proof that the result
+belongs to the request that started it.
 
 ## The board
 

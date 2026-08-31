@@ -45,6 +45,18 @@ def _int(name: str, default: int) -> int:
         raise ConfigError(f"{name} must be an integer, got {raw!r}") from exc
 
 
+def _command(name: str, default: str) -> tuple[str, ...]:
+    """
+    A command line from the environment, as an argument list.
+
+    Split here rather than at the call site so that nothing downstream is ever
+    handed a string it might be tempted to pass to a shell.
+    """
+    from .kanban import split_command
+
+    return split_command(os.environ.get(name, "").strip() or default)
+
+
 def _bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name, "").strip().lower()
     if not raw:
@@ -120,6 +132,76 @@ class LLMConfig:
 
 
 @dataclass(frozen=True)
+class KanbanConfig:
+    """
+    The customer -> Kanban bridge.
+
+    Off by default, and off is a real state: with `enabled` false the worker
+    does not announce `kanban_report` as a capability, so it never claims one.
+    A job of that kind sits queued and visible instead of being claimed and
+    failed, which is the difference between "not switched on yet" and "broken".
+
+    The web route is gated separately (KANBAN_BRIDGE_ENABLED in apps/web), so
+    turning the customer path on is two deliberate acts on two hosts rather than
+    one flag that quietly opens both ends.
+    """
+
+    enabled: bool = False
+
+    # How the worker reaches the CLI. The board lives in the agent's container,
+    # the worker in its own, so on the documented deployment this is a
+    # `docker exec` prefix. Split with shlex and run as an argument list.
+    command: tuple[str, ...] = ("hermes",)
+    board: str = "dataengine"
+    timeout_seconds: int = 120
+
+    # Which profile takes each card. These are Hermes profile names on the agent
+    # host (/opt/data/profiles), not model names.
+    supervisor_profile: str = "dataengine-supervisor"
+    analyst_profile: str = "dataengine-analyst"
+    reporter_profile: str = "dataengine-reporter"
+    verifier_profile: str = "dataengine-supervisor"
+
+    # One poll per claim, not a loop inside one. The dispatcher sweeps once a
+    # minute, so polling faster than that only spends `docker exec` calls on a
+    # single-core box.
+    poll_seconds: int = 30
+    # A blocked card is waiting for a person, and people are slow. Polling it
+    # every thirty seconds for six hours is 720 pointless calls.
+    blocked_poll_seconds: int = 300
+
+    # What bounds a bridged job. Not `max_attempts`, which a deferral gives
+    # back: a chain that never finishes is stopped by its deadline.
+    #
+    # The smoke test measured four Opus-high turns at 68s, 55s, 87s and 50s plus
+    # up to a minute of dispatcher latency per hop -- call it ten minutes for a
+    # healthy chain. An hour leaves room for a retry inside Kanban without
+    # leaving a runaway on the host all afternoon.
+    deadline_seconds: int = 3600
+    # A blocked run is a different clock: somebody has to notice, fix the input
+    # and unblock the card. A working day, after which the customer is told
+    # rather than left waiting.
+    blocked_deadline_seconds: int = 86400
+
+    # How long the input URL handed to the board stays valid. Long enough for a
+    # serialised chain, short enough that a card left on the board overnight
+    # carries a dead link rather than a live one.
+    input_url_ttl_seconds: int = 7200
+
+    # Passed to the board as --max-runtime. A second ceiling under the run's
+    # deadline, enforced by the side that can actually stop a running turn:
+    # the dispatcher SIGTERMs a worker that exceeds it and re-queues the
+    # card. The smoke test's longest turn was 87 seconds, so twenty minutes
+    # is a wide margin around a card that has genuinely hung.
+    card_max_runtime: str = "20m"
+
+    # How often an idle worker looks for a cancelled run whose cards are
+    # still going. Rare housekeeping, so rare that missing one costs a few
+    # minutes of a chain nobody is waiting on.
+    sweep_seconds: int = 300
+
+
+@dataclass(frozen=True)
 class Config:
     supabase_url: str
     service_key: str
@@ -171,6 +253,8 @@ class Config:
 
     llm: LLMConfig = field(default_factory=LLMConfig)
 
+    kanban: KanbanConfig = field(default_factory=KanbanConfig)
+
     # Section 8's context discipline, enforced as a setting so it is auditable
     # rather than merely intended. Raising it is a deliberate, visible act.
     max_sample_values: int = 5
@@ -213,6 +297,28 @@ def load_config() -> Config:
 
     work_dir = Path(os.environ.get("HERMES_WORK_DIR", "").strip() or "/tmp/hermes")
 
+    kanban = KanbanConfig(
+        enabled=_bool("HERMES_KANBAN_ENABLED", False),
+        command=_command("HERMES_KANBAN_COMMAND", "hermes"),
+        board=os.environ.get("HERMES_KANBAN_BOARD", "").strip() or "dataengine",
+        timeout_seconds=_int("HERMES_KANBAN_TIMEOUT_SECONDS", 120),
+        supervisor_profile=os.environ.get("HERMES_KANBAN_SUPERVISOR", "").strip()
+        or "dataengine-supervisor",
+        analyst_profile=os.environ.get("HERMES_KANBAN_ANALYST", "").strip()
+        or "dataengine-analyst",
+        reporter_profile=os.environ.get("HERMES_KANBAN_REPORTER", "").strip()
+        or "dataengine-reporter",
+        verifier_profile=os.environ.get("HERMES_KANBAN_VERIFIER", "").strip()
+        or "dataengine-supervisor",
+        poll_seconds=_int("HERMES_KANBAN_POLL_SECONDS", 30),
+        blocked_poll_seconds=_int("HERMES_KANBAN_BLOCKED_POLL_SECONDS", 300),
+        deadline_seconds=_int("HERMES_KANBAN_DEADLINE_SECONDS", 3600),
+        blocked_deadline_seconds=_int("HERMES_KANBAN_BLOCKED_DEADLINE_SECONDS", 86400),
+        input_url_ttl_seconds=_int("HERMES_KANBAN_INPUT_URL_TTL_SECONDS", 7200),
+        card_max_runtime=os.environ.get("HERMES_KANBAN_CARD_MAX_RUNTIME", "").strip() or "20m",
+        sweep_seconds=_int("HERMES_KANBAN_SWEEP_SECONDS", 300),
+    )
+
     return Config(
         supabase_url=url,
         service_key=key,
@@ -234,6 +340,7 @@ def load_config() -> Config:
         max_download_bytes=_int("HERMES_MAX_DOWNLOAD_BYTES", 50 * 1024 * 1024),
         work_dir=work_dir,
         llm=llm,
+        kanban=kanban,
         max_sample_values=_int("HERMES_MAX_SAMPLE_VALUES", 5),
         redact_samples=_bool("HERMES_REDACT_SAMPLES", True),
     )

@@ -385,6 +385,77 @@ with no gateway restart.
 Adding a board does not raise concurrency: the cap is a host budget, summed
 across boards in `kanban_db.count_running_tasks_other_boards`.
 
+### The customer bridge
+
+`kanban_report` is the job kind whose work the board does. It is **off by
+default and needs two switches**, on two hosts:
+
+```
+apps/web/.env            KANBAN_BRIDGE_ENABLED=true
+services/hermes/.env     HERMES_KANBAN_ENABLED=true
+                         HERMES_KANBAN_COMMAND=docker exec -u hermes                            hermes-agent-bwlq-hermes-agent-1 /opt/hermes/.venv/bin/hermes
+```
+
+Before the first customer job, on the agent host:
+
+```bash
+docker exec hermes-hermes-1 python -m hermes.kanban --probe
+```
+
+Read-only. It runs every argument list the worker builds and prints what the CLI
+accepted, and it checks `create --help` for each flag the bridge depends on by
+name. Green against this installation on 2026-08-31. Run it again after any
+Hermes upgrade: a renamed flag is a five-second finding here and a mystery three
+minutes into a chain. Correct the matching `_argv_*` builder in
+`services/hermes/hermes/kanban.py`.
+
+Three CLI facts the bridge depends on, verified rather than assumed, because
+each one would have failed quietly:
+
+- `create` takes its **title positionally**. `--title` is a parse error.
+- `--workspace` selects the working-directory *kind* (`scratch | worktree |
+  dir:<path>`), not a namespace. The per-job namespace is `--tenant`, and
+  `list --tenant job-<uuid>` reads exactly one job's cards.
+- `block` takes its reason **positionally** and needs `--kind needs_input`. A
+  bare block leaves no diagnostic and the dispatcher's promote pass returns the
+  card to `ready` — observed within a minute on a probe card. That is the
+  difference between stopping a chain and re-running it.
+
+Creation is idempotent at the board: every card carries
+`--idempotency-key <correlation>:<role>`, and a repeat create returns the
+existing id without overwriting the body. So a worker that dies between creating
+a card and recording its id simply runs the same four commands again.
+
+Where a bridged job has got to:
+
+```sql
+select j.status, r.phase, r.verdict, r.polls, r.blocked_reason, r.root_task_id
+from agent_jobs j join kanban_runs r on r.job_id = j.id
+where j.id = '<job id>';
+```
+
+`phase` is the real lifecycle — claimed, orchestrating, running, verifying, then
+completed, blocked, failed, cancelled or timeout. `agent_jobs.status` stays the
+five words the rest of the product understands, and the phase is mirrored into
+`progress->>'stage'` for the dashboard.
+
+**A bridged job reads `queued` while it is working.** That is not a stall. It is
+handed back to the queue between board checks so a ten-minute chain does not
+hold the deployment's only worker, and `available_at` says when it comes back.
+A job that really is stuck has a `polls` counter that stops moving.
+
+**`done` is not a pass.** The worker reads the verifier's verdict, checks the
+correlation token and the artefact path against what it issued, and downloads
+the file before it will record a success. A PASS whose metadata is missing
+`job_id`, `correlation_id` or `artifact` is refused — that is a card-body
+problem, not a worker problem.
+
+**Cancelling.** A customer may still cancel a bridged job, because it is
+`queued`. Doing so cancels the run immediately; the worker stops the cards on
+its next idle sweep (within `HERMES_KANBAN_SWEEP_SECONDS`, default five
+minutes). A cancelled run whose `cards_stopped_at` is still null after that is
+worth a look.
+
 ### Recovery
 
 A card that cannot proceed blocks with a reason. Fix the cause, then:

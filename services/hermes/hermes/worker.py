@@ -33,7 +33,7 @@ from typing import Any
 
 from . import health
 from .config import Config, ConfigError, load_config
-from .jobs import HANDLERS, JobContext, JobError
+from .jobs import HANDLERS, JobContext, JobDeferred, JobError
 from .llm.router import LLMRouter
 from .supabase import SupabaseClient, SupabaseError
 
@@ -48,6 +48,9 @@ class Worker:
         self._stopping = threading.Event()
         self._jobs_done = 0
         self._jobs_failed = 0
+        # Deferrals are neither. Counted so a bridge that is polling
+        # forever is visible on the dashboard rather than only in the log.
+        self._jobs_deferred = 0
         # Unknown until the first check runs, and reported as unknown rather
         # than as healthy -- a monitor that defaults to "fine" is a monitor
         # that lies for its first interval.
@@ -74,6 +77,24 @@ class Worker:
                 f"has no handler for. Known kinds: {', '.join(sorted(HANDLERS))}."
             )
         self.capabilities = requested or tuple(HANDLERS)
+
+        # The bridge's off switch, and it is an off switch with teeth.
+        #
+        # Not announcing `kanban_report` means never claiming one, so a job of
+        # that kind sits `queued` and visible instead of being claimed and
+        # failed once a second. "Not switched on yet" and "broken" look
+        # different, which is the whole point of doing it here rather than
+        # inside the handler.
+        if not config.kanban.enabled and "kanban_report" in self.capabilities:
+            if "kanban_report" in requested:
+                raise ConfigError(
+                    "HERMES_CAPABILITIES names kanban_report, but HERMES_KANBAN_ENABLED "
+                    "is not set. Enable the bridge or drop the capability -- announcing "
+                    "a kind this worker will refuse to run is worse than not claiming it."
+                )
+            self.capabilities = tuple(
+                kind for kind in self.capabilities if kind != "kanban_report"
+            )
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -108,6 +129,7 @@ class Worker:
             "reasoning_provider": self.config.llm.provider_for("reasoning"),
             "jobs_done": self._jobs_done,
             "jobs_failed": self._jobs_failed,
+            "jobs_deferred": self._jobs_deferred,
         }
         metadata.update(self._health.summary())
 
@@ -245,6 +267,72 @@ class Worker:
             # never a reason to abandon an accountant's job.
             log.warning("worker heartbeat failed: %s %s", error.status, error.body)
 
+    def defer(self, job_id: str, progress: dict[str, Any], delay_seconds: int) -> None:
+        """
+        Hand a job back to the queue without spending an attempt on it.
+
+        The counterpart of `finish` for work that is happening elsewhere. See
+        JobDeferred: the job is not done and not broken, it is waiting, and a
+        worker that waits with it is a worker not serving anybody else.
+        """
+        self.supabase.rpc(
+            "defer_agent_job",
+            {
+                "p_job_id": job_id,
+                "p_worker_id": self.config.worker_id,
+                "p_progress": progress,
+                "p_delay_seconds": delay_seconds,
+            },
+        )
+
+    def sweep_cancelled_kanban_runs(self) -> None:
+        """
+        Stop the cards of a chain whose job the customer cancelled.
+
+        Deferral made this necessary. `cancel_agent_job` accepts a `queued` job,
+        and a bridged job is `queued` between polls -- so a customer can now
+        cancel one while four agents are working on it. The database marks the
+        run cancelled the moment they do, which stops the worker from ever
+        resurrecting it, but stopping a card takes the CLI and the database has
+        none.
+
+        So this runs on an idle pass: one run at a time, best effort, never
+        raising. The worst case if it does nothing is a chain that finishes and
+        writes a report nobody reads -- which is the state this replaced, so a
+        failed sweep is no worse than no sweep.
+        """
+        if not self.config.kanban.enabled:
+            return
+
+        try:
+            rows = self.supabase.rpc(
+                "next_cancelled_kanban_run", {"p_worker_id": self.config.worker_id}
+            )
+        except SupabaseError as error:
+            log.warning("kanban sweep could not read: %s %s", error.status, error.body)
+            return
+
+        run = rows[0] if isinstance(rows, list) and rows else rows
+        if not isinstance(run, dict) or not run.get("task_ids"):
+            return
+
+        from .kanban import KanbanClient
+
+        client = KanbanClient(
+            command=self.config.kanban.command,
+            board=run.get("board") or self.config.kanban.board,
+            timeout_seconds=self.config.kanban.timeout_seconds,
+        )
+        stopped = sum(
+            1
+            for task_id in run["task_ids"]
+            if client.block(task_id, "the customer cancelled the job this chain served")
+        )
+        log.info(
+            "kanban sweep: stopped %s/%s card(s) for cancelled job %s",
+            stopped, len(run["task_ids"]), run.get("job_id"),
+        )
+
     def finish(
         self,
         job_id: str,
@@ -302,6 +390,25 @@ class Worker:
             self._jobs_done += 1
             log.info("job %s: done in %sms", job_id, elapsed)
 
+        except JobDeferred as deferred:
+            # Not a failure and not a completion. The job goes back on the queue
+            # with its attempt returned, and this worker moves on to whatever
+            # else is waiting -- which on a one-worker deployment is the whole
+            # reason a ten-minute Kanban chain does not stop everybody else's
+            # month-end.
+            log.info(
+                "job %s: %s; back in %ss",
+                job_id, deferred.reason or "waiting", deferred.delay_seconds,
+            )
+            try:
+                self.defer(job_id, deferred.progress, deferred.delay_seconds)
+                self._jobs_deferred += 1
+            except SupabaseError as error:
+                # The lease still expires, so the job comes back either way.
+                # Losing the deferral costs one lease period of latency, not the
+                # job.
+                log.warning("could not defer job %s: %s %s", job_id, error.status, error.body)
+
         except JobError as error:
             # A message written for the accountant. Shown verbatim, and normally
             # not retried -- see JobError.
@@ -349,6 +456,7 @@ class Worker:
 
         self._last_announce = time.monotonic()
         last_health = time.monotonic()
+        last_sweep = time.monotonic()
         backoff = self.config.poll_seconds
 
         while not self._stopping.is_set():
@@ -363,6 +471,12 @@ class Worker:
                 job = self.claim()
 
                 if job is None:
+                    # Housekeeping belongs on the idle pass and nowhere else. A
+                    # queue with work in it should be spending the host's one
+                    # core on that work, not on tidying.
+                    if now - last_sweep >= self.config.kanban.sweep_seconds:
+                        self.sweep_cancelled_kanban_runs()
+                        last_sweep = now
                     self._stopping.wait(self.config.poll_seconds)
                     backoff = self.config.poll_seconds
                     continue

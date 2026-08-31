@@ -42,9 +42,32 @@ const KINDS = [
   'replay_recipe',
 ] as const;
 
+/**
+ * Kinds a customer may ask for only once an operator has turned them on.
+ *
+ * `kanban_report` runs through the internal multi-agent board, which is a
+ * different risk profile from every kind above it: the work happens in another
+ * process, on another host, in a system with no tenancy of its own. The
+ * database will happily enqueue it — `enqueue_agent_job` checks membership, not
+ * policy — so the decision to expose it lives here, and it is off until
+ * somebody sets the flag.
+ *
+ * The agent host has its own switch (`HERMES_KANBAN_ENABLED`). Two flags on two
+ * hosts is deliberate: opening the customer path is a thing you do on purpose,
+ * twice, rather than a thing that happens because one variable leaked into one
+ * environment file.
+ */
+const GATED_KINDS = ['kanban_report'] as const;
+
+const kanbanBridgeEnabled = process.env.KANBAN_BRIDGE_ENABLED === 'true';
+
+const ALLOWED_KINDS: readonly string[] = kanbanBridgeEnabled
+  ? [...KINDS, ...GATED_KINDS]
+  : KINDS;
+
 const createSchema = z.object({
   workspaceId: z.string().uuid(),
-  kind: z.enum(KINDS),
+  kind: z.enum([...KINDS, ...GATED_KINDS]),
   datasetId: z.string().uuid().nullish(),
   datasetVersionId: z.string().uuid().nullish(),
   rawUploadId: z.string().uuid().nullish(),
@@ -54,6 +77,13 @@ const createSchema = z.object({
 export async function POST(request: Request) {
   try {
     const body = createSchema.parse(await request.json());
+
+    if (!ALLOWED_KINDS.includes(body.kind)) {
+      // 404 rather than 403: a kind that is not switched on is not a permission
+      // the caller could be granted, and saying "forbidden" invites them to ask
+      // who can grant it.
+      return NextResponse.json({ error: `Unknown job kind ${body.kind}` }, { status: 404 });
+    }
 
     await requireWorkspaceAccess(body.workspaceId);
     const supabase = await createServerSupabase();

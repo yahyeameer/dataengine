@@ -263,20 +263,41 @@ function describeModels(metadata: Json): string {
 }
 
 function JobStatus({ job }: { job: Job }) {
+  const progress = (job.progress ?? {}) as Record<string, unknown>;
+  const stage = typeof progress.stage === 'string' ? progress.stage : null;
+
   if (job.status === 'running') {
     // The worker reports which phase it is in on every lease renewal, so this
     // is the real stage rather than a spinner that means "something".
-    const progress = (job.progress ?? {}) as Record<string, unknown>;
-    const stage = typeof progress.stage === 'string' ? progress.stage : 'working';
     return (
       <Badge tone="info">
         <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current pulse-dot" />
-        {stage}…
+        {stage ?? 'working'}…
       </Badge>
     );
   }
 
   if (job.status === 'queued') {
+    // A job whose work is happening somewhere else — a report running on the
+    // internal board — is handed back to the queue between checks so it does
+    // not hold the worker. It is `queued` in the table and *working* in every
+    // sense the accountant cares about, and it carries the stage that says so.
+    //
+    // Without this it read "queued" for ten minutes while four agents worked on
+    // it, which is the indicator telling the opposite of the truth. A blocked
+    // stage is called out separately: that one is waiting for a person, and
+    // showing it as busy is how nobody notices.
+    if (stage) {
+      return stage === 'blocked' ? (
+        <Badge tone="warning">needs attention</Badge>
+      ) : (
+        <Badge tone="info">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current pulse-dot" />
+          {stage}…
+        </Badge>
+      );
+    }
+
     return (
       <Badge tone={job.attempts > 0 ? 'warning' : 'neutral'}>
         {job.attempts > 0 ? `retrying · attempt ${job.attempts + 1}` : 'queued'}

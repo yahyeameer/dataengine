@@ -42,6 +42,7 @@ export type Database = {
       agent_jobs: {
         Row: {
           attempts: number
+          available_at: string
           claimed_at: string | null
           claimed_by: string | null
           created_at: string
@@ -66,6 +67,7 @@ export type Database = {
         }
         Insert: {
           attempts?: number
+          available_at?: string
           claimed_at?: string | null
           claimed_by?: string | null
           created_at?: string
@@ -90,6 +92,7 @@ export type Database = {
         }
         Update: {
           attempts?: number
+          available_at?: string
           claimed_at?: string | null
           claimed_by?: string | null
           created_at?: string
@@ -1912,6 +1915,7 @@ export type Database = {
         | "replay_recipe"
         | "export_dataset"
         | "categorize_dataset"
+        | "kanban_report"
       agent_job_status:
         | "queued"
         | "running"
@@ -2091,6 +2095,7 @@ export const Constants = {
         "replay_recipe",
         "export_dataset",
         "categorize_dataset",
+        "kanban_report",
       ],
       agent_job_status: [
         "queued",
