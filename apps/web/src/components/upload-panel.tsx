@@ -11,7 +11,14 @@ import {
   isAcceptedFilename,
   mimeForFilename,
 } from '@/lib/storage';
-import { ErrorText, Field, buttonClass, inputClass } from '@/components/ui';
+import {
+  ErrorText,
+  Field,
+  buttonClass,
+  fileInputClass,
+  inputClass,
+  selectClass,
+} from '@/components/ui';
 
 type Dataset = { id: string; name: string };
 
@@ -136,7 +143,7 @@ export function UploadPanel({
         hint="Group each month's file under the same dataset. The agent fingerprints the layout on the first parse, so next month's file can be matched to it."
       >
         <select
-          className={inputClass}
+          className={selectClass}
           value={datasetId}
           onChange={(e) => setDatasetId(e.target.value)}
           disabled={busy}
@@ -166,7 +173,7 @@ export function UploadPanel({
       <Field label="File" hint={`${ACCEPTED_EXTENSIONS.join(', ')} · up to ${formatBytes(MAX_UPLOAD_BYTES)}`}>
         <input
           ref={inputRef}
-          className={inputClass}
+          className={fileInputClass}
           type="file"
           accept={ACCEPTED_EXTENSIONS.join(',')}
           disabled={busy}
@@ -176,7 +183,7 @@ export function UploadPanel({
       <ErrorText>{error}</ErrorText>
 
       <div className="flex items-center gap-3">
-        <button className={buttonClass} type="submit" disabled={busy}>
+        <button className={buttonClass()} type="submit" disabled={busy}>
           {busy ? PHASE_LABEL[phase] : 'Upload'}
         </button>
         {busy ? <span className="text-sm text-subtle">{PHASE_LABEL[phase]}</span> : null}

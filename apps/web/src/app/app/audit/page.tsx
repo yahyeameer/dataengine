@@ -1,13 +1,21 @@
-import { EmptyState, PageHeader, TableShell, Td, Th } from '@/components/ui';
+import { EmptyState, PageHeader, TableShell, Td, Th, tableBodyClass } from '@/components/ui';
 import { requireCurrentOrg } from '@/lib/authz';
 import { createServerSupabase } from '@/lib/supabase/server';
 
 export const metadata = { title: 'Activity · DataEngine' };
 
+const LIMIT = 200;
+
 /**
  * The audit trail required by section 13. Append-only in the database, so what
  * is shown here is what happened -- there is no code path, including this
  * application's own, that can rewrite it.
+ *
+ * Two hundred rows is a long table, and it was being rendered as one: every row
+ * repeated the full date, the workspace name wrapped inside a squeezed column
+ * so each row stood a hundred pixels tall, and the header scrolled away after
+ * the first screen of a page twenty-two thousand pixels long. The content is
+ * unchanged; what changed is that it can now be read.
  */
 export default async function AuditPage() {
   const { org } = await requireCurrentOrg();
@@ -19,13 +27,14 @@ export default async function AuditPage() {
       .select('id, action, entity_type, entity_id, workspace_id, actor_user_id, metadata, created_at')
       .eq('org_id', org.id)
       .order('created_at', { ascending: false })
-      .limit(200),
+      .limit(LIMIT),
     supabase.from('workspaces').select('id, name').eq('org_id', org.id),
   ]);
 
   if (error) throw new Error(`Could not load the audit log: ${error.message}`);
 
   const workspaceNames = new Map((workspaces ?? []).map((w) => [w.id, w.name]));
+  const rows = entries ?? [];
 
   return (
     <>
@@ -35,43 +44,155 @@ export default async function AuditPage() {
         subtitle="Every action, in order, with who did it and when. Entries cannot be edited or deleted."
       />
 
-      {!entries || entries.length === 0 ? (
+      {rows.length === 0 ? (
         <EmptyState
           title="No activity yet"
           body="Every upload, job and approval is recorded here the moment it happens, and nothing in this application can edit or remove an entry."
         />
       ) : (
-        <TableShell>
-          <thead className="border-b border-border bg-surface-2">
+        <>
+          <p className="mb-3 text-[13px] text-subtle">
+            Showing the{' '}
+            <span className="tabular font-medium text-muted">{rows.length}</span> most recent
+            {rows.length === LIMIT ? ' of this organisation’s entries' : ' entries'}, newest
+            first.
+          </p>
+
+          <TableShell stickyHead minWidth="46rem">
+            <thead>
               <tr>
-                <Th>When</Th>
-                <Th>Action</Th>
-                <Th>Workspace</Th>
+                <Th className="w-[8.5rem]">When</Th>
+                <Th className="w-[15rem]">Action</Th>
+                <Th className="w-[11rem]">Workspace</Th>
                 <Th>Detail</Th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
-              {entries.map((entry) => (
-                <tr key={entry.id}>
-                  <Td className="whitespace-nowrap text-subtle tabular">
-                    {new Date(entry.created_at).toLocaleString('en-GB')}
-                  </Td>
-                  <Td className="whitespace-nowrap font-medium">{entry.action}</Td>
-                  <Td className="text-muted">
-                    {entry.workspace_id ? workspaceNames.get(entry.workspace_id) ?? '—' : '—'}
-                  </Td>
-                  <Td>
-                    <code className="break-all font-mono text-xs text-subtle">
-                      {summarise(entry.metadata)}
-                    </code>
-                  </Td>
-                </tr>
-              ))}
+            <tbody className={tableBodyClass}>
+              {rows.map((entry, i) => {
+                const at = new Date(entry.created_at);
+                // The date is printed only where it changes. Two hundred rows
+                // from the same afternoon repeated "30/08/2026," two hundred
+                // times, which is two hundred lines of noise in the column the
+                // eye scans first.
+                const previous = i > 0 ? new Date(rows[i - 1].created_at) : null;
+                const newDay =
+                  !previous || previous.toDateString() !== at.toDateString();
+
+                return (
+                  <tr key={entry.id}>
+                    <Td className="whitespace-nowrap tabular">
+                      {newDay && (
+                        <span className="mr-2 font-medium">
+                          {at.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                        </span>
+                      )}
+                      <span className={newDay ? 'text-subtle' : 'text-muted'}>
+                        {at.toLocaleTimeString('en-GB', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                        })}
+                      </span>
+                    </Td>
+                    <Td className="whitespace-nowrap">
+                      <span className="font-medium">{describeAction(entry.action)}</span>
+                    </Td>
+                    <Td className="text-muted">
+                      <span className="block truncate" title={
+                        entry.workspace_id
+                          ? (workspaceNames.get(entry.workspace_id) ?? undefined)
+                          : undefined
+                      }>
+                        {entry.workspace_id
+                          ? (workspaceNames.get(entry.workspace_id) ?? '—')
+                          : '—'}
+                      </span>
+                    </Td>
+                    <Td>
+                      <code className="font-mono text-[11px] leading-relaxed text-subtle">
+                        {summarise(entry.metadata)}
+                      </code>
+                    </Td>
+                  </tr>
+                );
+              })}
             </tbody>
           </TableShell>
+        </>
       )}
     </>
   );
+}
+
+/**
+ * The action, in words rather than in dots.
+ *
+ * `agent.changes.proposed` is the name of an event in a database column, and
+ * an accountant reading their own audit trail should not have to parse one.
+ * Anything not in this map falls back to the raw string with the separators
+ * softened, so a new event type is legible on the day it ships rather than on
+ * the day somebody remembers to add it here.
+ */
+const ACTION_LABELS: Record<string, string> = {
+  'organization.created': 'Organisation created',
+  'workspace.created': 'Workspace created',
+  'dataset.created': 'Dataset created',
+  'dataset.version.created': 'Version written',
+
+  'upload.signed': 'Upload started',
+  'upload.stored': 'File stored',
+  'upload.completed': 'File stored',
+  'upload.failed': 'Upload failed',
+
+  'agent.job.enqueued': 'Job queued',
+  'agent.job.claimed': 'Job started',
+  'agent.job.succeeded': 'Job finished',
+  'agent.job.failed': 'Job failed',
+  'agent.job.retried': 'Job retried',
+  'agent.job.retrying': 'Job retrying',
+  'agent.job.cancelled': 'Job cancelled',
+  'agent.analysis.ran': 'Analysis ran',
+
+  'agent.changes.proposed': 'Changes proposed',
+  'agent.changes.approved': 'Changes approved',
+  'agent.changes.rejected': 'Changes rejected',
+  'agent.deviation.resolved': 'Deviation resolved',
+  'deviation.resolved': 'Deviation resolved',
+
+  'recipe.created': 'Recipe saved',
+  'recipe.version.created': 'Recipe version saved',
+  'recipe.version.edited': 'Recipe version edited',
+
+  'export.signed': 'Export downloaded',
+  'hermes.ask': 'Question asked',
+  'hermes.chat': 'Question asked',
+};
+
+/**
+ * A replay's outcome is written as `recipe.run.<status>`, so the statuses
+ * cannot all be enumerated above without this page having to be edited every
+ * time the worker gains one.
+ */
+const RUN_STATUS_LABELS: Record<string, string> = {
+  started: 'Replay started',
+  succeeded: 'Replay finished',
+  needs_review: 'Replay stopped for review',
+  blocked: 'Replay blocked',
+  failed: 'Replay failed',
+};
+
+function describeAction(action: string): string {
+  const known = ACTION_LABELS[action];
+  if (known) return known;
+
+  if (action.startsWith('recipe.run.')) {
+    const status = action.slice('recipe.run.'.length);
+    return RUN_STATUS_LABELS[status] ?? `Replay ${status.replace(/_/g, ' ')}`;
+  }
+
+  // Anything genuinely new stays legible on the day it ships rather than on
+  // the day somebody remembers to add it here.
+  return action.replace(/\./g, ' · ').replace(/_/g, ' ');
 }
 
 /**

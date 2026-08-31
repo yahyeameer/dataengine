@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { createBrowserSupabase } from '@/lib/supabase/client';
-import { ErrorText, buttonClass } from '@/components/ui';
+import { ErrorText, buttonClass, inputClass } from '@/components/ui';
 
 type Answer = {
   request_id: string;
@@ -124,50 +124,70 @@ export function AskPanel({ workspaceId }: { workspaceId: string }) {
     }
   }
 
-  return (
-    <section className="rounded-[var(--radius-lg)] border border-border px-4 py-3">
-      <p className="text-sm font-medium">Ask about this workspace</p>
-      <p className="mt-1 text-xs text-subtle">
-        Goes to the Hermes agent, which reads the data directly. Answers can take a minute or
-        two — you can leave this page and come back.
-      </p>
+  const thinking = pending?.status === 'pending';
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <input
-          type="text"
-          value={question}
-          onChange={(event) => setQuestion(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !busy) ask();
-          }}
-          disabled={busy}
-          placeholder="e.g. what changed in the latest version?"
-          className="min-w-64 flex-1 rounded border border-border px-2 py-1.5 text-xs  dark:bg-transparent"
-        />
-        <button
-          type="button"
-          onClick={ask}
-          disabled={busy || !question.trim()}
-          className={`${buttonClass} px-3 py-1.5 text-xs`}
-        >
-          {busy ? 'Sending…' : 'Ask'}
-        </button>
+  return (
+    // Glass, deliberately. The design system reserves it for the surfaces that
+    // float above the page rather than sit in it, and this is the one panel on
+    // the workspace that is a conversation rather than a record. It was a bare
+    // bordered box with a 12px input -- the least considered surface on a
+    // screen whose whole premise is that there is an agent behind it.
+    <section className="glass overflow-hidden rounded-[var(--radius-lg)] shadow-[var(--shadow)]">
+      <div className="p-5">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !busy) ask();
+            }}
+            disabled={busy}
+            placeholder="e.g. what changed in the latest version?"
+            aria-label="Ask about this workspace"
+            className={inputClass}
+          />
+          <button
+            type="button"
+            onClick={ask}
+            disabled={busy || !question.trim()}
+            className={`${buttonClass()} shrink-0`}
+          >
+            {busy ? 'Sending…' : 'Ask'}
+          </button>
+        </div>
+
+        <p className="mt-2.5 text-xs leading-relaxed text-subtle">
+          Answers come from the Hermes agent, which reads this workspace&rsquo;s data directly.
+          They can take a minute or two — you can leave this page and come back.
+        </p>
+
+        <ErrorText>{error}</ErrorText>
       </div>
 
-      <ErrorText>{error}</ErrorText>
-
       {pending ? (
-        <div className="mt-3 rounded border border-border px-3 py-2">
-          <p className="text-xs text-subtle">{pending.question}</p>
+        <div className="border-t border-border bg-surface-2/40 px-5 py-4">
+          <p className="text-[13px] font-medium text-muted">{pending.question}</p>
 
-          {pending.status === 'pending' ? (
-            <p className="mt-2 text-xs text-muted">Thinking…</p>
+          {thinking ? (
+            // A skeleton rather than the word "Thinking…". The answer is prose
+            // of unknown length arriving up to two minutes later, and a line of
+            // static text gives no sign that anything is still happening.
+            <div className="mt-3 space-y-2" role="status" aria-label="Waiting for an answer">
+              <div className="flex items-center gap-2 text-xs text-subtle">
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent pulse-dot" />
+                Working on it
+              </div>
+              <div className="skeleton h-3.5 w-full" />
+              <div className="skeleton h-3.5 w-11/12" />
+              <div className="skeleton h-3.5 w-2/3" />
+            </div>
           ) : pending.status === 'failed' ? (
-            <p className="mt-2 text-xs text-danger">
+            <p className="mt-2.5 text-sm text-danger">
               {pending.error ?? 'The agent could not answer.'}
             </p>
           ) : (
-            <p className="mt-2 whitespace-pre-wrap text-sm">{pending.answer}</p>
+            <p className="mt-2.5 whitespace-pre-wrap text-sm leading-relaxed">{pending.answer}</p>
           )}
         </div>
       ) : null}

@@ -52,8 +52,8 @@ export function Panel({
     <Card as="section" className={className}>
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
-          {description && <p className="mt-0.5 text-sm text-muted">{description}</p>}
+          <h2 className="text-[15px] font-semibold tracking-tight">{title}</h2>
+          {description && <p className="mt-1 text-sm leading-relaxed text-muted">{description}</p>}
         </div>
         {action && <div className="shrink-0">{action}</div>}
       </div>
@@ -78,26 +78,52 @@ export function PageHeader({
   eyebrow?: string;
 }) {
   return (
-    <header className="mb-7 flex flex-wrap items-end justify-between gap-4">
+    <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
         {eyebrow && (
-          <p className="mb-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-accent">
+          <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.14em] text-accent">
             {eyebrow}
           </p>
         )}
-        <h1 className="text-2xl font-semibold tracking-tight text-balance">{title}</h1>
-        {subtitle && <p className="mt-1.5 max-w-2xl text-sm text-muted">{subtitle}</p>}
+        {/* Large enough to be the first thing read on the page, and the only
+            thing at this size. Every other heading in the product steps down
+            from here rather than competing with it. */}
+        <h1 className="text-[28px] font-semibold leading-tight tracking-tight text-balance sm:text-[32px]">
+          {title}
+        </h1>
+        {subtitle && (
+          <p className="mt-2 max-w-2xl text-[15px] leading-relaxed text-muted">{subtitle}</p>
+        )}
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </header>
   );
 }
 
-export function SectionHeading({ children, hint }: { children: ReactNode; hint?: string }) {
+/**
+ * The one section heading in the product.
+ *
+ * There used to be three sizes of section title on the workspace page -- 14px
+ * here, an 18px heading the review queue rolled itself, and a 14px uppercase
+ * one in the deviations panel -- so the page read as three screens stapled
+ * together. Everything now steps down from `PageHeader` through this.
+ */
+export function SectionHeading({
+  children,
+  hint,
+  description,
+}: {
+  children: ReactNode;
+  hint?: ReactNode;
+  description?: string;
+}) {
   return (
-    <div className="mb-3 flex items-baseline justify-between gap-3">
-      <h2 className="text-sm font-semibold tracking-tight">{children}</h2>
-      {hint && <span className="text-xs text-subtle">{hint}</span>}
+    <div className="mb-3.5">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 className="text-[17px] font-semibold tracking-tight">{children}</h2>
+        {hint && <span className="text-xs text-subtle">{hint}</span>}
+      </div>
+      {description && <p className="mt-1 text-sm leading-relaxed text-muted">{description}</p>}
     </div>
   );
 }
@@ -111,26 +137,106 @@ export function SectionHeading({ children, hint }: { children: ReactNode; hint?:
    -------------------------------------------------------------------------- */
 
 const controlBase =
-  'inline-flex items-center justify-center gap-2 rounded-[var(--radius)] text-sm font-medium ' +
-  'transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50';
+  'inline-flex items-center justify-center gap-2 rounded-[var(--radius)] font-medium ' +
+  'transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45 ' +
+  'disabled:shadow-none';
 
-export const buttonClass =
-  `${controlBase} bg-accent px-4 py-2 text-white hover:bg-accent-hover ` +
-  'shadow-[var(--shadow-sm)]';
+/**
+ * Two control sizes and no others.
+ *
+ * The product had five, arrived at one call site at a time -- `px-2.5 py-1`,
+ * `px-3 py-1.5`, `px-4 py-2` -- so two buttons doing the same job in two panels
+ * were different heights. `md` is the default; `sm` is for controls that sit
+ * inside a row of content rather than under it.
+ *
+ * Both clear 32px, which is the smallest a real person hits reliably.
+ */
+export const controlSize = {
+  sm: 'h-8 px-3 text-[13px]',
+  md: 'h-10 px-4 text-sm',
+} as const;
 
-export const secondaryButtonClass =
-  `${controlBase} border border-border bg-surface px-4 py-2 text-foreground hover:bg-surface-2 hover:border-border-strong`;
+export type ControlSize = keyof typeof controlSize;
 
-export const ghostButtonClass =
-  `${controlBase} px-3 py-1.5 text-muted hover:bg-surface-2 hover:text-foreground`;
+/**
+ * The filled control.
+ *
+ * `text-accent-ink` rather than `text-white`: the dark theme's accent is a pale
+ * mint, and white on it was the one unreadable pairing in the palette. Every
+ * primary button in the product was affected.
+ */
+export function buttonClass(size: ControlSize = 'md') {
+  return (
+    `${controlBase} ${controlSize[size]} glow-hover bg-accent text-accent-ink ` +
+    'hover:bg-accent-hover shadow-[var(--shadow-sm)]'
+  );
+}
 
-export const dangerButtonClass =
-  `${controlBase} border border-danger/30 bg-danger-soft px-4 py-2 text-danger hover:border-danger/50`;
+export function secondaryButtonClass(size: ControlSize = 'md') {
+  return (
+    `${controlBase} ${controlSize[size]} border border-border bg-surface text-foreground ` +
+    'transition-[color,background-color,border-color,box-shadow] ' +
+    'hover:border-border-strong hover:bg-surface-2'
+  );
+}
+
+export function ghostButtonClass(size: ControlSize = 'sm') {
+  return `${controlBase} ${controlSize[size]} text-muted hover:bg-surface-2 hover:text-foreground`;
+}
+
+export function dangerButtonClass(size: ControlSize = 'md') {
+  return (
+    `${controlBase} ${controlSize[size]} border border-danger/30 bg-danger-soft text-danger ` +
+    'hover:border-danger/50'
+  );
+}
+
+/**
+ * A quiet text control for a disclosure -- "Show evidence", "Show all". Not a
+ * button shape, because it reveals rather than does.
+ */
+/**
+ * Sized to be hittable. At its natural line height this was a 20px-tall target
+ * on a phone, which is under every touch guideline going -- and it is the
+ * control that opens the evidence behind a decision worth millions.
+ */
+export const disclosureClass =
+  'inline-flex min-h-8 items-center gap-1.5 rounded-[var(--radius)] py-1.5 text-[13px] ' +
+  'font-medium text-accent transition-colors hover:text-accent-hover';
 
 export const inputClass =
-  'w-full rounded-[var(--radius)] border border-border bg-surface px-3 py-2 text-sm text-foreground ' +
-  'outline-none transition-colors placeholder:text-subtle ' +
+  'w-full min-w-0 rounded-[var(--radius)] border border-border bg-surface px-3 text-sm text-foreground ' +
+  'h-10 outline-none transition-[border-color,box-shadow] placeholder:text-subtle ' +
   'focus:border-accent focus:ring-2 focus:ring-[var(--accent-ring)]';
+
+/** The same field at the small size, for controls that sit inside a row. */
+export const inputClassSm =
+  'w-full min-w-0 rounded-[var(--radius)] border border-border bg-surface px-2.5 text-[13px] text-foreground ' +
+  'h-8 outline-none transition-[border-color,box-shadow] placeholder:text-subtle ' +
+  'focus:border-accent focus:ring-2 focus:ring-[var(--accent-ring)]';
+
+/**
+ * A `select` needs `max-w-full` explicitly.
+ *
+ * A native select sizes itself to its widest option, ignores its flex
+ * container, and will not shrink. The categorise control was fed real column
+ * names and stretched the whole workspace page to 1,649px on a 1,440px screen
+ * -- every viewport scrolled sideways because of one dropdown.
+ */
+export const selectClass = `${inputClass} max-w-full`;
+
+/**
+ * A file input keeps its native button, so it cannot take a fixed height the
+ * way the other controls do -- the browser lays the button out on its own
+ * baseline and a hard `h-10` clips it.
+ */
+export const fileInputClass =
+  'w-full min-w-0 rounded-[var(--radius)] border border-border bg-surface px-3 py-2 text-sm ' +
+  'text-foreground outline-none transition-[border-color,box-shadow] ' +
+  'file:mr-3 file:rounded-[6px] file:border-0 file:bg-surface-2 file:px-3 file:py-1.5 ' +
+  'file:text-[13px] file:font-medium file:text-foreground hover:border-border-strong ' +
+  'focus:border-accent focus:ring-2 focus:ring-[var(--accent-ring)]';
+export const selectClassSm = `${inputClassSm} max-w-full`;
 
 export function Field({
   label,
@@ -312,25 +418,52 @@ export function EmptyState({
   steps?: string[];
   action?: ReactNode;
 }) {
-  return (
-    <div className="rounded-[var(--radius-lg)] border border-dashed border-border bg-surface/50 px-6 py-12 text-center">
-      <h3 className="text-base font-semibold tracking-tight">{title}</h3>
-      <p className="mx-auto mt-2 max-w-md text-sm text-muted">{body}</p>
+  const laddered = Boolean(steps && steps.length > 0);
 
-      {steps && steps.length > 0 && (
-        <ol className="mx-auto mt-6 max-w-md space-y-2 text-left">
-          {steps.map((step, i) => (
-            <li key={step} className="flex items-start gap-3 text-sm text-muted">
-              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent-soft font-mono text-[11px] font-semibold text-accent">
+  return (
+    // A solid surface rather than a dashed outline. The dashed box read as a
+    // drop target on the workspace page -- it sat beside an upload form, and
+    // nothing could be dropped on it.
+    <div className="rounded-[var(--radius-lg)] border border-border bg-surface px-6 py-10 sm:px-8">
+      <div className={laddered ? '' : 'text-center'}>
+        <h3 className="text-base font-semibold tracking-tight">{title}</h3>
+        <p
+          className={`mt-1.5 text-sm leading-relaxed text-muted ${
+            laddered ? 'max-w-lg' : 'mx-auto max-w-md'
+          }`}
+        >
+          {body}
+        </p>
+      </div>
+
+      {laddered && (
+        // The same numbered ladder the sign-in page uses to explain the
+        // product, so a first-time customer meets one explanation twice rather
+        // than two different ones.
+        <ol className="mt-6 max-w-lg">
+          {steps!.map((step, i) => (
+            <li key={step} className="relative flex gap-3.5 pb-4 last:pb-0">
+              {i < steps!.length - 1 && (
+                <span
+                  aria-hidden
+                  className="absolute left-[11px] top-6 h-[calc(100%-1rem)] w-px bg-border"
+                />
+              )}
+              <span
+                aria-hidden
+                className="relative z-10 flex h-[23px] w-[23px] shrink-0 items-center justify-center rounded-full border border-accent/30 bg-accent-soft font-mono text-[10px] font-semibold text-accent"
+              >
                 {i + 1}
               </span>
-              {step}
+              <span className="min-w-0 pt-0.5 text-sm leading-relaxed text-muted">{step}</span>
             </li>
           ))}
         </ol>
       )}
 
-      {action && <div className="mt-6 flex justify-center">{action}</div>}
+      {action && (
+        <div className={`mt-7 flex ${laddered ? '' : 'justify-center'}`}>{action}</div>
+      )}
     </div>
   );
 }
@@ -389,22 +522,48 @@ export function SkeletonTable({ rows = 5, cols = 4 }: { rows?: number; cols?: nu
  * Financial tables are wide and phones are not. Letting the page scroll
  * sideways instead breaks every other column on the screen, so the overflow is
  * contained here once rather than remembered at each call site.
+ *
+ * `stickyHead` because the audit log is two hundred rows and twenty thousand
+ * pixels tall. A header that scrolls away on a table that long is a header
+ * that is only read once.
  */
-export function TableShell({ children }: { children: ReactNode }) {
+export function TableShell({
+  children,
+  stickyHead = false,
+  minWidth = '42rem',
+}: {
+  children: ReactNode;
+  stickyHead?: boolean;
+  minWidth?: string;
+}) {
   return (
-    <div className="overflow-x-auto rounded-[var(--radius-lg)] border border-border bg-surface">
-      <table className="w-full min-w-[42rem] text-sm">{children}</table>
+    <div
+      className={`overflow-x-auto rounded-[var(--radius-lg)] border border-border bg-surface ${
+        stickyHead ? '[&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10' : ''
+      }`}
+    >
+      <table className="w-full text-sm" style={{ minWidth }}>
+        {children}
+      </table>
     </div>
   );
 }
 
-export function Th({ children, align = 'left' }: { children: ReactNode; align?: 'left' | 'right' }) {
+export function Th({
+  children,
+  align = 'left',
+  className = '',
+}: {
+  children: ReactNode;
+  align?: 'left' | 'right';
+  className?: string;
+}) {
   return (
     <th
       scope="col"
-      className={`whitespace-nowrap px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-subtle ${
+      className={`whitespace-nowrap border-b border-border bg-surface-2 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-subtle ${
         align === 'right' ? 'text-right' : 'text-left'
-      }`}
+      } ${className}`}
     >
       {children}
     </th>
@@ -422,28 +581,84 @@ export function Td({
 }) {
   return (
     <td
-      className={`px-4 py-3 align-top ${align === 'right' ? 'text-right tabular' : ''} ${className}`}
+      className={`px-4 py-2.5 align-middle ${
+        align === 'right' ? 'text-right tabular' : ''
+      } ${className}`}
     >
       {children}
     </td>
   );
 }
 
+/** A body whose rows separate and warm under the cursor. */
+export const tableBodyClass =
+  'divide-y divide-border-subtle [&>tr]:transition-colors [&>tr:hover]:bg-surface-2/70';
+
 /** A single figure with its label. No sparkline, no delta, no invented trend. */
 export function Stat({
   label,
   value,
   hint,
+  tone = 'neutral',
 }: {
   label: string;
   value: ReactNode;
   hint?: string;
+  tone?: 'neutral' | 'accent' | 'warning';
+}) {
+  const accentRing = {
+    neutral: 'border-border',
+    accent: 'border-accent/30 bg-accent-soft/30',
+    warning: 'border-warning/30 bg-warning-soft/40',
+  }[tone];
+
+  return (
+    <div className={`rounded-[var(--radius-lg)] border bg-surface px-4 py-3.5 ${accentRing}`}>
+      <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">{label}</p>
+      <p className="mt-1.5 text-2xl font-semibold tabular leading-none tracking-tight">{value}</p>
+      {hint && <p className="mt-1.5 text-xs text-subtle">{hint}</p>}
+    </div>
+  );
+}
+
+/**
+ * A money figure, at the weight the amount deserves.
+ *
+ * The review queue asks an accountant to sign off on a change worth thirteen
+ * million pounds, and that number was rendered at 12px in the same grey as the
+ * column name beside it. Materiality is the axis the whole queue is ranked on;
+ * it should not be the quietest thing in the row.
+ */
+export function Money({
+  children,
+  size = 'sm',
+}: {
+  children: ReactNode;
+  size?: 'sm' | 'lg';
 }) {
   return (
-    <div className="rounded-[var(--radius-lg)] border border-border bg-surface px-4 py-3.5">
-      <p className="text-xs font-medium uppercase tracking-wider text-subtle">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular tracking-tight">{value}</p>
-      {hint && <p className="mt-0.5 text-xs text-subtle">{hint}</p>}
-    </div>
+    <span
+      className={`tabular font-semibold tracking-tight text-foreground ${
+        size === 'lg' ? 'text-[17px]' : 'text-[13px]'
+      }`}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
+ * A label/value pair for the impact strip under a proposal. Each fact gets its
+ * own cell so the numbers line up down a column of proposals instead of being
+ * buried in a run-on sentence.
+ */
+export function Fact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <span className="inline-flex flex-col gap-0.5">
+      <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-subtle">
+        {label}
+      </span>
+      <span className="text-[13px] leading-none">{children}</span>
+    </span>
   );
 }

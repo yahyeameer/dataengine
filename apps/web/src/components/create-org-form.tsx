@@ -21,7 +21,7 @@ export function CreateOrgForm() {
 
       <ErrorText>{state.error}</ErrorText>
 
-      <button className={buttonClass} type="submit" disabled={pending}>
+      <button className={buttonClass()} type="submit" disabled={pending}>
         {pending ? 'Creating…' : 'Create organization'}
       </button>
     </form>

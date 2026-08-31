@@ -81,7 +81,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
 
       <ErrorText>{error}</ErrorText>
 
-      <button className={`${buttonClass} w-full`} type="submit" disabled={pending}>
+      <button className={`${buttonClass()} w-full`} type="submit" disabled={pending}>
         {pending ? 'Working…' : isSignup ? 'Create account' : 'Sign in'}
       </button>
 

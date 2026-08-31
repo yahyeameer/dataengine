@@ -12,7 +12,14 @@ import {
   isWorkerOnline,
 } from '@/lib/agent';
 import type { Json } from '@/lib/database.types';
-import { StatusBadge, buttonClass, secondaryButtonClass } from '@/components/ui';
+import {
+  Badge,
+  StatusBadge,
+  buttonClass,
+  inputClassSm,
+  secondaryButtonClass,
+  selectClassSm,
+} from '@/components/ui';
 
 type Job = {
   id: string;
@@ -107,8 +114,8 @@ export function AgentPanel({
   const recent = jobs.slice(0, 5);
 
   return (
-    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border px-4 py-3">
+    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border bg-surface-2/50 px-5 py-3.5">
         <span
           aria-hidden
           className={`inline-block h-2 w-2 shrink-0 rounded-full ${
@@ -126,9 +133,9 @@ export function AgentPanel({
             {describeModels(online[0].metadata)}
           </span>
         ) : (
-          <span className="text-xs text-muted">
-            Nothing will run until it reconnects. Anything you ask for is queued and
-            picked up automatically.
+          <span className="text-[13px] text-muted">
+            Nothing will run until it reconnects. Anything you ask for is queued and picked up
+            automatically.
           </span>
         )}
 
@@ -141,23 +148,26 @@ export function AgentPanel({
       </div>
 
       {recent.length === 0 ? (
-        <p className="px-4 py-3.5 text-sm text-muted">
+        <p className="px-5 py-4 text-sm text-muted">
           Nothing has run yet. Upload a file and choose Analyse to start.
         </p>
       ) : (
-        <ul className="divide-y divide-border">
+        <ul className="divide-y divide-border-subtle">
           {recent.map((job) => (
-            <li key={job.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
+            <li key={job.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-3">
               <span className="text-sm font-medium">{JOB_KIND_LABELS[job.kind] ?? job.kind}</span>
 
               <JobStatus job={job} />
 
-              <DownloadButton job={job} />
+              {/* No download control here. Every finished export is listed
+                  under Cleaned data, where somebody looking for their file
+                  actually goes; repeating it inline gave a workspace two
+                  identical "Download Excel" buttons in different places. */}
 
               <RelativeTime timestamp={job.finished_at ?? job.created_at} />
 
               {job.error ? (
-                <p className="w-full text-xs text-danger">{job.error}</p>
+                <p className="w-full text-xs leading-relaxed text-danger">{job.error}</p>
               ) : null}
             </li>
           ))}
@@ -237,17 +247,18 @@ function JobStatus({ job }: { job: Job }) {
     const progress = (job.progress ?? {}) as Record<string, unknown>;
     const stage = typeof progress.stage === 'string' ? progress.stage : 'working';
     return (
-      <span className="rounded bg-blue-500/15 px-2 py-0.5 text-xs text-blue-700 dark:text-blue-300">
+      <Badge tone="info">
+        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current pulse-dot" />
         {stage}…
-      </span>
+      </Badge>
     );
   }
 
   if (job.status === 'queued') {
     return (
-      <span className="rounded bg-surface-2 px-2 py-0.5 font-mono text-xs text-muted">
-        {job.attempts > 0 ? `retrying (attempt ${job.attempts + 1})` : 'queued'}
-      </span>
+      <Badge tone={job.attempts > 0 ? 'warning' : 'neutral'}>
+        {job.attempts > 0 ? `retrying · attempt ${job.attempts + 1}` : 'queued'}
+      </Badge>
     );
   }
 
@@ -339,11 +350,11 @@ export function DownloadButton({ job }: { job: DownloadableJob }) {
         onClick={download}
         disabled={busy}
         title={name}
-        className={`${secondaryButtonClass} px-2.5 py-1 text-xs`}
+        className={`${secondaryButtonClass('sm')}`}
       >
         {busy ? 'Preparing…' : `Download ${formatLabel(name)}`}
       </button>
-      {error ? <span className="text-xs text-red-600">{error}</span> : null}
+      {error ? <span className="text-xs text-danger">{error}</span> : null}
     </>
   );
 }
@@ -395,19 +406,19 @@ export function ExportButton({
 
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
-      <span className="text-xs font-medium text-muted">Export cleaned data</span>
+      <span className="text-[13px] font-medium text-muted">Export as</span>
       {(['xlsx', 'csv'] as const).map((format) => (
         <button
           key={format}
           type="button"
           onClick={() => requestExport(format)}
           disabled={busy !== null}
-          className={`${secondaryButtonClass} px-2.5 py-1 text-xs`}
+          className={secondaryButtonClass('sm')}
         >
           {busy === format ? 'Starting…' : format === 'xlsx' ? 'Excel' : 'CSV'}
         </button>
       ))}
-      {error ? <span className="text-xs text-red-600">{error}</span> : null}
+      {error ? <span className="text-xs text-danger">{error}</span> : null}
     </span>
   );
 }
@@ -475,19 +486,23 @@ export function CategorizeButton({
   }
 
   return (
-    <div className="rounded-[var(--radius-lg)] border border-border bg-surface px-4 py-3.5">
+    <div>
       <p className="text-sm font-medium">Categorise a column</p>
-      <p className="mt-1 text-xs text-subtle">
+      <p className="mt-1 max-w-prose text-[13px] leading-relaxed text-subtle">
         The agent reads the column&rsquo;s distinct values — never the rows — and proposes a
         category for each. It arrives in the review queue as a change you approve.
       </p>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      {/* `grid` rather than `flex-wrap`. A native select sizes itself to its
+          widest option and refuses to shrink, so with real column names in it
+          this row stretched the whole page to 1,649px on a 1,440px screen. */}
+      <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)_auto]">
         <select
           value={column}
           onChange={(event) => setColumn(event.target.value)}
           disabled={busy}
-          className="rounded-[var(--radius)] border border-border bg-surface px-2 py-1 text-xs"
+          aria-label="Column to categorise"
+          className={selectClassSm}
         >
           {columns.map((name) => (
             <option key={name} value={name}>
@@ -502,20 +517,21 @@ export function CategorizeButton({
           onChange={(event) => setCategories(event.target.value)}
           disabled={busy}
           placeholder="Categories (optional, comma separated)"
-          className="min-w-56 flex-1 rounded-[var(--radius)] border border-border bg-surface px-2 py-1 text-xs"
+          aria-label="Categories"
+          className={inputClassSm}
         />
 
         <button
           type="button"
           onClick={categorize}
           disabled={busy || !column}
-          className={`${buttonClass} px-3 py-1.5 text-xs`}
+          className={buttonClass('sm')}
         >
           {busy ? 'Starting…' : 'Categorise'}
         </button>
       </div>
 
-      {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
+      {error ? <p className="mt-2 text-xs text-danger">{error}</p> : null}
     </div>
   );
 }
@@ -580,11 +596,11 @@ export function AnalyseButton({
         type="button"
         onClick={analyse}
         disabled={busy}
-        className={`${secondaryButtonClass} px-2.5 py-1 text-xs`}
+        className={`${secondaryButtonClass('sm')}`}
       >
         {busy ? 'Starting…' : 'Analyse'}
       </button>
-      {error ? <span className="ml-2 text-xs text-red-600">{error}</span> : null}
+      {error ? <span className="ml-2 text-xs text-danger">{error}</span> : null}
     </span>
   );
 }

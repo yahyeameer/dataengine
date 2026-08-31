@@ -27,15 +27,31 @@
      the ground rather than floating on top of it. */
   --foreground: #0e1720;
   --muted: #475763;
-  --subtle: #6b7c88;
+  /* Darkened from #6b7c88. The old value measured 3.94:1 against surface-2 and
+     4.09:1 against the page ground -- under WCAG AA for the small text this
+     token is used for almost everywhere: table headers, timestamps, field
+     labels, the footer. The ramp foreground -> muted -> subtle is unchanged;
+     the bottom of it is now readable. */
+  --subtle: #5d6e7a;
 
   --border: #dde5eb;
   --border-strong: #c3cfd8;
+  /* A hairline for dividers inside a surface, lighter than the surface's own
+     edge so a list does not read as a stack of separate cards. */
+  --border-subtle: #e8eef3;
 
   --accent: #10706c;
   --accent-hover: #0c5a57;
---accent-soft: #e2f1f0;
+  --accent-soft: #e2f1f0;
   --accent-ring: #10706c33;
+  /* Text that sits *on* the accent. A separate token because the accent
+     inverts between themes: white on the deep teal reads, white on the dark
+     theme's pale mint does not. Every filled control reads this, so the
+     contrast is fixed in one place rather than per component. */
+  --accent-ink: #ffffff;
+  /* The glow. One shadow, used for the hover state of anything the reader is
+     meant to press, and for the surface that is currently the subject. */
+  --accent-glow: 0 0 0 1px rgb(16 112 108 / 0.10), 0 6px 20px -8px rgb(16 112 108 / 0.35);
 
   --success: #2f6b47;
   --success-soft: #e3f0e8;
@@ -69,11 +85,16 @@
 
     --border: #22303c;
     --border-strong: #334554;
+    --border-subtle: #1b2731;
 
     --accent: #4bb8b0;
     --accent-hover: #63c9c1;
     --accent-soft: #12292e;
     --accent-ring: #4bb8b040;
+    /* Near-black rather than white. The dark theme's accent is a pale mint and
+       white on it is the one genuinely unreadable combination in the palette. */
+    --accent-ink: #05201f;
+    --accent-glow: 0 0 0 1px rgb(75 184 176 / 0.16), 0 6px 22px -8px rgb(75 184 176 / 0.30);
 
     --success: #6cb98a;
     --success-soft: #14251c;
@@ -99,7 +120,9 @@
   --color-subtle: var(--subtle);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
+  --color-border-subtle: var(--border-subtle);
   --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
   --color-accent-hover: var(--accent-hover);
   --color-accent-soft: var(--accent-soft);
   --color-success: var(--success);
@@ -192,12 +215,82 @@ body {
 }
 
 /* --- glass ------------------------------------------------------------------
-   Used in three places and nowhere else: the auth panel, the AI status panel,
-   and overlays. A frosted interface is a tiring interface, and glass everywhere
-   means glass signifies nothing. */
+   Used for the surfaces that float above the page rather than sit in it: the
+   auth panel, the sticky application bar, the AI panels. A frosted interface is
+   a tiring interface, and glass everywhere means glass signifies nothing. */
 .glass {
   background: color-mix(in srgb, var(--surface) 72%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+/* The same treatment for a bar that has content scrolling under it. Heavier
+   blur, no border of its own -- the bar draws its own bottom hairline. */
+.glass-bar {
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .glass,
+  .glass-bar {
+    background: var(--surface);
+  }
+}
+
+/* --- interaction ------------------------------------------------------------
+   The product's one flourish. A surface the reader can act on lifts a little
+   and picks up a whisper of the accent when hovered; a surface that is merely
+   information does not move. That contrast is the information -- it is how the
+   eye finds what is pressable without every element shouting.
+
+   Kept as utilities rather than repeated Tailwind chains so "interactive" means
+   exactly one thing across the product. */
+
+.lift {
+  transition:
+    border-color 150ms ease,
+    box-shadow 200ms ease,
+    transform 200ms ease;
+}
+.lift:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  box-shadow: var(--accent-glow);
+  transform: translateY(-1px);
+}
+
+/* For rows in a list, which must not move -- a list that shifts under the
+   cursor is a list that is hard to click down. They warm instead. */
+.row-hover {
+  transition: background-color 130ms ease, box-shadow 130ms ease;
+}
+.row-hover:hover {
+  background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface));
+}
+
+/* The glow on a filled control, so the primary action on a screen is the one
+   thing that answers to the cursor with light. */
+.glow-hover {
+  transition: background-color 150ms ease, box-shadow 200ms ease;
+}
+.glow-hover:hover:not(:disabled) {
+  box-shadow: var(--accent-glow);
+}
+
+/* Marks the surface that is currently the subject of the screen -- the review
+   queue when something is waiting, the deviations panel when a run is paused.
+   A ring rather than a colour fill, so the content inside keeps the ordinary
+   contrast it needs to be read. */
+.ring-subject {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+    var(--shadow-lg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lift:hover {
+    transform: none;
+  }
 }

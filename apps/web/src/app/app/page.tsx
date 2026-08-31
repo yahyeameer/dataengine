@@ -1,7 +1,8 @@
 import Link from 'next/link';
 
 import { CreateWorkspaceForm } from '@/components/create-workspace-form';
-import { Card, EmptyState, PageHeader, StatusDot } from '@/components/ui';
+import { Card, EmptyState, Money, PageHeader, StatusDot } from '@/components/ui';
+import { formatMoney } from '@/lib/agent';
 import { requireCurrentOrg } from '@/lib/authz';
 import { createServerSupabase } from '@/lib/supabase/server';
 
@@ -35,7 +36,12 @@ export default async function AppHomePage() {
 
   const ids = workspaces.map((w) => w.id);
 
-  const [{ data: datasets }, { data: activeJobs }] = await Promise.all([
+  // Three queries for the whole list, not one per workspace, and the third is
+  // the one that turns this page from a directory into a worklist. "Which
+  // client is waiting on me, and for how much" is the question an accountant
+  // opens this screen to answer; without it every card said only that a
+  // workspace exists, which they already knew.
+  const [{ data: datasets }, { data: activeJobs }, { data: openChanges }] = await Promise.all([
     ids.length
       ? supabase.from('datasets').select('id, workspace_id').in('workspace_id', ids)
       : Promise.resolve({ data: [] as { id: string; workspace_id: string }[] }),
@@ -46,14 +52,36 @@ export default async function AppHomePage() {
           .in('workspace_id', ids)
           .in('status', ['queued', 'running'])
       : Promise.resolve({ data: [] as { id: string; workspace_id: string; status: string }[] }),
+    ids.length
+      ? supabase
+          .from('proposed_changes')
+          .select('id, workspace_id, materiality_gbp')
+          .in('workspace_id', ids)
+          .eq('status', 'pending')
+      : Promise.resolve(
+          { data: [] as { id: string; workspace_id: string; materiality_gbp: number | null }[] },
+        ),
   ]);
 
   const datasetCount = tally(datasets ?? [], (d) => d.workspace_id);
   const workingCount = tally(activeJobs ?? [], (j) => j.workspace_id);
+  const pendingCount = tally(openChanges ?? [], (c) => c.workspace_id);
+  const pendingValue = sumBy(
+    openChanges ?? [],
+    (c) => c.workspace_id,
+    (c) => Math.abs(Number(c.materiality_gbp ?? 0)),
+  );
 
   const canCreate = role === 'owner' || role === 'admin';
   const totalDatasets = (datasets ?? []).length;
   const totalWorking = (activeJobs ?? []).length;
+  const totalPending = (openChanges ?? []).length;
+
+  // Waiting work first. A practice with forty clients should not have to read
+  // forty cards to find the two that need an answer today.
+  const sorted = [...workspaces].sort(
+    (a, b) => (pendingCount.get(b.id) ?? 0) - (pendingCount.get(a.id) ?? 0),
+  );
 
   return (
     <>
@@ -69,7 +97,7 @@ export default async function AppHomePage() {
           title="Your firm is ready"
           body={
             canCreate
-              ? 'Create a workspace for the client whose monthly file you process by hand today. That recurring file is what DataEngine learns from.'
+              ? 'Create a workspace for the client whose monthly file you process by hand today. DataEngine learns that workflow from the fixes you approve, then repeats it on next month’s file.'
               : 'An owner or admin of this firm needs to create the first workspace.'
           }
           steps={[
@@ -84,39 +112,51 @@ export default async function AppHomePage() {
           {/* A summary only once there is something to summarise. An empty
               stat row is decoration pretending to be information. */}
           {totalDatasets > 0 && (
-            <p className="mb-5 text-sm text-muted">
-              <span className="font-medium text-foreground tabular">{totalDatasets}</span>{' '}
-              dataset{totalDatasets === 1 ? '' : 's'} across{' '}
-              <span className="font-medium text-foreground tabular">{workspaces.length}</span>{' '}
-              workspace{workspaces.length === 1 ? '' : 's'}
-              {totalWorking > 0 && (
-                <>
-                  {' · '}
-                  <span className="inline-flex items-center gap-1.5">
-                    <StatusDot tone="info" live />
-                    <span className="tabular">{totalWorking}</span> processing now
-                  </span>
-                </>
+            <div className="mb-6 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-[var(--radius-lg)] border border-border bg-surface px-5 py-3.5 text-sm shadow-[var(--shadow-sm)]">
+              <span className="text-muted">
+                <span className="tabular font-medium text-foreground">{totalDatasets}</span>{' '}
+                dataset{totalDatasets === 1 ? '' : 's'} across{' '}
+                <span className="tabular font-medium text-foreground">{workspaces.length}</span>{' '}
+                workspace{workspaces.length === 1 ? '' : 's'}
+              </span>
+
+              {totalPending > 0 && (
+                <span className="flex items-center gap-1.5 text-muted">
+                  <span aria-hidden className="h-1 w-1 rounded-full bg-border-strong" />
+                  <span className="tabular font-medium text-foreground">{totalPending}</span>{' '}
+                  awaiting your decision
+                </span>
               )}
-              .
-            </p>
+
+              {totalWorking > 0 && (
+                <span className="flex items-center gap-1.5 text-muted">
+                  <StatusDot tone="info" live />
+                  <span className="tabular font-medium text-foreground">{totalWorking}</span>{' '}
+                  processing now
+                </span>
+              )}
+            </div>
           )}
 
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {workspaces.map((workspace) => {
+          <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {sorted.map((workspace) => {
               const datasets = datasetCount.get(workspace.id) ?? 0;
               const working = workingCount.get(workspace.id) ?? 0;
+              const waiting = pendingCount.get(workspace.id) ?? 0;
+              const atStake = pendingValue.get(workspace.id) ?? 0;
 
               return (
                 <li key={workspace.id}>
                   <Link
                     href={`/app/workspaces/${workspace.id}`}
-                    className="group block h-full rounded-[var(--radius-lg)]"
+                    className="block h-full rounded-[var(--radius-lg)]"
                   >
-                    <Card className="flex h-full flex-col p-5 transition-colors group-hover:border-accent/40">
+                    <Card className="lift flex h-full flex-col p-5">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="truncate font-medium tracking-tight">{workspace.name}</p>
+                          <p className="truncate text-[15px] font-medium tracking-tight">
+                            {workspace.name}
+                          </p>
                           {workspace.client_name && (
                             <p className="mt-0.5 truncate text-sm text-muted">
                               {workspace.client_name}
@@ -125,7 +165,7 @@ export default async function AppHomePage() {
                         </div>
                         {working > 0 && (
                           <span
-                            className="mt-1 shrink-0"
+                            className="mt-1.5 shrink-0"
                             title={`${working} job${working === 1 ? '' : 's'} in progress`}
                           >
                             <StatusDot tone="info" live />
@@ -133,7 +173,32 @@ export default async function AppHomePage() {
                         )}
                       </div>
 
-                      <div className="mt-4 flex items-baseline gap-4 border-t border-border pt-3 text-xs text-subtle">
+                      {/* The reason to open this workspace rather than any
+                          other. Given the room a decision deserves. */}
+                      {waiting > 0 ? (
+                        <div className="mt-4 rounded-[var(--radius)] border border-accent/25 bg-accent-soft/50 px-3.5 py-2.5">
+                          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-accent">
+                            Waiting on you
+                          </p>
+                          <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-sm">
+                            <span className="tabular font-semibold">{waiting}</span>
+                            <span className="text-muted">
+                              proposal{waiting === 1 ? '' : 's'}
+                            </span>
+                            {atStake > 0 && (
+                              <span className="ml-auto">
+                                <Money>{formatMoney(atStake)}</Money>
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="mt-4 rounded-[var(--radius)] border border-border bg-surface-2/50 px-3.5 py-2.5 text-[13px] text-subtle">
+                          Nothing waiting on you.
+                        </p>
+                      )}
+
+                      <div className="mt-auto flex items-baseline gap-4 pt-4 text-xs text-subtle">
                         <span>
                           <span className="tabular font-medium text-muted">{datasets}</span>{' '}
                           dataset{datasets === 1 ? '' : 's'}
@@ -143,7 +208,7 @@ export default async function AppHomePage() {
                             <span className="tabular font-medium">{working}</span> processing
                           </span>
                         )}
-                        <span className="ml-auto">
+                        <span className="ml-auto tabular">
                           {new Date(workspace.created_at).toLocaleDateString('en-GB', {
                             day: 'numeric',
                             month: 'short',
@@ -163,6 +228,7 @@ export default async function AppHomePage() {
   );
 }
 
+/** Counts rows per key. */
 function tally<T>(rows: T[], key: (row: T) => string): Map<string, number> {
   const counts = new Map<string, number>();
   for (const row of rows) {
@@ -170,4 +236,14 @@ function tally<T>(rows: T[], key: (row: T) => string): Map<string, number> {
     counts.set(k, (counts.get(k) ?? 0) + 1);
   }
   return counts;
+}
+
+/** Sums a figure per key, for the money at stake behind each workspace. */
+function sumBy<T>(rows: T[], key: (row: T) => string, value: (row: T) => number): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const row of rows) {
+    const k = key(row);
+    totals.set(k, (totals.get(k) ?? 0) + value(row));
+  }
+  return totals;
 }

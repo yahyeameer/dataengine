@@ -23,7 +23,7 @@ export function CreateWorkspaceForm({ orgId }: { orgId: string }) {
 
   if (!open) {
     return (
-      <button className={secondaryButtonClass} onClick={() => setOpen(true)} type="button">
+      <button className={secondaryButtonClass()} onClick={() => setOpen(true)} type="button">
         New client workspace
       </button>
     );
@@ -48,10 +48,10 @@ export function CreateWorkspaceForm({ orgId }: { orgId: string }) {
       <ErrorText>{state.error}</ErrorText>
 
       <div className="flex gap-2">
-        <button className={buttonClass} type="submit" disabled={pending}>
+        <button className={buttonClass()} type="submit" disabled={pending}>
           {pending ? 'Creating…' : 'Create workspace'}
         </button>
-        <button className={secondaryButtonClass} type="button" onClick={() => setOpen(false)}>
+        <button className={secondaryButtonClass()} type="button" onClick={() => setOpen(false)}>
           Cancel
         </button>
       </div>

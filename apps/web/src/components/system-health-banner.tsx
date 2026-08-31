@@ -46,15 +46,15 @@ export async function SystemHealthBanner({
   const total = kinds.reduce((sum, [, n]) => sum + n, 0);
 
   return (
-    <div role="status" className={`border-b px-5 py-2.5 text-sm sm:px-8 ${tone}`}>
-      <div className="mx-auto flex max-w-6xl flex-wrap items-baseline gap-x-3 gap-y-1">
+    <div role="status" className={`border-b px-5 py-3 text-sm sm:px-8 ${tone}`}>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="font-semibold">
           {degraded ? 'AI explanations are running without a model' : 'Model status unknown'}
         </span>
 
         {degraded ? (
           <>
-            <span>
+            <span className="text-muted">
               {total} job{total === 1 ? '' : 's'} in the last 24 hours answered from the rule
               engine
               {kinds.length > 0 && (
@@ -71,16 +71,19 @@ export async function SystemHealthBanner({
             </span>
             {health.degradedSince && (
               <span className="text-subtle">
-                since {new Date(health.degradedSince).toLocaleString('en-GB')}
+                since{' '}
+                <span className="tabular">
+                  {new Date(health.degradedSince).toLocaleString('en-GB')}
+                </span>
               </span>
             )}
           </>
         ) : (
-          <span>{health.reason}</span>
+          <span className="text-muted">{health.reason}</span>
         )}
 
         {health.workerId && (
-          <span className="ml-auto font-mono text-xs text-subtle">
+          <span className="ml-auto shrink-0 font-mono text-xs text-subtle">
             {health.workerId}
             {health.secondsSinceHeartbeat !== null && ` · ${health.secondsSinceHeartbeat}s ago`}
           </span>
