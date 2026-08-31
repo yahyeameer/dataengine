@@ -354,14 +354,16 @@ grant execute on function kanban_run_start(uuid, text, text, integer) to service
 -- Record the cards.
 --
 -- The dangerous window in this design is: cards created, connection lost,
--- nothing written down. The worker closes it by searching the board for its own
--- correlation token before creating anything, so the recovery path adopts the
--- orphaned chain instead of starting a second one.
+-- nothing written down. The CLI closes it -- every card is created with
+-- `--idempotency-key <correlation>:<role>`, and a repeat create returns the
+-- existing id rather than a second card, so the worker simply runs the same
+-- four commands again after a crash.
 --
--- This function is the backstop for the case where that search is wrong. Once a
--- root task is recorded it is frozen: a second, different root is refused
--- loudly rather than silently overwriting the first and orphaning a live chain
--- that will keep spending the host's only core.
+-- This function is the backstop for the case where that fails anyway: a card
+-- archived mid-run, say, which makes its key free again. Once a root task is
+-- recorded it is frozen. A second, different root is refused loudly rather than
+-- silently overwriting the first and orphaning a live chain that will keep
+-- spending the host's only core.
 -- -----------------------------------------------------------------------------
 
 create or replace function kanban_run_record_tasks(
