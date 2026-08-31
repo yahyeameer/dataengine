@@ -716,8 +716,15 @@ parent handoff -- they are on the parents' **runs**, not their task rows.
 2. Every figure the reporter published, re-derived by you from the source at
    {input_url} -- not by comparing two downstream copies of the same number,
    which cannot detect a shared error.
-3. That the artefact was actually uploaded to {artifact_path}, and that its
-   SHA-256 is what the reporter recorded.
+3. That the reporter published to exactly {artifact_path} and recorded a
+   SHA-256 and a byte count for what it sent.
+
+   You cannot re-download it: the exports bucket is private and you hold no
+   credentials for it. Do not report that as a failure and do not invent a way
+   around it -- the worker re-reads those bytes from storage with its own
+   credentials and rejects the result if the digest disagrees. Check that the
+   path matches this card exactly and that the reporter's upload succeeded;
+   the bytes are somebody else's job.
 
 ## PROTOCOL -- how to report
 
