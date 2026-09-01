@@ -33,9 +33,9 @@ jobs:
     name: Worker (Python)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -56,9 +56,9 @@ jobs:
     name: Web (TypeScript)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -100,7 +100,7 @@ jobs:
     name: Secret scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -161,12 +161,12 @@ jobs:
             image: dataengine-hermes
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # buildx, for the registry cache below. The stock docker driver cannot
       # export one, and without a cache every deploy reinstalls node_modules
       # and the Arrow wheels from scratch.
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # Next inlines NEXT_PUBLIC_* at build time, so an image built without
       # them is not broken at build -- it is broken in the browser, later, with
@@ -189,14 +189,14 @@ jobs:
       # credential that could write to the registry.
       - name: Log in to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -241,7 +241,7 @@ jobs:
     steps:
       # For scripts/deploy-*.sh, which the two ssh steps below pipe to the VPS.
       # The runner needs them on disk; the VPS never fetches them itself.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: scripts
           sparse-checkout-cone-mode: false
