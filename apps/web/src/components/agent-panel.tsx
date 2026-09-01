@@ -122,50 +122,45 @@ export function AgentPanel({
   const recent = jobs.slice(0, 5);
 
   return (
-    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border bg-surface-2/50 px-5 py-3.5">
+    <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 shadow-xl backdrop-blur-xl">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-slate-800/80 bg-slate-950/50 px-5 py-3.5">
         <EngineDot state={state} busy={active > 0} />
-        <span className="text-sm font-medium">{ENGINE_STATE_LABELS[state]}</span>
+        <span className="text-sm font-bold text-slate-100">{ENGINE_STATE_LABELS[state]}</span>
 
         {state === 'connected' && isOnline ? (
-          <span className="font-mono text-xs text-subtle">
+          <span className="font-mono text-xs text-slate-400">
             {online[0].hostname ?? online[0].id}
             {online[0].version ? ` · v${online[0].version}` : ''}
             {describeModels(online[0].metadata)}
           </span>
         ) : (
-          <span className="text-[13px] text-muted">{ENGINE_STATE_DETAIL[state]}</span>
+          <span className="text-xs text-slate-400">{ENGINE_STATE_DETAIL[state]}</span>
         )}
 
         {active > 0 ? (
-          <span className="ml-auto flex items-center gap-1.5 text-xs text-info">
-            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-info pulse-dot" />
-            <span className="tabular font-medium">{active}</span> running
+          <span className="ml-auto flex items-center gap-1.5 text-xs text-cyan-400 bg-cyan-950/60 px-2.5 py-1 rounded-full border border-cyan-500/30">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
+            <span className="font-mono font-bold">{active}</span> jobs active
           </span>
         ) : null}
       </div>
 
       {recent.length === 0 ? (
-        <p className="px-5 py-4 text-sm text-muted">
+        <p className="px-5 py-4 text-sm text-slate-400">
           Nothing has run yet. Upload a file and choose Analyse to start.
         </p>
       ) : (
-        <ul className="divide-y divide-border-subtle">
+        <ul className="divide-y divide-slate-800/60">
           {recent.map((job) => (
-            <li key={job.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-3">
-              <span className="text-sm font-medium">{JOB_KIND_LABELS[job.kind] ?? job.kind}</span>
+            <li key={job.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-3.5 hover:bg-slate-800/30 transition-colors">
+              <span className="text-sm font-semibold text-slate-200">{JOB_KIND_LABELS[job.kind] ?? job.kind}</span>
 
               <JobStatus job={job} />
-
-              {/* No download control here. Every finished export is listed
-                  under Cleaned data, where somebody looking for their file
-                  actually goes; repeating it inline gave a workspace two
-                  identical "Download Excel" buttons in different places. */}
 
               <RelativeTime timestamp={job.finished_at ?? job.created_at} />
 
               {job.error ? (
-                <p className="w-full text-xs leading-relaxed text-danger">{job.error}</p>
+                <p className="w-full text-xs leading-relaxed text-rose-400 mt-1">{job.error}</p>
               ) : null}
             </li>
           ))}
@@ -173,6 +168,7 @@ export function AgentPanel({
       )}
     </section>
   );
+
 }
 
 /**

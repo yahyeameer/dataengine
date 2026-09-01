@@ -27,7 +27,7 @@ export function Card({
 }) {
   return (
     <Tag
-      className={`rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)] ${className}`}
+      className={`rounded-2xl border border-slate-800 bg-slate-900/60 shadow-xl backdrop-blur-xl ${className}`}
     >
       {children}
     </Tag>
@@ -50,10 +50,10 @@ export function Panel({
 }) {
   return (
     <Card as="section" className={className}>
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-800/80 px-5 py-4">
         <div className="min-w-0">
-          <h2 className="text-[15px] font-semibold tracking-tight">{title}</h2>
-          {description && <p className="mt-1 text-sm leading-relaxed text-muted">{description}</p>}
+          <h2 className="font-heading text-base font-bold tracking-tight text-slate-100">{title}</h2>
+          {description && <p className="mt-1 text-sm leading-relaxed text-slate-400">{description}</p>}
         </div>
         {action && <div className="shrink-0">{action}</div>}
       </div>
@@ -61,6 +61,7 @@ export function Panel({
     </Card>
   );
 }
+
 
 /* --------------------------------------------------------------------------
    Type and page structure

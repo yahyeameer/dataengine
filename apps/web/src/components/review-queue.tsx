@@ -329,81 +329,65 @@ function ChangeRow({
 }) {
   const [open, setOpen] = useState(false);
   const money = formatMoney(change.materiality_gbp);
-  // A blocking finding has no operation behind it -- "Approve" and "Reject"
-  // both simply clear the block, so labelling them that way asks the reader to
-  // approve something that does not exist.
   const blocking = change.confidence === 'low';
   const deciding = busy?.startsWith(change.group_key) ?? false;
 
   return (
-    <li className="row-hover px-5 py-4">
-      {/* Two columns on a wide screen, one on a narrow one. The controls used
-          to be `shrink-0` beside a `flex-1` text column at every width, so on a
-          phone the rationale was squeezed into a forty-per-cent ribbon that ran
-          to fourteen lines while the buttons sat in white space. */}
+    <li className="group px-5 py-4 transition-colors hover:bg-slate-900/60">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
         <div className="min-w-0 flex-1">
-          {/* The recommendation. What DataEngine proposes, in the words the
-              rule engine chose -- first and largest, because it is the thing
-              being decided. */}
-          <p className="text-[15px] font-medium leading-snug tracking-tight">{change.title}</p>
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+              blocking 
+                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' 
+                : 'bg-cyan-950 text-cyan-300 border border-cyan-500/30'
+            }`}>
+              {CONFIDENCE_LABELS[change.confidence]}
+            </span>
+            {change.column_name ? (
+              <span className="font-mono text-xs text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                col: {change.column_name}
+              </span>
+            ) : null}
+          </div>
 
-          {/* Why. Full contrast rather than dimmed: this is the reasoning an
-              accountant is being asked to accept, and reasoning printed at
-              70% opacity reads as small print. */}
-          <p className="mt-1.5 max-w-prose text-sm leading-relaxed text-muted">
+          <p className="font-heading text-base font-bold text-slate-100 leading-snug">
+            {change.title}
+          </p>
+
+          <p className="mt-1.5 max-w-prose text-sm text-slate-300 leading-relaxed">
             {change.rationale}
           </p>
 
-          {/* Impact. Labelled cells rather than a run of grey text, so the
-              amounts can be compared down the column without being read. */}
-          <div className="mt-3.5 flex flex-wrap items-end gap-x-6 gap-y-3">
-            <Badge tone={blocking ? 'danger' : 'neutral'}>
-              {CONFIDENCE_LABELS[change.confidence]}
-            </Badge>
-
+          <div className="mt-3.5 flex flex-wrap items-center gap-6 text-xs text-slate-400">
             {money !== '—' ? (
-              <Fact label="Affected">
-                <Money>{money}</Money>
-              </Fact>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Impact:</span>
+                <span className="font-mono text-sm font-extrabold text-cyan-300">{money}</span>
+              </div>
             ) : null}
 
-            <Fact label="Rows">
-              <span className="tabular">{change.affected_rows.toLocaleString('en-GB')}</span>
-            </Fact>
-
-            {change.column_name ? (
-              <Fact label="Column">
-                <span className="font-mono text-[12px]">{change.column_name}</span>
-              </Fact>
-            ) : null}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Rows:</span>
+              <span className="font-mono font-medium text-slate-200">{change.affected_rows.toLocaleString('en-GB')}</span>
+            </div>
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 lg:pt-0.5">
+        <div className="flex shrink-0 items-center gap-2.5 lg:pt-0.5">
           <button
             type="button"
-            className={secondaryButtonClass('sm')}
+            className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-300 bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:text-slate-100 hover:border-slate-700 transition-all cursor-pointer disabled:opacity-50"
             disabled={busy !== null}
             onClick={() => onDecide([change.group_key], false)}
-            title={
-              blocking
-                ? 'Records that you do not accept this finding, and clears the block'
-                : 'Leave the data as it is'
-            }
           >
             {blocking ? 'Not an issue' : 'Reject'}
           </button>
           <button
             type="button"
-            className={buttonClass('sm')}
+            className="px-4 py-1.5 rounded-lg text-xs font-semibold text-slate-950 bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 hover:to-teal-300 shadow-md shadow-cyan-500/20 transition-all cursor-pointer disabled:opacity-50"
             disabled={busy !== null}
             onClick={() => onDecide([change.group_key], true)}
-            title={
-              blocking
-                ? 'Records that you have investigated and accepted this, and clears the block'
-                : 'Apply this change when the run goes ahead'
-            }
           >
             {deciding ? 'Recording…' : blocking ? 'Reviewed, continue' : 'Approve'}
           </button>
@@ -411,26 +395,20 @@ function ChangeRow({
       </div>
 
       {hasEvidence(change.evidence) ? (
-        <div className="mt-3">
+        <div className="mt-3.5 pt-2 border-t border-slate-800/40">
           <button
             type="button"
-            className={disclosureClass}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-cyan-400 hover:text-cyan-300 transition-colors cursor-pointer"
             aria-expanded={open}
             onClick={() => setOpen(!open)}
           >
-            <span
-              aria-hidden
-              className={`inline-block transition-transform duration-150 ${open ? 'rotate-90' : ''}`}
-            >
+            <span className={`inline-block transition-transform duration-200 ${open ? 'rotate-90' : ''}`}>
               ›
             </span>
-            {open ? 'Hide evidence' : 'Show evidence'}
+            {open ? 'Hide Audit Evidence' : 'Inspect Raw Evidence Payload'}
           </button>
           {open ? (
-            // Raw evidence, deliberately. Section 7's promise is that a number
-            // can be traced, and a curated summary of the evidence is the thing
-            // the accountant would have to take on trust.
-            <pre className="mt-2 max-h-64 overflow-auto rounded-[var(--radius)] border border-border bg-surface-2 p-3.5 font-mono text-[11px] leading-relaxed text-muted">
+            <pre className="mt-2.5 max-h-64 overflow-auto rounded-xl border border-slate-800 bg-slate-950 p-4 font-mono text-[11px] leading-relaxed text-cyan-200/90 shadow-inner">
               {JSON.stringify(change.evidence, null, 2)}
             </pre>
           ) : null}
@@ -439,3 +417,4 @@ function ChangeRow({
     </li>
   );
 }
+
