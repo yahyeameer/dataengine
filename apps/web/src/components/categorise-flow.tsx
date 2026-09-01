@@ -218,15 +218,15 @@ function Dropzone({
       className="mx-auto max-w-3xl"
     >
       <div className="text-center space-y-3">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 text-xs font-semibold tracking-wide">
-          <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-sky-300 text-xs font-mono tracking-wide">
+          <Sparkles className="w-3.5 h-3.5 text-sky-400" />
           <span>HMRC AI Tax Engine v2.4</span>
         </div>
-        <h1 className="font-heading text-3xl sm:text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-slate-100 via-cyan-100 to-teal-200">
+        <h1 className="font-heading text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-100">
           Categorise Your Bank Transactions
         </h1>
         <p className="mx-auto max-w-xl text-base text-slate-400 leading-relaxed">
-          Upload any CSV or Excel statement. DataEngine instantly maps transactions to official HMRC categories with complete auditability.
+          Upload any CSV or Excel statement. DataEngine maps transactions directly to official HMRC categories with complete auditability.
         </p>
       </div>
 
@@ -242,15 +242,12 @@ function Dropzone({
           const file = event.dataTransfer.files?.[0];
           if (file && !busy) onFile(file);
         }}
-        className={`relative mt-8 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-8 py-20 text-center transition-all duration-300 backdrop-blur-md overflow-hidden ${
+        className={`relative mt-8 flex cursor-pointer flex-col items-center justify-center rounded-3xl border border-white/10 px-8 py-20 text-center transition-all duration-300 backdrop-blur-xl overflow-hidden ${
           over
-            ? 'border-cyan-400 bg-cyan-950/30 shadow-[0_0_40px_-5px_rgba(6,182,212,0.4)] scale-[1.01]'
-            : 'border-slate-800 bg-slate-900/40 hover:border-cyan-500/50 hover:bg-slate-900/70 shadow-2xl'
+            ? 'border-sky-400/50 bg-sky-500/10 shadow-[0_0_50px_rgba(14,165,233,0.2)] scale-[1.01]'
+            : 'bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04] shadow-2xl'
         } ${busy ? 'pointer-events-none opacity-80' : ''}`}
       >
-        {/* Subtle glowing mesh backdrop */}
-        <div className="absolute inset-0 bg-gradient-to-tr from-cyan-500/10 via-transparent to-teal-500/10 opacity-50 pointer-events-none" />
-
         <input
           ref={inputRef}
           type="file"
@@ -265,11 +262,11 @@ function Dropzone({
         />
 
         <div className="relative z-10 flex flex-col items-center">
-          <div className="p-4 rounded-2xl bg-cyan-950/80 border border-cyan-500/40 text-cyan-400 shadow-lg shadow-cyan-950/50 mb-5 group-hover:scale-110 transition-transform duration-300">
+          <div className="p-4 rounded-2xl bg-white/5 border border-white/10 text-sky-400 mb-5 shadow-lg group-hover:scale-105 transition-transform duration-300">
             {busy ? (
-              <Loader2 className="w-10 h-10 animate-spin text-cyan-400" />
+              <Loader2 className="w-9 h-9 animate-spin text-sky-400" />
             ) : (
-              <UploadCloud className="w-10 h-10 text-cyan-400" />
+              <UploadCloud className="w-9 h-9 text-sky-400" />
             )}
           </div>
 
@@ -279,8 +276,8 @@ function Dropzone({
 
           {!busy ? (
             <>
-              <p className="mt-1 text-sm text-slate-400">or click to browse from computer</p>
-              <span className="mt-5 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 px-5 py-2.5 text-sm font-semibold text-slate-950 shadow-lg shadow-cyan-500/20 hover:from-cyan-400 hover:to-teal-400 transition-all duration-200">
+              <p className="mt-1 text-sm text-slate-400">or browse from your device</p>
+              <span className="mt-5 inline-flex items-center gap-2 rounded-xl bg-sky-500 px-5 py-2.5 text-sm font-semibold text-slate-950 shadow-lg shadow-sky-500/20 hover:bg-sky-400 transition-all duration-200">
                 <FileSpreadsheet className="w-4 h-4" />
                 Select File
               </span>
@@ -296,7 +293,7 @@ function Dropzone({
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mt-4 flex items-center gap-3 rounded-xl border border-rose-500/30 bg-rose-950/40 px-4 py-3 text-sm text-rose-300 shadow-lg"
+          className="mt-4 flex items-center gap-3 rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300"
         >
           <AlertCircle className="w-5 h-5 shrink-0 text-rose-400" />
           <span>{error}</span>
@@ -304,17 +301,17 @@ function Dropzone({
       ) : null}
 
       <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
-        <div className="p-4 rounded-xl border border-slate-800/80 bg-slate-900/30">
-          <ShieldCheck className="w-5 h-5 text-cyan-400 mb-2" />
+        <div className="p-4 rounded-2xl border border-white/10 bg-white/[0.02]">
+          <ShieldCheck className="w-5 h-5 text-sky-400 mb-2" />
           <p className="text-xs font-semibold text-slate-200">Zero Overwrites</p>
-          <p className="text-[11px] text-slate-400 mt-1">Source files remain untouched. Categories added as a new dataset.</p>
+          <p className="text-[11px] text-slate-400 mt-1">Original files stay safe. Categories created as a new dataset.</p>
         </div>
-        <div className="p-4 rounded-xl border border-slate-800/80 bg-slate-900/30">
+        <div className="p-4 rounded-2xl border border-white/10 bg-white/[0.02]">
           <Sparkles className="w-5 h-5 text-teal-400 mb-2" />
           <p className="text-xs font-semibold text-slate-200">HMRC Box Mappings</p>
           <p className="text-[11px] text-slate-400 mt-1">Direct SA103F tax categorization for instant self-assessment prep.</p>
         </div>
-        <div className="p-4 rounded-xl border border-slate-800/80 bg-slate-900/30">
+        <div className="p-4 rounded-2xl border border-white/10 bg-white/[0.02]">
           <FileSpreadsheet className="w-5 h-5 text-indigo-400 mb-2" />
           <p className="text-xs font-semibold text-slate-200">Instant Export</p>
           <p className="text-[11px] text-slate-400 mt-1">Download ready-to-use Excel or CSV files in seconds.</p>
@@ -323,6 +320,7 @@ function Dropzone({
     </motion.div>
   );
 }
+
 
 /* -------------------------------------------------------------------------- */
 /* State 2 — processing                                                        */

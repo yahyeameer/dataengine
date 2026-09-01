@@ -2,84 +2,52 @@
 
 @layer base {
   :root {
-    --font-heading: var(--font-jakarta), var(--font-geist-sans), sans-serif;
-    --font-mono: var(--font-jetbrains), var(--font-geist-mono), monospace;
+    --font-heading: var(--font-jakarta), system-ui, sans-serif;
+    --font-mono: var(--font-jetbrains), monospace;
 
-    /* Light Theme Palette */
+    /* Light Theme - Clean Swiss Precision */
     --background: 210 40% 98%;
     --foreground: 222 47% 11%;
     --card: 0 0% 100%;
     --card-foreground: 222 47% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --primary: 187 85% 43%;
+    --primary: 210 100% 45%;
     --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 187 85% 43%;
-    --accent-foreground: 222 47% 11%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
     --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 187 85% 43%;
     --radius: 0.75rem;
 
     --surface: #ffffff;
-    --surface-2: #f1f5f9;
+    --surface-2: #f8fafc;
     --border-subtle: #e2e8f0;
-    --accent-glow: 0 0 25px -5px rgba(6, 182, 212, 0.4);
-    --success: #10b981;
-    --success-soft: #ecfdf5;
-    --warning: #f59e0b;
-    --warning-soft: #fffbeb;
-    --danger: #ef4444;
-    --danger-soft: #fef2f2;
-    --info: #3b82f6;
-    --info-soft: #eff6ff;
   }
 
   .dark {
-    /* Dark Futuristic Theme (Cyan/Teal/Indigo Fusion) */
+    /* Apple VisionOS Stealth Dark (Midnight Sapphire & Ice Teal) */
     --background: 224 71% 4%;
     --foreground: 210 40% 98%;
-    --card: 222 47% 7%;
+    --card: 222 47% 6%;
     --card-foreground: 210 40% 98%;
-    --popover: 222 47% 7%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 187 92% 52%;
+    --primary: 199 89% 48%;
     --primary-foreground: 224 71% 4%;
-    --secondary: 217 33% 14%;
+    --secondary: 217 33% 12%;
     --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 14%;
+    --muted: 217 33% 12%;
     --muted-foreground: 215 20.2% 65.1%;
-    --accent: 187 92% 52%;
+    --accent: 199 89% 48%;
     --accent-foreground: 224 71% 4%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217 33% 16%;
-    --input: 217 33% 16%;
-    --ring: 187 92% 52%;
+    --border: 217 33% 14%;
+    --ring: 199 89% 48%;
 
-    --surface: #0b1320;
-    --surface-2: #111c2e;
-    --border-subtle: #1e293b;
-    --accent-glow: 0 0 35px -5px rgba(6, 182, 212, 0.5);
-    --success: #34d399;
-    --success-soft: rgba(16, 185, 129, 0.15);
-    --warning: #fbbf24;
-    --warning-soft: rgba(245, 158, 11, 0.15);
-    --danger: #f87171;
-    --danger-soft: rgba(239, 68, 68, 0.15);
-    --info: #60a5fa;
-    --info-soft: rgba(59, 130, 246, 0.15);
+    /* Apple Glass Surface Tokens */
+    --surface: #0b111e;
+    --surface-2: #101726;
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --accent-glow: 0 10px 30px -10px rgba(14, 165, 233, 0.25);
   }
 }
 
 h1, h2, h3, h4, .font-heading {
   font-family: var(--font-heading);
+  letter-spacing: -0.025em;
 }
 
 .font-mono, code, pre, .tabular {
@@ -87,11 +55,36 @@ h1, h2, h3, h4, .font-heading {
   font-variant-numeric: tabular-nums slashed-zero;
 }
 
+/* Apple Sub-pixel Glass & Frosted Blur Primitives */
+.apple-glass {
+  background: rgba(13, 19, 32, 0.65);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+}
+
+.apple-glass-card {
+  background: rgba(16, 24, 40, 0.45);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.4);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.apple-glass-card:hover {
+  border-color: rgba(56, 189, 248, 0.3);
+  box-shadow: 0 15px 35px -10px rgba(14, 165, 233, 0.2), inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
+}
+
 body {
-  background-color: var(--background);
-  color: var(--foreground);
+  background-color: #060911;
+  color: #f1f5f9;
   -webkit-font-smoothing: antialiased;
 }
+
 
 
 body {

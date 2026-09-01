@@ -34,32 +34,32 @@ export async function AppShell({
   const isAdmin = role === 'owner' || role === 'admin';
 
   return (
-    <div className="flex min-h-svh flex-col bg-slate-950 text-slate-100 selection:bg-cyan-500/30">
+    <div className="flex min-h-svh flex-col bg-[#050811] text-slate-100 selection:bg-sky-500/20">
       <SystemHealthBanner role={role} health={health} />
 
       <div className="flex flex-1 flex-col lg:flex-row">
-        {/* --- Sidebar Navigation --- */}
-        <aside className="sticky top-0 z-30 shrink-0 border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-xl lg:h-svh lg:w-64 lg:self-start lg:border-b-0 lg:border-r lg:bg-slate-900/40">
+        {/* --- Apple Vision Translucent Sidebar --- */}
+        <aside className="sticky top-0 z-30 shrink-0 border-b border-white/10 bg-[#080d1a]/80 backdrop-blur-2xl lg:h-svh lg:w-64 lg:self-start lg:border-b-0 lg:border-r lg:bg-[#070b16]/70">
           
-          {/* Mobile top bar */}
+          {/* Mobile Bar */}
           <div className="lg:hidden">
             <div className="flex items-center justify-between gap-3 px-4 py-3">
               <Link
                 href="/app"
-                className="flex items-center gap-2.5 rounded-lg p-1 transition-colors hover:bg-slate-800/50"
+                className="flex items-center gap-2.5 rounded-xl p-1 transition-colors hover:bg-white/5"
               >
-                <Mark className="h-6 w-6 text-cyan-400" />
-                <span className="font-heading font-extrabold text-base tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-300 to-indigo-300">
+                <Mark className="h-6 w-6 text-sky-400" />
+                <span className="font-heading font-extrabold text-base tracking-tight text-slate-100">
                   DataEngine
                 </span>
               </Link>
 
-              <span className="truncate border-l border-slate-800 pl-3 text-xs font-medium text-slate-300 max-w-[140px]">
+              <span className="truncate border-l border-white/10 pl-3 text-xs font-mono text-slate-400 max-w-[140px]">
                 {orgName}
               </span>
 
               <form action="/auth/signout" method="post">
-                <button className={secondaryButtonClass('sm')} type="submit">
+                <button className="px-3 py-1 rounded-lg text-xs font-medium border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white transition-all cursor-pointer" type="submit">
                   Sign out
                 </button>
               </form>
@@ -74,44 +74,44 @@ export async function AppShell({
             </nav>
           </div>
 
-          {/* Desktop full sidebar */}
+          {/* Desktop Full Sidebar */}
           <div className="hidden lg:flex lg:h-full lg:flex-col lg:justify-between">
             <div>
               {/* Header Branding */}
-              <div className="flex items-center justify-between border-b border-slate-800/80 px-5 py-4">
+              <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
                 <Link href="/app" className="flex items-center gap-3 group">
-                  <div className="p-1.5 rounded-xl bg-gradient-to-br from-cyan-500/20 to-teal-500/10 border border-cyan-500/30 group-hover:border-cyan-400/60 transition-all shadow-[0_0_15px_-3px_rgba(6,182,212,0.3)]">
-                    <Mark className="h-6 w-6 text-cyan-400" />
+                  <div className="p-2 rounded-xl bg-white/5 border border-white/10 group-hover:border-sky-400/50 group-hover:bg-sky-500/10 transition-all duration-300 shadow-sm">
+                    <Mark className="h-6 w-6 text-sky-400" />
                   </div>
-                  <span className="font-heading font-extrabold text-lg tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-slate-100 via-cyan-100 to-teal-200">
+                  <span className="font-heading font-extrabold text-lg tracking-tight text-slate-100">
                     DataEngine
                   </span>
                 </Link>
               </div>
 
-              {/* Quick Command Trigger */}
+              {/* Command Menu */}
               <div className="px-3 pt-4 pb-2">
                 <CommandMenu />
               </div>
 
-              {/* Workspace / Org Badge */}
-              <div className="mx-3 my-2 rounded-xl border border-slate-800/80 bg-slate-900/50 p-3.5 shadow-inner">
+              {/* Organization Indicator Card */}
+              <div className="mx-3 my-2 rounded-2xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md">
                 <div className="flex items-center justify-between">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-cyan-400/80">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                     Active Client
                   </p>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-cyan-950/60 px-2 py-0.5 text-[10px] font-medium text-cyan-300 border border-cyan-800/50">
-                    <ShieldCheck className="w-3 h-3 text-cyan-400" />
+                  <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-300 border border-sky-500/20">
+                    <ShieldCheck className="w-3 h-3 text-sky-400" />
                     {role}
                   </span>
                 </div>
-                <p className="mt-1.5 truncate text-sm font-semibold text-slate-100" title={orgName}>
+                <p className="mt-1.5 truncate font-heading text-sm font-bold text-slate-100" title={orgName}>
                   {orgName}
                 </p>
               </div>
 
               {/* Navigation Links */}
-              <nav className="flex flex-col gap-1.5 px-3 py-3">
+              <nav className="flex flex-col gap-1 px-3 py-3">
                 {NAV.map((item) => (
                   <NavLink key={item.href} href={item.href} icon={item.icon}>
                     {item.label}
@@ -121,17 +121,17 @@ export async function AppShell({
             </div>
 
             {/* Bottom Status & Account */}
-            <div className="mt-auto border-t border-slate-800/80">
+            <div className="mt-auto border-t border-white/10">
               {isAdmin && <EngineStatus state={health.state} />}
 
-              <div className="p-4 bg-slate-900/30">
+              <div className="p-4 bg-white/[0.02]">
                 {email && (
                   <p className="truncate text-xs font-mono text-slate-400 mb-3" title={email}>
                     {email}
                   </p>
                 )}
                 <form action="/auth/signout" method="post">
-                  <button className={`${secondaryButtonClass('sm')} w-full text-slate-300 hover:text-slate-100 hover:border-slate-700`} type="submit">
+                  <button className="w-full px-3 py-2 rounded-xl text-xs font-semibold border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white transition-all cursor-pointer" type="submit">
                     Sign out
                   </button>
                 </form>
@@ -140,19 +140,16 @@ export async function AppShell({
           </div>
         </aside>
 
-        {/* --- Main Content Area --- */}
+        {/* --- Main Workspace View --- */}
         <div className="flex min-w-0 flex-1 flex-col">
           <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-8 sm:py-10">
             {children}
           </main>
 
-          <footer className="mt-12 border-t border-slate-800/60 px-6 py-6 bg-slate-950/80">
+          <footer className="mt-16 border-t border-white/5 px-6 py-6 bg-[#040710]/90">
             <div className="mx-auto max-w-2xl text-center">
               <p className="text-xs leading-relaxed text-slate-400">
-                DataEngine AI Copilot · Professional Financial Automation Engine
-              </p>
-              <p className="mt-1 text-[11px] text-slate-400/80">
-                Every material proposal is verifiable and audited against source bank files.
+                DataEngine · Enterprise Financial Intelligence Copilot
               </p>
             </div>
           </footer>
@@ -163,21 +160,22 @@ export async function AppShell({
 }
 
 function EngineStatus({ state }: { state: 'ok' | 'degraded' | 'unknown' }) {
-  const label = { ok: 'AI Engine Ready', degraded: 'Engine Degraded', unknown: 'Connecting...' }[state];
+  const label = { ok: 'Engine Connected', degraded: 'Engine Degraded', unknown: 'Connecting...' }[state];
   const color = {
-    ok: 'bg-emerald-400 text-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]',
-    degraded: 'bg-amber-400 text-amber-400',
-    unknown: 'bg-slate-500 text-slate-500',
+    ok: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]',
+    degraded: 'bg-amber-400',
+    unknown: 'bg-slate-500',
   }[state];
 
   return (
-    <div className="px-5 py-3.5 bg-slate-900/20 flex items-center justify-between">
+    <div className="px-5 py-3.5 bg-white/[0.02] flex items-center justify-between">
       <div className="flex items-center gap-2">
-        <Cpu className="w-4 h-4 text-cyan-400" />
+        <Cpu className="w-4 h-4 text-sky-400" />
         <span className="text-xs font-semibold text-slate-300">{label}</span>
       </div>
       <span aria-hidden className={`h-2 w-2 rounded-full ${color}`} />
     </div>
   );
 }
+
 
