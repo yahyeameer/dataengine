@@ -35,8 +35,27 @@ const querySchema = z.object({
 /** The buckets an export may legitimately live in. Never `raw`. */
 const DOWNLOADABLE_BUCKETS = new Set(['exports', 'cleaned']);
 
-/** The job kinds that produce a downloadable artefact. */
-const DOWNLOADABLE_KINDS = new Set(['generate_report', 'export_dataset', 'kanban_report']);
+/**
+ * The job kinds that produce a downloadable artefact.
+ *
+ * Keep this in step with the worker: every handler in services/hermes that
+ * records an `export_path` or `report_path` belongs here, and there are three
+ * of them -- generate_report, export_dataset and categorise_statement.
+ *
+ * `categorise_statement` was missing, which is why "Download categorised file"
+ * answered "We couldn't prepare that download". The job had succeeded, the
+ * workbook was in the bucket, and the row carried both `bucket` and
+ * `export_path` -- the worker names those fields exactly so this route needs no
+ * special case for it. The file was reachable the whole time; this list simply
+ * never learned the kind existed, and the 400 it returned said the job "does
+ * not produce a file" about a job that had just produced one.
+ */
+const DOWNLOADABLE_KINDS = new Set([
+  'generate_report',
+  'export_dataset',
+  'kanban_report',
+  'categorise_statement',
+]);
 
 /**
  * Sixty seconds. The link is minted in response to a click and handed straight
@@ -75,7 +94,16 @@ function downloadName(result: Record<string, unknown>, path: string): string {
   const version = typeof result.version_no === 'number' ? ` v${result.version_no}` : '';
   // Says what happened to it. A file called the same thing as the original,
   // sitting next to the original, is its own kind of accident.
-  const marker = result.export_path ? ' (cleaned)' : ' (report)';
+  //
+  // Three outcomes, not two. A categorise_statement job writes `taxonomy`, and
+  // the object it stores is already named `__categorised.xlsx` -- so calling
+  // the download "(cleaned)" contradicted the file's own name and undersold
+  // what had been done to it.
+  const marker = result.taxonomy
+    ? ' (categorised)'
+    : result.export_path
+      ? ' (cleaned)'
+      : ' (report)';
 
   // A dataset is named by a person, so it can contain anything -- quotes and
   // newlines would break the header outright, and path separators are worse.
