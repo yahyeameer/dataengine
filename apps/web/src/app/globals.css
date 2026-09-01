@@ -1,144 +1,98 @@
 @import "tailwindcss";
 
-/* ---------------------------------------------------------------------------
-   DataEngine design tokens.
-
-   The product asks an accountant to trust it with a client's books, so the
-   visual language is built for confidence rather than for delight: a cool,
-   near-neutral ground, one accent, and semantic colours that stay out of the
-   way until something needs attention.
-
-   The accent is a deep teal. It reads as instrument rather than as brand --
-   closer to a well-made terminal than to a consumer app -- and it survives on
-   both grounds without the saturation that makes an interface feel cheap.
-   There is exactly one. Anything competing with it is either semantic or a
-   mistake.
-   --------------------------------------------------------------------------- */
-
-:root {
-  /* Ground. Not pure white: a hint of blue keeps large surfaces from glaring
-     under the fluorescent light of an actual office. */
-  --background: #f7f9fb;
-  --surface: #ffffff;
-  --surface-2: #f1f5f8;
-  --surface-raised: #ffffff;
-
-  /* Ink. Blue-biased through the whole ramp so text sits in the same family as
-     the ground rather than floating on top of it. */
-  --foreground: #0e1720;
-  --muted: #475763;
-  /* Darkened from #6b7c88. The old value measured 3.94:1 against surface-2 and
-     4.09:1 against the page ground -- under WCAG AA for the small text this
-     token is used for almost everywhere: table headers, timestamps, field
-     labels, the footer. The ramp foreground -> muted -> subtle is unchanged;
-     the bottom of it is now readable. */
-  --subtle: #5d6e7a;
-
-  --border: #dde5eb;
-  --border-strong: #c3cfd8;
-  /* A hairline for dividers inside a surface, lighter than the surface's own
-     edge so a list does not read as a stack of separate cards. */
-  --border-subtle: #e8eef3;
-
-  --accent: #10706c;
-  --accent-hover: #0c5a57;
-  --accent-soft: #e2f1f0;
-  --accent-ring: #10706c33;
-  /* Text that sits *on* the accent. A separate token because the accent
-     inverts between themes: white on the deep teal reads, white on the dark
-     theme's pale mint does not. Every filled control reads this, so the
-     contrast is fixed in one place rather than per component. */
-  --accent-ink: #ffffff;
-  /* The glow. One shadow, used for the hover state of anything the reader is
-     meant to press, and for the surface that is currently the subject. */
-  --accent-glow: 0 0 0 1px rgb(16 112 108 / 0.10), 0 6px 20px -8px rgb(16 112 108 / 0.35);
-
-  --success: #2f6b47;
-  --success-soft: #e3f0e8;
-  --warning: #8a5a10;
-  --warning-soft: #f8efdc;
-  --danger: #9b3430;
-  --danger-soft: #f9e8e6;
-  --info: #2b5a86;
-  --info-soft: #e5eef6;
-
-  --radius: 8px;
-  --radius-lg: 12px;
-
-  /* Restrained on purpose. Elevation here is a hairline and a whisper of
-     shadow, not a drop-shadow competition. */
-  --shadow-sm: 0 1px 2px 0 rgb(14 23 32 / 0.04);
-  --shadow: 0 1px 3px 0 rgb(14 23 32 / 0.06), 0 1px 2px -1px rgb(14 23 32 / 0.04);
-  --shadow-lg: 0 10px 30px -12px rgb(14 23 32 / 0.18);
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a1016;
-    --surface: #111a22;
-    --surface-2: #16212b;
-    --surface-raised: #16212b;
+    --font-heading: var(--font-jakarta), var(--font-geist-sans), sans-serif;
+    --font-mono: var(--font-jetbrains), var(--font-geist-mono), monospace;
 
-    --foreground: #e6edf3;
-    --muted: #a3b3c0;
-    --subtle: #7d8f9d;
+    /* Light Theme Palette */
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 187 85% 43%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 187 85% 43%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 187 85% 43%;
+    --radius: 0.75rem;
 
-    --border: #22303c;
-    --border-strong: #334554;
-    --border-subtle: #1b2731;
+    --surface: #ffffff;
+    --surface-2: #f1f5f9;
+    --border-subtle: #e2e8f0;
+    --accent-glow: 0 0 25px -5px rgba(6, 182, 212, 0.4);
+    --success: #10b981;
+    --success-soft: #ecfdf5;
+    --warning: #f59e0b;
+    --warning-soft: #fffbeb;
+    --danger: #ef4444;
+    --danger-soft: #fef2f2;
+    --info: #3b82f6;
+    --info-soft: #eff6ff;
+  }
 
-    --accent: #4bb8b0;
-    --accent-hover: #63c9c1;
-    --accent-soft: #12292e;
-    --accent-ring: #4bb8b040;
-    /* Near-black rather than white. The dark theme's accent is a pale mint and
-       white on it is the one genuinely unreadable combination in the palette. */
-    --accent-ink: #05201f;
-    --accent-glow: 0 0 0 1px rgb(75 184 176 / 0.16), 0 6px 22px -8px rgb(75 184 176 / 0.30);
+  .dark {
+    /* Dark Futuristic Theme (Cyan/Teal/Indigo Fusion) */
+    --background: 224 71% 4%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 7%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 7%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 187 92% 52%;
+    --primary-foreground: 224 71% 4%;
+    --secondary: 217 33% 14%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 14%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 187 92% 52%;
+    --accent-foreground: 224 71% 4%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 33% 16%;
+    --input: 217 33% 16%;
+    --ring: 187 92% 52%;
 
-    --success: #6cb98a;
-    --success-soft: #14251c;
-    --warning: #d3a05a;
-    --warning-soft: #2a2216;
-    --danger: #e08b85;
-    --danger-soft: #2c1a19;
-    --info: #7fb0dc;
-    --info-soft: #16232f;
-
-    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
-    --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.4);
-    --shadow-lg: 0 10px 30px -12px rgb(0 0 0 / 0.6);
+    --surface: #0b1320;
+    --surface-2: #111c2e;
+    --border-subtle: #1e293b;
+    --accent-glow: 0 0 35px -5px rgba(6, 182, 212, 0.5);
+    --success: #34d399;
+    --success-soft: rgba(16, 185, 129, 0.15);
+    --warning: #fbbf24;
+    --warning-soft: rgba(245, 158, 11, 0.15);
+    --danger: #f87171;
+    --danger-soft: rgba(239, 68, 68, 0.15);
+    --info: #60a5fa;
+    --info-soft: rgba(59, 130, 246, 0.15);
   }
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-surface: var(--surface);
-  --color-surface-2: var(--surface-2);
-  --color-foreground: var(--foreground);
-  --color-muted: var(--muted);
-  --color-subtle: var(--subtle);
-  --color-border: var(--border);
-  --color-border-strong: var(--border-strong);
-  --color-border-subtle: var(--border-subtle);
-  --color-accent: var(--accent);
-  --color-accent-ink: var(--accent-ink);
-  --color-accent-hover: var(--accent-hover);
-  --color-accent-soft: var(--accent-soft);
-  --color-success: var(--success);
-  --color-success-soft: var(--success-soft);
-  --color-warning: var(--warning);
-  --color-warning-soft: var(--warning-soft);
-  --color-danger: var(--danger);
-  --color-danger-soft: var(--danger-soft);
-  --color-info: var(--info);
-  --color-info-soft: var(--info-soft);
-
-  /* The layout loads Geist and Geist Mono. Until now `body` overrode both with
-     Arial, so the fonts were downloaded and never used. */
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+h1, h2, h3, h4, .font-heading {
+  font-family: var(--font-heading);
 }
+
+.font-mono, code, pre, .tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+
 
 body {
   background: var(--background);

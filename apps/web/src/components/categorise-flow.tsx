@@ -191,6 +191,13 @@ export function CategoriseFlow() {
 /* State 1 — upload                                                            */
 /* -------------------------------------------------------------------------- */
 
+/* -------------------------------------------------------------------------- */
+/* State 1 — upload                                                            */
+/* -------------------------------------------------------------------------- */
+
+import { motion, AnimatePresence } from 'framer-motion';
+import { UploadCloud, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, Sparkles, Download, ArrowRight, ShieldCheck } from 'lucide-react';
+
 function Dropzone({
   busy,
   error,
@@ -204,18 +211,25 @@ function Dropzone({
   const [over, setOver] = useState(false);
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <h1 className="text-center text-[26px] font-semibold tracking-tight">
-        Categorise your transactions
-      </h1>
-      <p className="mx-auto mt-2 max-w-lg text-center text-[15px] leading-relaxed text-muted">
-        Drop a bank statement or transaction export. DataEngine reads it, sorts every
-        transaction into HMRC categories and gives you back a spreadsheet.
-      </p>
+    <motion.div
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      className="mx-auto max-w-3xl"
+    >
+      <div className="text-center space-y-3">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 text-xs font-semibold tracking-wide">
+          <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+          <span>HMRC AI Tax Engine v2.4</span>
+        </div>
+        <h1 className="font-heading text-3xl sm:text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-slate-100 via-cyan-100 to-teal-200">
+          Categorise Your Bank Transactions
+        </h1>
+        <p className="mx-auto max-w-xl text-base text-slate-400 leading-relaxed">
+          Upload any CSV or Excel statement. DataEngine instantly maps transactions to official HMRC categories with complete auditability.
+        </p>
+      </div>
 
-      {/* A label rather than a div with a click handler: it is a real file input
-          underneath, so the keyboard and the screen reader get the control they
-          expect and the drop target is the same element either way. */}
       <label
         onDragOver={(event) => {
           event.preventDefault();
@@ -228,10 +242,15 @@ function Dropzone({
           const file = event.dataTransfer.files?.[0];
           if (file && !busy) onFile(file);
         }}
-        className={`mt-8 flex cursor-pointer flex-col items-center justify-center rounded-[var(--radius-lg)] border-2 border-dashed px-6 py-16 text-center transition-colors ${
-          over ? 'border-accent bg-accent-soft/40' : 'border-border bg-surface hover:bg-surface-2/60'
-        } ${busy ? 'pointer-events-none opacity-70' : ''}`}
+        className={`relative mt-8 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-8 py-20 text-center transition-all duration-300 backdrop-blur-md overflow-hidden ${
+          over
+            ? 'border-cyan-400 bg-cyan-950/30 shadow-[0_0_40px_-5px_rgba(6,182,212,0.4)] scale-[1.01]'
+            : 'border-slate-800 bg-slate-900/40 hover:border-cyan-500/50 hover:bg-slate-900/70 shadow-2xl'
+        } ${busy ? 'pointer-events-none opacity-80' : ''}`}
       >
+        {/* Subtle glowing mesh backdrop */}
+        <div className="absolute inset-0 bg-gradient-to-tr from-cyan-500/10 via-transparent to-teal-500/10 opacity-50 pointer-events-none" />
+
         <input
           ref={inputRef}
           type="file"
@@ -245,31 +264,63 @@ function Dropzone({
           }}
         />
 
-        <p className="text-[15px] font-medium">
-          {busy ? `${busy}…` : 'Drop your bank statement here'}
-        </p>
-        {!busy ? (
-          <>
-            <p className="mt-1 text-sm text-subtle">or</p>
-            <span className={`${buttonClass('sm')} mt-3`}>Choose a file</span>
-            <p className="mt-4 text-xs text-subtle">
-              CSV · XLSX · XLS · up to {formatBytes(MAX_UPLOAD_BYTES)}
-            </p>
-          </>
-        ) : null}
+        <div className="relative z-10 flex flex-col items-center">
+          <div className="p-4 rounded-2xl bg-cyan-950/80 border border-cyan-500/40 text-cyan-400 shadow-lg shadow-cyan-950/50 mb-5 group-hover:scale-110 transition-transform duration-300">
+            {busy ? (
+              <Loader2 className="w-10 h-10 animate-spin text-cyan-400" />
+            ) : (
+              <UploadCloud className="w-10 h-10 text-cyan-400" />
+            )}
+          </div>
+
+          <p className="font-heading text-lg font-bold text-slate-100">
+            {busy ? `${busy} file...` : 'Drag & drop your bank statement here'}
+          </p>
+
+          {!busy ? (
+            <>
+              <p className="mt-1 text-sm text-slate-400">or click to browse from computer</p>
+              <span className="mt-5 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 px-5 py-2.5 text-sm font-semibold text-slate-950 shadow-lg shadow-cyan-500/20 hover:from-cyan-400 hover:to-teal-400 transition-all duration-200">
+                <FileSpreadsheet className="w-4 h-4" />
+                Select File
+              </span>
+              <p className="mt-6 text-xs text-slate-400 font-mono">
+                Supports .CSV, .XLSX, .XLS up to {formatBytes(MAX_UPLOAD_BYTES)}
+              </p>
+            </>
+          ) : null}
+        </div>
       </label>
 
       {error ? (
-        <p className="mt-4 rounded-[var(--radius)] border border-danger/30 bg-danger-soft/40 px-4 py-3 text-sm leading-relaxed text-danger">
-          {error}
-        </p>
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-4 flex items-center gap-3 rounded-xl border border-rose-500/30 bg-rose-950/40 px-4 py-3 text-sm text-rose-300 shadow-lg"
+        >
+          <AlertCircle className="w-5 h-5 shrink-0 text-rose-400" />
+          <span>{error}</span>
+        </motion.div>
       ) : null}
 
-      <p className="mt-6 text-center text-xs leading-relaxed text-subtle">
-        Your file is stored exactly as it arrives and is never changed. Categories are added
-        alongside your data in a new copy.
-      </p>
-    </div>
+      <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
+        <div className="p-4 rounded-xl border border-slate-800/80 bg-slate-900/30">
+          <ShieldCheck className="w-5 h-5 text-cyan-400 mb-2" />
+          <p className="text-xs font-semibold text-slate-200">Zero Overwrites</p>
+          <p className="text-[11px] text-slate-400 mt-1">Source files remain untouched. Categories added as a new dataset.</p>
+        </div>
+        <div className="p-4 rounded-xl border border-slate-800/80 bg-slate-900/30">
+          <Sparkles className="w-5 h-5 text-teal-400 mb-2" />
+          <p className="text-xs font-semibold text-slate-200">HMRC Box Mappings</p>
+          <p className="text-[11px] text-slate-400 mt-1">Direct SA103F tax categorization for instant self-assessment prep.</p>
+        </div>
+        <div className="p-4 rounded-xl border border-slate-800/80 bg-slate-900/30">
+          <FileSpreadsheet className="w-5 h-5 text-indigo-400 mb-2" />
+          <p className="text-xs font-semibold text-slate-200">Instant Export</p>
+          <p className="text-[11px] text-slate-400 mt-1">Download ready-to-use Excel or CSV files in seconds.</p>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 
@@ -291,82 +342,79 @@ function Working({ status, filename }: { status: Status | null; filename: string
   const active = steps.find((step) => step.status === 'active');
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <h1 className="text-center text-[26px] font-semibold tracking-tight">
-        {active?.label ?? 'Working on your file'}
+    <motion.div
+      initial={{ opacity: 0, scale: 0.98 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="mx-auto max-w-xl text-center"
+    >
+      <div className="relative inline-flex items-center justify-center p-4 rounded-full bg-cyan-950/60 border border-cyan-500/40 text-cyan-400 mb-6 shadow-[0_0_30px_rgba(6,182,212,0.3)]">
+        <Loader2 className="w-8 h-8 animate-spin" />
+      </div>
+
+      <h1 className="font-heading text-2xl font-bold tracking-tight text-slate-100">
+        {active?.label ?? 'AI Processing Engine Active'}
       </h1>
-      {filename ? (
-        <p className="mt-2 text-center text-sm text-muted">{filename}</p>
-      ) : null}
+      {filename ? <p className="mt-1 text-sm font-mono text-cyan-400/80">{filename}</p> : null}
 
-      <ul className="mt-8 space-y-1 rounded-[var(--radius-lg)] border border-border bg-surface p-5 shadow-[var(--shadow-sm)]">
-        {steps.map((step) => (
-          <li key={step.label} className="flex items-center gap-3 py-1.5">
-            <StepMark status={step.status} />
-            <span
-              className={`text-sm ${
-                step.status === 'waiting'
-                  ? 'text-subtle'
-                  : step.status === 'active'
-                    ? 'font-medium'
-                    : 'text-muted'
-              }`}
+      <div className="mt-8 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-2xl backdrop-blur-xl text-left">
+        <ul className="space-y-3.5">
+          {steps.map((step, idx) => (
+            <motion.li
+              key={step.label}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: idx * 0.05 }}
+              className="flex items-center gap-3.5 text-sm"
             >
-              {step.label}
-            </span>
-          </li>
-        ))}
-      </ul>
+              <StepMark status={step.status} />
+              <span
+                className={`font-medium ${
+                  step.status === 'waiting'
+                    ? 'text-slate-400'
+                    : step.status === 'active'
+                      ? 'text-cyan-300 font-semibold'
+                      : 'text-slate-200'
+                }`}
+              >
+                {step.label}
+              </span>
+            </motion.li>
+          ))}
+        </ul>
+      </div>
 
-      <p className="mt-5 text-center text-xs leading-relaxed text-subtle">
+      <p className="mt-6 text-xs text-slate-400">
         {status?.state === 'working' && status.queued
-          ? 'Waiting for a free slot. This usually starts within a few seconds.'
-          : 'This usually takes under a minute. You can leave this page open.'}
+          ? 'Queued in worker pool. Processing starts in a few seconds...'
+          : 'Categorising transactions... You can keep this tab open.'}
       </p>
-    </div>
+    </motion.div>
   );
 }
 
-/**
- * The state of one step, as a shape and not only as a colour.
- *
- * A tick, a pulsing dot and an empty circle read as three different things in
- * greyscale, which a green/grey pair does not.
- */
 function StepMark({ status }: { status: Step['status'] }) {
   if (status === 'done') {
     return (
-      <span
-        aria-hidden
-        className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-success text-[10px] font-bold text-white"
-      >
-        ✓
-      </span>
+      <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 border border-emerald-400/50 text-emerald-400">
+        <CheckCircle2 className="w-3.5 h-3.5" />
+      </div>
     );
   }
   if (status === 'failed') {
     return (
-      <span
-        aria-hidden
-        className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-danger text-[10px] font-bold text-white"
-      >
-        !
-      </span>
+      <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-500/20 border border-rose-400/50 text-rose-400">
+        <AlertCircle className="w-3.5 h-3.5" />
+      </div>
     );
   }
   if (status === 'active') {
     return (
-      <span
-        aria-hidden
-        className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 border-info"
-      >
-        <span className="h-1.5 w-1.5 rounded-full bg-info pulse-dot" />
-      </span>
+      <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-cyan-400/60 bg-cyan-950">
+        <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
+      </div>
     );
   }
-  return (
-    <span aria-hidden className="h-4 w-4 shrink-0 rounded-full border-2 border-border-subtle" />
-  );
+  return <div className="h-5 w-5 shrink-0 rounded-full border border-slate-800" />;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -388,9 +436,6 @@ function Result({
     setBusy(true);
     setError(null);
     try {
-      // The job id came from the status of *this* upload, and the route re-reads
-      // the path off that job server-side. There is no list of past exports on
-      // this screen and no way for it to name one.
       const response = await fetch(`/api/exports?jobId=${status.download.jobId}`, {
         cache: 'no-store',
       });
@@ -405,67 +450,76 @@ function Result({
   }
 
   return (
-    <div className="mx-auto max-w-2xl text-center">
-      <span
-        aria-hidden
-        className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-success text-lg font-bold text-white"
-      >
-        ✓
-      </span>
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="mx-auto max-w-2xl text-center"
+    >
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/20 border border-emerald-400/40 text-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.3)] mb-4">
+        <CheckCircle2 className="w-8 h-8" />
+      </div>
 
-      <h1 className="mt-5 text-[26px] font-semibold tracking-tight">
-        Your categorised file is ready
+      <h1 className="font-heading text-3xl font-bold tracking-tight text-slate-100">
+        Categorised Statement Ready
       </h1>
-      <p className="mt-2 text-sm text-muted">{status.filename}</p>
+      <p className="mt-1.5 text-sm font-mono text-cyan-400">{status.filename}</p>
 
-      <div className="mt-8 grid gap-px overflow-hidden rounded-[var(--radius-lg)] border border-border bg-border sm:grid-cols-3">
-        <Figure value={summary.transactions} label="transactions read" />
-        <Figure value={summary.categorised} label="categorised" />
+      {/* Modern Dashboard KPI Cards */}
+      <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Figure value={summary.transactions} label="Transactions Read" />
+        <Figure value={summary.categorised} label="Auto-Categorised" highlight />
         <Figure
           value={summary.flagged}
-          label="flagged for review"
-          hint={
-            summary.flagged > 0
-              ? 'The description did not show a business purpose, so nothing was claimed for these.'
-              : undefined
-          }
+          label="Flagged for Review"
+          hint={summary.flagged > 0 ? 'Requires human sign-off' : undefined}
         />
       </div>
 
-      <button
-        type="button"
-        onClick={download}
-        disabled={busy}
-        className={`${buttonClass()} mt-8 w-full sm:w-auto`}
-      >
-        {busy ? 'Preparing…' : 'Download categorised file'}
-      </button>
+      <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
+        <button
+          type="button"
+          onClick={download}
+          disabled={busy}
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 px-6 py-3 text-base font-semibold text-slate-950 shadow-lg shadow-cyan-500/25 hover:from-cyan-400 hover:to-teal-400 transition-all duration-200 cursor-pointer"
+        >
+          {busy ? (
+            <Loader2 className="w-5 h-5 animate-spin" />
+          ) : (
+            <Download className="w-5 h-5" />
+          )}
+          <span>{busy ? 'Preparing File...' : 'Download Categorised Excel'}</span>
+        </button>
 
-      {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+        <button
+          type="button"
+          onClick={onAnother}
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-5 py-3 text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-slate-100 transition-all cursor-pointer"
+        >
+          Categorise Another File
+        </button>
+      </div>
 
-      <p className="mt-6 text-xs leading-relaxed text-subtle">
-        Your file now has HMRC Category, HMRC Box and Confidence columns beside the original
-        data. Nothing that was in the file has been changed.
-      </p>
-
-      <button type="button" onClick={onAnother} className={`${secondaryButtonClass('sm')} mt-6`}>
-        Categorise another file
-      </button>
-    </div>
+      {error ? <p className="mt-4 text-sm text-rose-400">{error}</p> : null}
+    </motion.div>
   );
 }
 
-function Figure({ value, label, hint }: { value: number; label: string; hint?: string }) {
+function Figure({ value, label, hint, highlight = false }: { value: number; label: string; hint?: string; highlight?: boolean }) {
   return (
-    <div className="bg-surface px-5 py-5">
-      <p className="tabular text-[26px] font-semibold leading-none tracking-tight">
+    <div className={`rounded-xl border p-5 text-left transition-all ${
+      highlight 
+        ? 'border-cyan-500/40 bg-cyan-950/30 shadow-[0_0_20px_-5px_rgba(6,182,212,0.2)]'
+        : 'border-slate-800 bg-slate-900/40'
+    }`}>
+      <p className="font-mono text-3xl font-extrabold text-slate-100 tracking-tight">
         {value.toLocaleString('en-GB')}
       </p>
-      <p className="mt-1.5 text-[13px] text-muted">{label}</p>
-      {hint ? <p className="mt-2 text-[11px] leading-relaxed text-subtle">{hint}</p> : null}
+      <p className="mt-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+      {hint ? <p className="mt-2 text-[11px] text-amber-400">{hint}</p> : null}
     </div>
   );
 }
+
 
 /* -------------------------------------------------------------------------- */
 /* Failure                                                                     */

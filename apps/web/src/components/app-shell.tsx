@@ -10,37 +10,13 @@ import { Mark } from '@/components/product-story';
 import { SystemHealthBanner } from '@/components/system-health-banner';
 import { getSystemHealth } from '@/lib/system-health';
 import { secondaryButtonClass } from '@/components/ui';
+import { CommandMenu } from '@/components/command-menu';
+import { ShieldCheck, Cpu } from 'lucide-react';
 
-/**
- * The application shell.
- *
- * A sidebar rather than a top bar, because this is a tool somebody keeps open
- * for an afternoon and vertical navigation leaves the full width to the tables
- * that are the actual work.
- *
- * Navigation lists the routes that exist. There is no Cleaning or Reports entry
- * because there is no such route — those are panels inside a workspace, and a
- * nav item leading nowhere is worse than one absent.
- *
- * Below `lg` the sidebar becomes a sticky top bar. It used to become a plain
- * horizontal strip that dropped the organisation name entirely, so on a tablet
- * or a phone there was nothing on screen saying whose books you were looking
- * at — in a product whose whole premise is one workspace per client. The bar
- * now carries the organisation, and the sign-out control moved behind the
- * account row instead of being pinned to an edge it overflowed by six pixels.
- *
- * Server component apart from `NavLink`, which needs the pathname to mark the
- * current destination.
- */
-
-// Categorise leads because it is the product: upload a file, get it back
-// categorised. Workspaces is everything behind that -- the versions, the
-// review queue, the full history of a run -- and it is one click away rather
-// than in the way.
 const NAV = [
   { href: '/app', label: 'Categorise', icon: <CategoriseIcon /> },
   { href: '/app/workspaces', label: 'Workspaces', icon: <WorkspacesIcon /> },
-  { href: '/app/audit', label: 'Activity', icon: <ActivityIcon /> },
+  { href: '/app/audit', label: 'Activity Log', icon: <ActivityIcon /> },
 ];
 
 export async function AppShell({
@@ -58,52 +34,38 @@ export async function AppShell({
   const isAdmin = role === 'owner' || role === 'admin';
 
   return (
-    <div className="flex min-h-svh flex-col">
+    <div className="flex min-h-svh flex-col bg-slate-950 text-slate-100 selection:bg-cyan-500/30">
       <SystemHealthBanner role={role} health={health} />
 
       <div className="flex flex-1 flex-col lg:flex-row">
-        <aside className="glass-bar sticky top-0 z-30 shrink-0 border-b border-border lg:h-svh lg:w-64 lg:self-start lg:border-b-0 lg:border-r lg:bg-surface lg:backdrop-blur-none">
-          {/* --- narrow: a bar in two rows ---------------------------------
-              One row could not hold the wordmark, the organisation, two
-              destinations and sign-out on a 390px screen: the organisation
-              truncated to "acc…", which is the one thing on the bar a person
-              needs to read. Identity and account on top, navigation beneath,
-              and the whole thing collapses back to a single row as soon as
-              there is width for it. */}
+        {/* --- Sidebar Navigation --- */}
+        <aside className="sticky top-0 z-30 shrink-0 border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-xl lg:h-svh lg:w-64 lg:self-start lg:border-b-0 lg:border-r lg:bg-slate-900/40">
+          
+          {/* Mobile top bar */}
           <div className="lg:hidden">
-            <div className="flex items-center gap-3 px-4 pb-2 pt-2.5 sm:pb-2.5">
-              {/* `-ml-1.5 p-1.5` rather than a bare 22px mark: below `sm` the
-                  wordmark is hidden and the link was a 22×22 tap target. The
-                  padding is negative-margined back out so the bar's optical
-                  left edge does not move. */}
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
               <Link
                 href="/app"
-                className="-ml-1.5 flex shrink-0 items-center gap-2.5 rounded-[var(--radius)] p-1.5 transition-colors hover:bg-surface-2"
-                aria-label="DataEngine — all workspaces"
+                className="flex items-center gap-2.5 rounded-lg p-1 transition-colors hover:bg-slate-800/50"
               >
-                <Mark className="h-[22px] w-[22px]" />
-                <span className="hidden text-[15px] font-semibold tracking-tight sm:inline">
+                <Mark className="h-6 w-6 text-cyan-400" />
+                <span className="font-heading font-extrabold text-base tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-300 to-indigo-300">
                   DataEngine
                 </span>
               </Link>
 
-              {/* Which client's books, on the screens that had no room for the
-                  sidebar block. */}
-              <span
-                className="min-w-0 flex-1 truncate border-l border-border pl-3 text-sm font-medium"
-                title={orgName}
-              >
+              <span className="truncate border-l border-slate-800 pl-3 text-xs font-medium text-slate-300 max-w-[140px]">
                 {orgName}
               </span>
 
-              <form action="/auth/signout" method="post" className="shrink-0">
+              <form action="/auth/signout" method="post">
                 <button className={secondaryButtonClass('sm')} type="submit">
                   Sign out
                 </button>
               </form>
             </div>
 
-            <nav className="flex items-center gap-1 px-3 pb-2">
+            <nav className="flex items-center gap-1 px-3 pb-2.5 overflow-x-auto">
               {NAV.map((item) => (
                 <NavLink key={item.href} href={item.href} icon={item.icon}>
                   {item.label}
@@ -112,56 +74,64 @@ export async function AppShell({
             </nav>
           </div>
 
-          {/* --- wide: the sidebar proper -----------------------------------
-              Sticky and viewport-tall rather than stretching with the page.
-              A workspace with a full review queue runs to six thousand pixels,
-              and a sidebar that grows with it put the engine status and the
-              account block at the very bottom of that -- present, and never
-              seen. */}
-          <div className="hidden lg:flex lg:h-full lg:flex-col lg:overflow-y-auto">
-            <Link
-              href="/app"
-              className="flex items-center gap-2.5 border-b border-border px-5 py-4 transition-opacity hover:opacity-80"
-            >
-              <Mark className="h-[22px] w-[22px]" />
-              <span className="text-[15px] font-semibold tracking-tight">DataEngine</span>
-            </Link>
+          {/* Desktop full sidebar */}
+          <div className="hidden lg:flex lg:h-full lg:flex-col lg:justify-between">
+            <div>
+              {/* Header Branding */}
+              <div className="flex items-center justify-between border-b border-slate-800/80 px-5 py-4">
+                <Link href="/app" className="flex items-center gap-3 group">
+                  <div className="p-1.5 rounded-xl bg-gradient-to-br from-cyan-500/20 to-teal-500/10 border border-cyan-500/30 group-hover:border-cyan-400/60 transition-all shadow-[0_0_15px_-3px_rgba(6,182,212,0.3)]">
+                    <Mark className="h-6 w-6 text-cyan-400" />
+                  </div>
+                  <span className="font-heading font-extrabold text-lg tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-slate-100 via-cyan-100 to-teal-200">
+                    DataEngine
+                  </span>
+                </Link>
+              </div>
 
-            {/* Which client's books am I looking at. The most important thing on
-                the frame, and the question a practice with forty clients asks
-                every time they switch tab. */}
-            <div className="min-w-0 border-b border-border px-5 py-4">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">
-                Organisation
-              </p>
-              <p className="mt-1.5 truncate text-sm font-medium" title={orgName}>
-                {orgName}
-              </p>
-              <p className="mt-0.5 text-xs capitalize text-subtle">{role}</p>
+              {/* Quick Command Trigger */}
+              <div className="px-3 pt-4 pb-2">
+                <CommandMenu />
+              </div>
+
+              {/* Workspace / Org Badge */}
+              <div className="mx-3 my-2 rounded-xl border border-slate-800/80 bg-slate-900/50 p-3.5 shadow-inner">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-cyan-400/80">
+                    Active Client
+                  </p>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-cyan-950/60 px-2 py-0.5 text-[10px] font-medium text-cyan-300 border border-cyan-800/50">
+                    <ShieldCheck className="w-3 h-3 text-cyan-400" />
+                    {role}
+                  </span>
+                </div>
+                <p className="mt-1.5 truncate text-sm font-semibold text-slate-100" title={orgName}>
+                  {orgName}
+                </p>
+              </div>
+
+              {/* Navigation Links */}
+              <nav className="flex flex-col gap-1.5 px-3 py-3">
+                {NAV.map((item) => (
+                  <NavLink key={item.href} href={item.href} icon={item.icon}>
+                    {item.label}
+                  </NavLink>
+                ))}
+              </nav>
             </div>
 
-            <nav className="flex flex-col gap-1 px-3 py-3">
-              {NAV.map((item) => (
-                <NavLink key={item.href} href={item.href} icon={item.icon}>
-                  {item.label}
-                </NavLink>
-              ))}
-            </nav>
-
-            {/* Pinned to the bottom. The status and the account are reference,
-                not navigation, and the gap above them used to be a hole in the
-                middle of the frame on a tall screen. */}
-            <div className="mt-auto">
+            {/* Bottom Status & Account */}
+            <div className="mt-auto border-t border-slate-800/80">
               {isAdmin && <EngineStatus state={health.state} />}
 
-              <div className="border-t border-border px-5 py-4">
+              <div className="p-4 bg-slate-900/30">
                 {email && (
-                  <p className="truncate text-xs text-subtle" title={email}>
+                  <p className="truncate text-xs font-mono text-slate-400 mb-3" title={email}>
                     {email}
                   </p>
                 )}
-                <form action="/auth/signout" method="post" className="mt-2.5">
-                  <button className={`${secondaryButtonClass('sm')} w-full`} type="submit">
+                <form action="/auth/signout" method="post">
+                  <button className={`${secondaryButtonClass('sm')} w-full text-slate-300 hover:text-slate-100 hover:border-slate-700`} type="submit">
                     Sign out
                   </button>
                 </form>
@@ -170,16 +140,21 @@ export async function AppShell({
           </div>
         </aside>
 
+        {/* --- Main Content Area --- */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-8 sm:px-8 sm:py-10">
+          <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-8 sm:py-10">
             {children}
           </main>
 
-          <footer className="mt-6 border-t border-border px-6 py-5">
-            <p className="mx-auto max-w-2xl text-center text-xs leading-relaxed text-subtle">
-              A copilot, not an autonomous accountant. Every material change is reviewed and
-              signed off by a person, and every number can be traced to its source rows.
-            </p>
+          <footer className="mt-12 border-t border-slate-800/60 px-6 py-6 bg-slate-950/80">
+            <div className="mx-auto max-w-2xl text-center">
+              <p className="text-xs leading-relaxed text-slate-400">
+                DataEngine AI Copilot · Professional Financial Automation Engine
+              </p>
+              <p className="mt-1 text-[11px] text-slate-400/80">
+                Every material proposal is verifiable and audited against source bank files.
+              </p>
+            </div>
           </footer>
         </div>
       </div>
@@ -187,37 +162,22 @@ export async function AppShell({
   );
 }
 
-/**
- * Whether the reasoning engine is actually running.
- *
- * Three states and never two: `unknown` means the worker has not reported, and
- * showing that as healthy would be the interface lying at the one moment it
- * matters. Admins only — a member cannot act on it.
- *
- * Quiet by design. The banner above is what shouts; this is for the glance
- * that confirms nothing is wrong.
- */
 function EngineStatus({ state }: { state: 'ok' | 'degraded' | 'unknown' }) {
-  // Same words as the workspace panel's engine strip. The frame said
-  // "Operational" while the panel on the page said "Running without a model",
-  // about the same worker, from the same row.
-  const label = { ok: 'Connected', degraded: 'Degraded', unknown: 'Unknown' }[state];
-  const dot = {
-    ok: 'bg-success',
-    degraded: 'bg-warning',
-    unknown: 'bg-subtle',
+  const label = { ok: 'AI Engine Ready', degraded: 'Engine Degraded', unknown: 'Connecting...' }[state];
+  const color = {
+    ok: 'bg-emerald-400 text-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]',
+    degraded: 'bg-amber-400 text-amber-400',
+    unknown: 'bg-slate-500 text-slate-500',
   }[state];
 
   return (
-    <div className="border-t border-border px-5 py-4">
-      <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">AI engine</p>
-      <p className="mt-1.5 flex items-center gap-2 text-sm">
-        <span
-          aria-hidden
-          className={`h-2 w-2 shrink-0 rounded-full ${dot} ${state === 'ok' ? 'pulse-dot' : ''}`}
-        />
-        {label}
-      </p>
+    <div className="px-5 py-3.5 bg-slate-900/20 flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <Cpu className="w-4 h-4 text-cyan-400" />
+        <span className="text-xs font-semibold text-slate-300">{label}</span>
+      </div>
+      <span aria-hidden className={`h-2 w-2 rounded-full ${color}`} />
     </div>
   );
 }
+
