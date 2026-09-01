@@ -1,0 +1,69 @@
+# Prove the deploy can happen, without doing it.
+#
+# Run it from the Actions tab, or:
+#
+#   gh workflow run deploy-preflight.yml
+#
+# This exists because the deploy job's failure modes are mostly *reachability*
+# failures, and those are slow and expensive to diagnose from a failed deploy:
+# the run has to get through three test jobs and two image builds before it even
+# attempts an ssh. This does the ssh first, on its own, in about twenty seconds.
+#
+# It changes nothing on the VPS. See scripts/deploy-preflight.sh.
+
+name: Deploy preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Can the deploy reach the VPS?
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+          sparse-checkout-cone-mode: false
+
+      # Port 22 on the VPS is closed to the internet and stays that way. See
+      # the note in ci.yml.
+      - name: Join the tailnet
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+          args: --accept-routes
+
+      # Reported before the ssh, because "the runner never joined the tailnet"
+      # and "the VPS refused the key" look identical from a timed-out ssh.
+      - name: Confirm the tailnet is up
+        run: |
+          tailscale status --peers=false || true
+          tailscale ip -4 || true
+
+      - name: Prepare the SSH key
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ vars.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Reach the VPS and look around
+        env:
+          VPS: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
+          APP_DIR: ${{ vars.VPS_APP_DIR }}
+          WEB_FILE: ${{ vars.VPS_WEB_COMPOSE_FILE }}
+          WEB_PROJECT: ${{ vars.VPS_WEB_PROJECT }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes -o ConnectTimeout=20 "$VPS" \
+              "bash -s -- '$APP_DIR' '$WEB_FILE' '$WEB_PROJECT'" \
+              < scripts/deploy-preflight.sh
