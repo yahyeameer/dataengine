@@ -1,3 +1,4 @@
+import type { Json } from '@/lib/database.types';
 import type { Database } from '@/lib/database.types';
 
 /**
@@ -186,4 +187,31 @@ export function formatAge(timestamp: string | null | undefined): string {
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.round(hours / 24)}d ago`;
+}
+
+/**
+ * The minimum a download control needs. Declared separately from Job so the
+ * page can hand over its own server-fetched rows without the two queries having
+ * to agree on every column.
+ */
+export type DownloadableJob = {
+  id: string;
+  kind: AgentJobKind;
+  status: AgentJobStatus;
+  result: Json;
+};
+
+/**
+ * The dataset version a finished export was taken from, or null if the job
+ * did not record one.
+ *
+ * Lives here rather than in `agent-panel` because the workspace page is a
+ * server component and needs it to mark superseded downloads. Every export of
+ * a `'use client'` module is a client reference, so calling this from the
+ * server threw "Attempted to call exportVersionNo() from the server" and took
+ * the whole workspace screen down with it.
+ */
+export function exportVersionNo(job: DownloadableJob): number | null {
+  const result = (job.result ?? {}) as Record<string, unknown>;
+  return typeof result.version_no === 'number' ? result.version_no : null;
 }

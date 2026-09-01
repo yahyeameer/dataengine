@@ -6,16 +6,20 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import {
   type AgentJobKind,
   type AgentJobStatus,
+  type DownloadableJob,
   ENGINE_STATE_DETAIL,
   ENGINE_STATE_LABELS,
   type EngineState,
   JOB_KIND_LABELS,
   engineStateFor,
+  exportVersionNo,
   formatAge,
   isTerminal,
   isWorkerOnline,
 } from '@/lib/agent';
 import type { Json } from '@/lib/database.types';
+
+export type { DownloadableJob };
 import {
   Badge,
   StatusBadge,
@@ -122,45 +126,45 @@ export function AgentPanel({
   const recent = jobs.slice(0, 5);
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 shadow-xl backdrop-blur-xl">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-slate-800/80 bg-slate-950/50 px-5 py-3.5">
+    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-xl backdrop-blur-xl">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border-subtle bg-background/50 px-5 py-3.5">
         <EngineDot state={state} busy={active > 0} />
-        <span className="text-sm font-bold text-slate-100">{ENGINE_STATE_LABELS[state]}</span>
+        <span className="text-sm font-bold text-foreground">{ENGINE_STATE_LABELS[state]}</span>
 
         {state === 'connected' && isOnline ? (
-          <span className="font-mono text-xs text-slate-400">
+          <span className="font-mono text-xs text-muted">
             {online[0].hostname ?? online[0].id}
             {online[0].version ? ` · v${online[0].version}` : ''}
             {describeModels(online[0].metadata)}
           </span>
         ) : (
-          <span className="text-xs text-slate-400">{ENGINE_STATE_DETAIL[state]}</span>
+          <span className="text-xs text-muted">{ENGINE_STATE_DETAIL[state]}</span>
         )}
 
         {active > 0 ? (
-          <span className="ml-auto flex items-center gap-1.5 text-xs text-cyan-400 bg-cyan-950/60 px-2.5 py-1 rounded-full border border-cyan-500/30">
-            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
+          <span className="ml-auto flex items-center gap-1.5 text-xs text-accent bg-accent-soft px-2.5 py-1 rounded-full border border-accent/30">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />
             <span className="font-mono font-bold">{active}</span> jobs active
           </span>
         ) : null}
       </div>
 
       {recent.length === 0 ? (
-        <p className="px-5 py-4 text-sm text-slate-400">
+        <p className="px-5 py-4 text-sm text-muted">
           Nothing has run yet. Upload a file and choose Analyse to start.
         </p>
       ) : (
-        <ul className="divide-y divide-slate-800/60">
+        <ul className="divide-y divide-border-subtle">
           {recent.map((job) => (
-            <li key={job.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-3.5 hover:bg-slate-800/30 transition-colors">
-              <span className="text-sm font-semibold text-slate-200">{JOB_KIND_LABELS[job.kind] ?? job.kind}</span>
+            <li key={job.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-3.5 hover:bg-surface-2 transition-colors">
+              <span className="text-sm font-semibold text-foreground">{JOB_KIND_LABELS[job.kind] ?? job.kind}</span>
 
               <JobStatus job={job} />
 
               <RelativeTime timestamp={job.finished_at ?? job.created_at} />
 
               {job.error ? (
-                <p className="w-full text-xs leading-relaxed text-rose-400 mt-1">{job.error}</p>
+                <p className="w-full text-xs leading-relaxed text-danger mt-1">{job.error}</p>
               ) : null}
             </li>
           ))}
@@ -306,18 +310,6 @@ function JobStatus({ job }: { job: Job }) {
   return <StatusBadge status={job.status} />;
 }
 
-/**
- * The minimum a download control needs. Declared separately from Job so the
- * page can hand over its own server-fetched rows without the two queries having
- * to agree on every column.
- */
-export type DownloadableJob = {
-  id: string;
-  kind: AgentJobKind;
-  status: AgentJobStatus;
-  result: Json;
-};
-
 /** The kinds that leave a file behind in the exports bucket. */
 const DOWNLOADABLE_KINDS = new Set<AgentJobKind>(['generate_report', 'export_dataset']);
 
@@ -343,26 +335,6 @@ function artefactName(job: DownloadableJob): string | null {
 }
 
 /**
- * Which dataset version this file was made from.
- *
- * The single most important fact about an export and the one nothing used to
- * show. An export is a snapshot of an immutable version, so the moment a
- * cleaning is applied every file made before it is a picture of the *previous*
- * figures — still correct, still downloadable, and no longer what anybody
- * means when they say "the cleaned data".
- *
- * That gap is not hypothetical. Approving a categorisation and then exporting
- * before pressing apply produces a file with no category column in it, sitting
- * in a list next to the one that has it, under an identical "Download Excel"
- * label. The reader picks the wrong one and concludes the categorisation was
- * lost.
- */
-export function exportVersionNo(job: DownloadableJob): number | null {
-  const result = (job.result ?? {}) as Record<string, unknown>;
-  return typeof result.version_no === 'number' ? result.version_no : null;
-}
-
-export /**
  * "Download Excel" beats "Download" the moment there are two of them.
  *
  * A workspace that has exported both formats renders two identical buttons
@@ -610,8 +582,13 @@ export function CategorizeButton({
 
       {/* `grid` rather than `flex-wrap`. A native select sizes itself to its
           widest option and refuses to shrink, so with real column names in it
-          this row stretched the whole page to 1,649px on a 1,440px screen. */}
-      <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,14rem)_minmax(0,14rem)_minmax(0,1fr)_auto]">
+          this row stretched the whole page to 1,649px on a 1,440px screen.
+
+          Two rows until there is genuinely room for four columns. Since the
+          workspace page moved its machinery into a rail this block sits in a
+          narrower column, and four across left the free-text field about
+          150px wide — a box for a sentence, sized for a word. */}
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,12rem)_minmax(0,12rem)_minmax(0,1fr)_auto]">
         <select
           value={column}
           onChange={(event) => setColumn(event.target.value)}

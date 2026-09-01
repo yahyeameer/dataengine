@@ -32,12 +32,22 @@ export function NavLink({
     <Link
       href={href}
       aria-current={active ? 'page' : undefined}
-      className={`group relative flex items-center gap-2.5 rounded-[var(--radius)] px-3 py-2 text-sm transition-colors ${
+      className={`group relative flex items-center gap-2.5 whitespace-nowrap rounded-[var(--radius)] py-2 pl-3 pr-3 text-sm transition-colors duration-[--duration-fast] ${
         active
           ? 'bg-accent-soft font-medium text-accent'
           : 'text-muted hover:bg-surface-2 hover:text-foreground'
       }`}
     >
+      {/* The active marker is a bar on the leading edge, not only a fill.
+          A tinted background alone is the first thing to disappear on a dim
+          laptop screen, and "which page am I on" should not depend on how
+          well the panel is calibrated. */}
+      <span
+        aria-hidden
+        className={`absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-accent transition-opacity ${
+          active ? 'opacity-100' : 'opacity-0'
+        }`}
+      />
       <span
         aria-hidden
         className={`shrink-0 transition-colors ${active ? 'text-accent' : 'text-subtle group-hover:text-muted'}`}

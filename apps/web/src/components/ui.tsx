@@ -27,7 +27,7 @@ export function Card({
 }) {
   return (
     <Tag
-      className={`rounded-2xl border border-slate-800 bg-slate-900/60 shadow-xl backdrop-blur-xl ${className}`}
+      className={`rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-md)] ${className}`}
     >
       {children}
     </Tag>
@@ -50,10 +50,10 @@ export function Panel({
 }) {
   return (
     <Card as="section" className={className}>
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-800/80 px-5 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border-subtle px-5 py-4">
         <div className="min-w-0">
-          <h2 className="font-heading text-base font-bold tracking-tight text-slate-100">{title}</h2>
-          {description && <p className="mt-1 text-sm leading-relaxed text-slate-400">{description}</p>}
+          <h2 className="font-heading text-base font-semibold tracking-tight text-foreground">{title}</h2>
+          {description && <p className="mt-1 text-sm leading-relaxed text-muted">{description}</p>}
         </div>
         {action && <div className="shrink-0">{action}</div>}
       </div>
@@ -276,13 +276,21 @@ const TONE: Record<Tone, string> = {
   accent: 'bg-accent-soft text-accent border-accent/25',
 };
 
-/** Every status string this product can show, mapped once. */
+/**
+ * Every status string this product can show, mapped once.
+ *
+ * The four job states are the spine of it: queued amber, running blue,
+ * succeeded green, failed red. `queued` was `neutral`, which made a job that
+ * had not started yet look identical to one that had been rejected and to one
+ * that had been superseded — three different facts in the same grey. Waiting
+ * is a state the reader is waiting *on*, so it gets a colour.
+ */
 const STATUS_TONE: Record<string, Tone> = {
   // uploads
   pending: 'warning',
   stored: 'success',
   // jobs
-  queued: 'neutral',
+  queued: 'warning',
   running: 'info',
   succeeded: 'success',
   // proposals
@@ -532,16 +540,29 @@ export function TableShell({
   children,
   stickyHead = false,
   minWidth = '42rem',
+  maxHeight = '70vh',
 }: {
   children: ReactNode;
   stickyHead?: boolean;
   minWidth?: string;
+  /** Only used with `stickyHead`; see below for why it is not optional there. */
+  maxHeight?: string;
 }) {
   return (
     <div
+      // `sticky` resolves against the nearest scrollport, and `overflow-x-auto`
+      // already made this box one -- CSS computes the other axis to `auto` as
+      // soon as one axis is not `visible`. With no height limit that box never
+      // scrolled, so the header stuck to a scrollport that never moved while
+      // the *page* scrolled past it: two hundred audit rows, twenty thousand
+      // pixels, and a header visible for the first screenful only. Capping the
+      // height is what makes the header actually stick.
       className={`overflow-x-auto rounded-[var(--radius-lg)] border border-border bg-surface ${
-        stickyHead ? '[&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10' : ''
+        stickyHead
+          ? 'overflow-y-auto [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10'
+          : ''
       }`}
+      style={stickyHead ? { maxHeight } : undefined}
     >
       <table className="w-full text-sm" style={{ minWidth }}>
         {children}
@@ -661,5 +682,205 @@ export function Fact({ label, children }: { label: string; children: ReactNode }
       </span>
       <span className="text-[13px] leading-none">{children}</span>
     </span>
+  );
+}
+
+/* --------------------------------------------------------------------------
+   Layout
+
+   The screens in this product are one of two shapes: a task with context
+   beside it, or a table with a toolbar over it. Both shapes live here so a
+   page describes what it contains rather than how wide its columns are.
+   -------------------------------------------------------------------------- */
+
+/**
+ * A task column with a rail of context beside it.
+ *
+ * The strongest idea taken from the reference: the thing the reader came to do
+ * stays in one uninterrupted column, and everything that is *about* the task —
+ * what state it is in, what the engine will do to it, what happened recently —
+ * sits to the right where it can be read without being stepped through.
+ *
+ * The rail collapses under the main column below `lg` rather than disappearing.
+ * On a phone the context is still the answer to "what is happening?", and it
+ * belongs after the task rather than instead of it.
+ *
+ * `sticky` on the rail's inner box, not on the rail: a sticky flex child with
+ * `align-self: stretch` never moves, which is the usual way this is written
+ * and the usual reason it does not work.
+ */
+export function RightRail({
+  children,
+  rail,
+  railLabel = 'Details',
+  sticky = true,
+}: {
+  children: ReactNode;
+  rail: ReactNode;
+  railLabel?: string;
+  /**
+   * Off when the rail is taller than the viewport. A sticky box that does not
+   * fit pins its top and puts its own last item permanently out of reach,
+   * which is worse than letting it scroll with the page.
+   */
+  sticky?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-8 lg:flex-row lg:items-start lg:gap-10">
+      <div className="min-w-0 flex-1">{children}</div>
+      <aside
+        aria-label={railLabel}
+        className="w-full shrink-0 lg:w-[19rem] lg:self-start xl:w-[21rem]"
+      >
+        <div className={`flex flex-col gap-4 ${sticky ? 'lg:sticky lg:top-6' : ''}`}>
+          {rail}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+/**
+ * A titled block inside the rail.
+ *
+ * Quieter than `Panel` on purpose. The rail is read at a glance and out of the
+ * corner of the eye; if every block in it carried a full card header the rail
+ * would compete with the task it is meant to support.
+ */
+export function RailSection({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-[var(--radius-lg)] border border-border bg-surface p-4">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-subtle">
+          {title}
+        </h2>
+        {hint && <span className="text-[11px] text-subtle">{hint}</span>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * One number, at the size a number deserves.
+ *
+ * Distinct from `Stat`: `Stat` is a card in a grid on a page, this is a row in
+ * a rail, where the label and the figure share a line because vertical space
+ * in a rail is the scarce thing.
+ */
+export function KpiTile({
+  label,
+  value,
+  tone = 'neutral',
+  hint,
+}: {
+  label: string;
+  value: ReactNode;
+  tone?: Tone;
+  hint?: string;
+}) {
+  const valueTone: Record<Tone, string> = {
+    neutral: 'text-foreground',
+    success: 'text-success',
+    warning: 'text-warning',
+    danger: 'text-danger',
+    info: 'text-info',
+    accent: 'text-accent',
+  };
+
+  return (
+    <div className="flex items-baseline justify-between gap-4 py-1.5">
+      <span className="min-w-0 text-[13px] text-muted">
+        {label}
+        {hint && <span className="mt-0.5 block text-[11px] text-subtle">{hint}</span>}
+      </span>
+      <span className={`tabular text-[15px] font-semibold tracking-tight ${valueTone[tone]}`}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * A row of mutually exclusive choices, rendered as one control.
+ *
+ * Replaces the pattern of two or three buttons sitting next to each other with
+ * the selected one coloured in, which reads as "three actions, one of them
+ * highlighted" rather than "one setting, currently on its second value".
+ */
+export function SegmentedControl<T extends string>({
+  options,
+  value,
+  onChange,
+  label,
+}: {
+  options: readonly { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  label: string;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className="inline-flex items-center gap-0.5 rounded-[var(--radius)] border border-border bg-surface-2 p-0.5"
+    >
+      {options.map((option) => {
+        const selected = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onChange(option.value)}
+            className={`h-7 cursor-pointer rounded-[calc(var(--radius)-3px)] px-3 text-[13px] font-medium transition-colors ${
+              selected
+                ? 'bg-surface text-foreground shadow-[var(--shadow-sm)]'
+                : 'text-muted hover:text-foreground'
+            }`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The bar over a table: what you are looking at on the left, what you can do
+ * about it on the right.
+ *
+ * Exists so the gap between a heading and the table under it is one number in
+ * one place, rather than whatever each page happened to pick.
+ */
+export function Toolbar({
+  title,
+  count,
+  children,
+}: {
+  title: ReactNode;
+  count?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <div className="flex min-w-0 items-baseline gap-2.5">
+        <h2 className="text-[15px] font-semibold tracking-tight">{title}</h2>
+        {count !== undefined && count !== null && (
+          <span className="tabular text-[13px] text-subtle">{count}</span>
+        )}
+      </div>
+      {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
+    </div>
   );
 }

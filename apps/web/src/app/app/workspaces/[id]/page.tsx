@@ -5,9 +5,7 @@ import {
   AnalyseButton,
   CategorizeButton,
   DownloadButton,
-  type DownloadableJob,
   ExportButton,
-  exportVersionNo,
 } from '@/components/agent-panel';
 import { AskPanel } from '@/components/ask-panel';
 import {
@@ -21,10 +19,11 @@ import {
   Card,
   EmptyState,
   PageHeader,
+  RightRail,
   SectionHeading,
   StatusBadge,
 } from '@/components/ui';
-import { isAdvisory } from '@/lib/agent';
+import { type DownloadableJob, exportVersionNo, isAdvisory } from '@/lib/agent';
 import { requireCurrentOrg } from '@/lib/authz';
 import { createServerSupabase } from '@/lib/supabase/server';
 import { formatBytes } from '@/lib/storage';
@@ -249,7 +248,92 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
       {/* Ordered by what the reader came to find out, not by what the system
           does. An accountant opening a client asks "is anything waiting on me"
           before anything else, so decisions come first and the machinery that
-          produced them comes after. */}
+          produced them comes after.
+
+          That ordering was right and the layout still buried it: eight full-
+          width sections stacked into nine thousand pixels, so the queue that
+          needs a decision and the engine log that explains it were never on
+          screen together. The decisions, the cleaned result and the question
+          box are the column; the machinery — what the engine is doing, what
+          has been uploaded — is the rail beside them. */}
+
+      <RightRail
+        railLabel="Workspace activity"
+        // The rail carries a live job log and every file in the workspace, so
+        // it routinely runs past a screen. Pinning it would strand its foot.
+        sticky={false}
+        rail={
+          <>
+            <section>
+              <SectionHeading hint="Live">What DataEngine is doing</SectionHeading>
+              <AgentPanel
+                workspaceId={workspace.id}
+                initialJobs={jobs ?? []}
+                initialWorkers={workers ?? []}
+              />
+            </section>
+
+            {!isNew ? (
+              <section className="min-w-0">
+                <SectionHeading
+                  hint={uploads && uploads.length > 0 ? `${uploads.length} stored` : undefined}
+                >
+                  Files
+                </SectionHeading>
+
+                <ul className="divide-y divide-border-subtle overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
+                  {(uploads ?? []).map((upload) => (
+                    <li
+                      key={upload.id}
+                      className="row-hover flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{upload.original_filename}</p>
+                        <p className="mt-0.5 truncate text-xs text-subtle">
+                          {upload.dataset_id
+                            ? (datasetNames.get(upload.dataset_id) ?? 'Unknown dataset')
+                            : 'No dataset'}
+                          {' · '}
+                          <span className="tabular">
+                            {new Date(upload.created_at).toLocaleDateString('en-GB')}
+                          </span>
+                          {' · '}
+                          <span className="tabular">{formatBytes(upload.byte_size)}</span>
+                        </p>
+                      </div>
+
+                      {/* The action and the state in one slot, so the column
+                          reads straight down even where one row offers Analyse
+                          and the next only says "no dataset". */}
+                      <div className="flex shrink-0 items-center gap-2">
+                        {upload.status === 'stored' ? (
+                          <AnalyseButton
+                            workspaceId={workspace.id}
+                            uploadId={upload.id}
+                            datasetId={upload.dataset_id}
+                          />
+                        ) : null}
+                        <StatusBadge status={upload.status} />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            {!isNew ? (
+              <section>
+                <SectionHeading description="Files are stored exactly as they arrived. Nothing is modified in place — cleaning writes a new version and leaves the original intact.">
+                  Upload a file
+                </SectionHeading>
+                <Card className="p-5">
+                  <UploadPanel workspaceId={workspace.id} datasets={datasets ?? []} />
+                </Card>
+              </section>
+            ) : null}
+          </>
+        }
+      >
 
       {needsDecision ? (
         <div className="mb-10 space-y-6">
@@ -293,15 +377,6 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
           </div>
         </section>
       ) : null}
-
-      <div className="mb-10">
-        <SectionHeading hint="Live">What DataEngine is doing</SectionHeading>
-        <AgentPanel
-          workspaceId={workspace.id}
-          initialJobs={jobs ?? []}
-          initialWorkers={workers ?? []}
-        />
-      </div>
 
       {latestVersion ? (
         <div className="mb-10">
@@ -421,64 +496,7 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
         </div>
       ) : null}
 
-      {!isNew ? (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
-          <section>
-            <SectionHeading description="Files are stored exactly as they arrived. Nothing is modified in place — cleaning writes a new version and leaves the original intact.">
-              Upload a file
-            </SectionHeading>
-            <Card className="p-5">
-              <UploadPanel workspaceId={workspace.id} datasets={datasets ?? []} />
-            </Card>
-          </section>
-
-          <section className="min-w-0">
-            <SectionHeading
-              hint={uploads && uploads.length > 0 ? `${uploads.length} stored` : undefined}
-            >
-              Files
-            </SectionHeading>
-
-            <ul className="divide-y divide-border-subtle overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
-              {(uploads ?? []).map((upload) => (
-                <li
-                  key={upload.id}
-                  className="row-hover flex flex-wrap items-center gap-x-4 gap-y-2.5 px-4 py-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{upload.original_filename}</p>
-                    <p className="mt-0.5 truncate text-xs text-subtle">
-                      {upload.dataset_id
-                        ? (datasetNames.get(upload.dataset_id) ?? 'Unknown dataset')
-                        : 'No dataset'}
-                      {' · '}
-                      <span className="tabular">
-                        {new Date(upload.created_at).toLocaleString('en-GB')}
-                      </span>
-                      {' · '}
-                      <span className="tabular">{formatBytes(upload.byte_size)}</span>
-                    </p>
-                  </div>
-
-                  {/* The action and the state in one slot, so the column reads
-                      straight down even where one row offers Analyse and the
-                      next only says "no dataset". */}
-                  <div className="flex shrink-0 items-center gap-2.5">
-                    {upload.status === 'stored' ? (
-                      <AnalyseButton
-                        workspaceId={workspace.id}
-                        uploadId={upload.id}
-                        datasetId={upload.dataset_id}
-                      />
-                    ) : null}
-                    <StatusBadge status={upload.status} />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </div>
-      ) : null}
+      </RightRail>
     </>
   );
 }

@@ -1,112 +1,162 @@
 @import "tailwindcss";
 
-@layer base {
-  :root {
-    --font-heading: var(--font-jakarta), system-ui, sans-serif;
-    --font-mono: var(--font-jetbrains), monospace;
+/* ============================================================================
+   The token layer.
 
-    /* Light Theme - Clean Swiss Precision */
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-    --primary: 210 100% 45%;
-    --primary-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --radius: 0.75rem;
+   Everything in the product takes its colour, radius, shadow and timing from
+   here. There is one of these blocks and there was previously none: the app
+   carried two half-migrated palettes in `:root`/`.dark` written as raw CSS
+   variables, which Tailwind v4 never sees. Utilities are generated from
+   `@theme`, so `bg-surface`, `text-muted`, `border-border` and two hundred
+   other classes across `ui.tsx` and the screens compiled to nothing at all,
+   and every screen that looked styled looked that way because somebody had
+   reached past the tokens for a `slate-900` or a `#050811`. Defining the
+   tokens here is what makes the design system in `ui.tsx` real.
 
-    --surface: #ffffff;
-    --surface-2: #f8fafc;
-    --border-subtle: #e2e8f0;
-  }
+   Dark only, on purpose. The light palette that used to sit in `:root` was
+   never reachable — `.dark` is hardcoded on <html> — and it was missing
+   `--accent`, so the focus ring would have been invalid the moment anyone
+   switched it on. A second theme nobody renders is a trap, not a feature.
+   ========================================================================= */
 
-  .dark {
-    /* Apple VisionOS Stealth Dark (Midnight Sapphire & Ice Teal) */
-    --background: 224 71% 4%;
-    --foreground: 210 40% 98%;
-    --card: 222 47% 6%;
-    --card-foreground: 210 40% 98%;
-    --primary: 199 89% 48%;
-    --primary-foreground: 224 71% 4%;
-    --secondary: 217 33% 12%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 12%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 199 89% 48%;
-    --accent-foreground: 224 71% 4%;
-    --border: 217 33% 14%;
-    --ring: 199 89% 48%;
-
-    /* Apple Glass Surface Tokens */
-    --surface: #0b111e;
-    --surface-2: #101726;
-    --border-subtle: rgba(255, 255, 255, 0.08);
-    --accent-glow: 0 10px 30px -10px rgba(14, 165, 233, 0.25);
-  }
-}
-
-h1, h2, h3, h4, .font-heading {
-  font-family: var(--font-heading);
-  letter-spacing: -0.025em;
-}
-
-.font-mono, code, pre, .tabular {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums slashed-zero;
-}
-
-/* Apple Sub-pixel Glass & Frosted Blur Primitives */
-.apple-glass {
-  background: rgba(13, 19, 32, 0.65);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
-}
-
-.apple-glass-card {
-  background: rgba(16, 24, 40, 0.45);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.4);
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.apple-glass-card:hover {
-  border-color: rgba(56, 189, 248, 0.3);
-  box-shadow: 0 15px 35px -10px rgba(14, 165, 233, 0.2), inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
-  transform: translateY(-2px);
-}
-
-body {
-  background-color: #060911;
-  color: #f1f5f9;
-  -webkit-font-smoothing: antialiased;
-}
-
-
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+@theme {
+  /* --- type ---------------------------------------------------------------
+     Two families for two roles, down from four (Geist, Geist Mono, Plus
+     Jakarta and JetBrains Mono were all being downloaded, two of them
+     monospace). IBM Plex was drawn for technical and financial interfaces and
+     ships a mono that shares its skeleton, so figures in a table and the
+     labels above them belong to the same voice. */
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", sans-serif;
+  --font-heading: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SFMono-Regular", monospace;
+
+  /* --- ground and surfaces ------------------------------------------------
+     Near-black rather than navy. A financial table sits on this for an hour at
+     a time, and a tinted ground pushes a colour cast through every neutral
+     above it. Three steps only: the page, a surface that sits on it, and a
+     surface raised off that one. The shell used to hand-pick four values in
+     this range (#050811, #080d1a, #070b16, #040710) that no reader could tell
+     apart. */
+  --color-background: #0a0b0f;
+  --color-surface: #111318;
+  --color-surface-2: #171a21;
+  --color-surface-3: #1e222b;
+
+  /* --- text ---------------------------------------------------------------
+     Three weights of voice. `foreground` is for content, `muted` for prose
+     that supports it, `subtle` for labels and metadata. All three clear AA on
+     the ground above; `subtle` is the floor and is never used for anything a
+     decision depends on. */
+  --color-foreground: #e9ebf0;
+  --color-muted: #a2aab8;
+  --color-subtle: #7e8898;
+
+  /* --- lines --------------------------------------------------------------
+     `border` is the default. `border-subtle` separates rows inside a surface
+     that is already bounded, and `border-strong` is the hover state. */
+  --color-border: #262b36;
+  --color-border-subtle: #1b1f28;
+  --color-border-strong: #39414f;
+
+  /* --- accent -------------------------------------------------------------
+     Trust blue, and the only non-status hue in the product. It is light rather
+     than saturated because it has to be legible *as text* on the ground —
+     a blue dark enough to carry white type is a blue too dark to read at 13px
+     on near-black. So the fill is the light blue and the ink on it is dark,
+     which is the pairing that actually passes AA in both directions:
+     accent on background 7.1:1, accent-ink on accent 6.8:1. */
+  --color-accent: #5b9dff;
+  --color-accent-hover: #85b6ff;
+  --color-accent-ink: #08111f;
+  --color-accent-soft: #5b9dff1f;
+
+  /* --- status -------------------------------------------------------------
+     Wired to the job vocabulary in `ui.tsx`: queued amber, running blue,
+     succeeded green, failed red. One colour per state, everywhere the state
+     appears. The `-soft` variants are the same hue at 12% for a badge ground,
+     so a badge never invents a colour of its own. */
+  --color-success: #4ecb8f;
+  --color-success-soft: #4ecb8f1f;
+  --color-warning: #e3a83c;
+  --color-warning-soft: #e3a83c1f;
+  --color-danger: #f26b6b;
+  --color-danger-soft: #f26b6b1f;
+  --color-info: #58b0f0;
+  --color-info-soft: #58b0f01f;
+}
+
+/* ----------------------------------------------------------------------------
+   Scalars Tailwind does not generate utilities for, but the components read
+   through `rounded-[var(--radius)]`, `shadow-[var(--shadow-sm)]` and friends.
+   `--accent-soft` and `--shadow-lg` were referenced by `.row-hover` and
+   `.ring-subject` and defined nowhere, so both utilities silently computed to
+   nothing. They are defined here.
+   -------------------------------------------------------------------------- */
+
+:root {
+  color-scheme: dark;
+
+  --radius-sm: 0.375rem;
+  --radius: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.125rem;
+
+  /* Elevation is carried by shadow, not by a lighter fill: on a near-black
+     ground a "raised" surface that is merely paler reads as a different
+     colour rather than a different height. */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.45);
+  --shadow-lg: 0 16px 40px -12px rgb(0 0 0 / 0.6);
+
+  --accent-soft: var(--color-accent-soft);
+  --accent-ring: #5b9dff40;
+  --accent-glow: 0 8px 28px -10px rgb(91 157 255 / 0.35);
+
+  /* --- motion -------------------------------------------------------------
+     Three durations and one easing. Movement in this product exists to say
+     that a state changed; anything longer than `slow` is decoration. */
+  --duration-fast: 120ms;
+  --duration: 180ms;
+  --duration-slow: 260ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
+h1,
+h2,
+h3,
+h4,
+.font-heading {
+  font-family: var(--font-heading);
+  letter-spacing: -0.018em;
+}
+
 /* Figures in a column must line up. This is a financial product; a table where
    the digits wander is a table nobody trusts. */
+code,
+pre,
 .tabular {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
 }
 
 /* Keyboard focus is never removed, only made to match the palette. */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 /* --- motion -----------------------------------------------------------------
@@ -121,26 +171,16 @@ body {
 .skeleton {
   position: relative;
   overflow: hidden;
-  background: var(--surface-2);
-  border-radius: 6px;
+  background: var(--color-surface-2);
+  border-radius: var(--radius-sm);
 }
 .skeleton::after {
   content: "";
   position: absolute;
   inset: 0;
   transform: translateX(-100%);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgb(255 255 255 / 0.35),
-    transparent
-  );
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.06), transparent);
   animation: de-shimmer 1.6s infinite;
-}
-@media (prefers-color-scheme: dark) {
-  .skeleton::after {
-    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.06), transparent);
-  }
 }
 
 @keyframes de-pulse {
@@ -148,6 +188,14 @@ body {
   50% { opacity: 0.45; }
 }
 .pulse-dot { animation: de-pulse 2.4s ease-in-out infinite; }
+
+/* Arrival, for a panel that appears in response to something the reader did.
+   Small enough to be felt rather than watched. */
+@keyframes de-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.rise { animation: de-rise var(--duration-slow) var(--ease-out) both; }
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -164,18 +212,21 @@ body {
 /* --- glass ------------------------------------------------------------------
    Used for the surfaces that float above the page rather than sit in it: the
    auth panel, the sticky application bar, the AI panels. A frosted interface is
-   a tiring interface, and glass everywhere means glass signifies nothing. */
+   a tiring interface, and glass everywhere means glass signifies nothing.
+
+   This replaces the `apple-glass` / `apple-glass-card` pair that was added
+   alongside it and did the same job with hand-mixed rgba values. */
 .glass {
-  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
-  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
 }
 
 /* The same treatment for a bar that has content scrolling under it. Heavier
    blur, no border of its own -- the bar draws its own bottom hairline. */
 .glass-bar {
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 82%, transparent);
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
 }
@@ -183,7 +234,7 @@ body {
 @supports not (backdrop-filter: blur(1px)) {
   .glass,
   .glass-bar {
-    background: var(--surface);
+    background: var(--color-surface);
   }
 }
 
@@ -198,12 +249,12 @@ body {
 
 .lift {
   transition:
-    border-color 150ms ease,
-    box-shadow 200ms ease,
-    transform 200ms ease;
+    border-color var(--duration) ease,
+    box-shadow var(--duration) ease,
+    transform var(--duration) var(--ease-out);
 }
 .lift:hover {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
   box-shadow: var(--accent-glow);
   transform: translateY(-1px);
 }
@@ -211,16 +262,18 @@ body {
 /* For rows in a list, which must not move -- a list that shifts under the
    cursor is a list that is hard to click down. They warm instead. */
 .row-hover {
-  transition: background-color 130ms ease, box-shadow 130ms ease;
+  transition: background-color var(--duration-fast) ease;
 }
 .row-hover:hover {
-  background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface));
+  background: color-mix(in srgb, var(--color-accent-soft) 55%, var(--color-surface));
 }
 
 /* The glow on a filled control, so the primary action on a screen is the one
    thing that answers to the cursor with light. */
 .glow-hover {
-  transition: background-color 150ms ease, box-shadow 200ms ease;
+  transition:
+    background-color var(--duration) ease,
+    box-shadow var(--duration) ease;
 }
 .glow-hover:hover:not(:disabled) {
   box-shadow: var(--accent-glow);
@@ -232,7 +285,7 @@ body {
    contrast it needs to be read. */
 .ring-subject {
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 22%, transparent),
     var(--shadow-lg);
 }
 

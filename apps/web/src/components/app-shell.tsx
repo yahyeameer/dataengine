@@ -9,9 +9,18 @@ import {
 import { Mark } from '@/components/product-story';
 import { SystemHealthBanner } from '@/components/system-health-banner';
 import { getSystemHealth } from '@/lib/system-health';
-import { secondaryButtonClass } from '@/components/ui';
 import { CommandMenu } from '@/components/command-menu';
-import { ShieldCheck, Cpu } from 'lucide-react';
+import { StatusDot } from '@/components/ui';
+
+/**
+ * The frame every signed-in screen sits in.
+ *
+ * It used to hand-pick four near-identical dark values — #050811, #080d1a,
+ * #070b16 and #040710 — for the page, the sidebar, the sidebar at large sizes
+ * and the footer. No reader could tell them apart, and none of them was the
+ * ground the rest of the product was drawn on. There are two surfaces here
+ * now: the page, and the rail beside it.
+ */
 
 const NAV = [
   { href: '/app', label: 'Categorise', icon: <CategoriseIcon /> },
@@ -34,38 +43,42 @@ export async function AppShell({
   const isAdmin = role === 'owner' || role === 'admin';
 
   return (
-    <div className="flex min-h-svh flex-col bg-[#050811] text-slate-100 selection:bg-sky-500/20">
+    <div className="flex min-h-svh flex-col bg-background text-foreground">
       <SystemHealthBanner role={role} health={health} />
 
       <div className="flex flex-1 flex-col lg:flex-row">
-        {/* --- Apple Vision Translucent Sidebar --- */}
-        <aside className="sticky top-0 z-30 shrink-0 border-b border-white/10 bg-[#080d1a]/80 backdrop-blur-2xl lg:h-svh lg:w-64 lg:self-start lg:border-b-0 lg:border-r lg:bg-[#070b16]/70">
-          
-          {/* Mobile Bar */}
+        {/* Opaque, not frosted. On desktop this rail is a full-height column
+            with nothing scrolling under it, so a backdrop-filter bought no
+            depth and cost a compositing layer — and Chromium sampled the
+            wrong region into it, painting ghosts of the right rail's figures
+            over the empty middle of the sidebar. */}
+        <aside className="sticky top-0 z-30 shrink-0 border-b border-border bg-surface lg:h-svh lg:w-64 lg:self-start lg:border-b-0 lg:border-r">
+          {/* --- Mobile bar --- */}
           <div className="lg:hidden">
             <div className="flex items-center justify-between gap-3 px-4 py-3">
               <Link
                 href="/app"
-                className="flex items-center gap-2.5 rounded-xl p-1 transition-colors hover:bg-white/5"
+                className="flex items-center gap-2.5 rounded-[var(--radius)] p-1 transition-colors hover:bg-surface-2"
               >
-                <Mark className="h-6 w-6 text-sky-400" />
-                <span className="font-heading font-extrabold text-base tracking-tight text-slate-100">
+                <Mark className="h-6 w-6 text-accent" />
+                <span className="font-heading text-base font-semibold tracking-tight">
                   DataEngine
                 </span>
               </Link>
 
-              <span className="truncate border-l border-white/10 pl-3 text-xs font-mono text-slate-400 max-w-[140px]">
+              <span
+                className="max-w-[140px] truncate border-l border-border pl-3 font-mono text-xs text-muted"
+                title={orgName}
+              >
                 {orgName}
               </span>
 
               <form action="/auth/signout" method="post">
-                <button className="px-3 py-1 rounded-lg text-xs font-medium border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white transition-all cursor-pointer" type="submit">
-                  Sign out
-                </button>
+                <SignOutButton />
               </form>
             </div>
 
-            <nav className="flex items-center gap-1 px-3 pb-2.5 overflow-x-auto">
+            <nav className="flex items-center gap-1 overflow-x-auto px-3 pb-2.5">
               {NAV.map((item) => (
                 <NavLink key={item.href} href={item.href} icon={item.icon}>
                   {item.label}
@@ -74,84 +87,73 @@ export async function AppShell({
             </nav>
           </div>
 
-          {/* Desktop Full Sidebar */}
-          <div className="hidden lg:flex lg:h-full lg:flex-col lg:justify-between">
-            <div>
-              {/* Header Branding */}
-              <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-                <Link href="/app" className="flex items-center gap-3 group">
-                  <div className="p-2 rounded-xl bg-white/5 border border-white/10 group-hover:border-sky-400/50 group-hover:bg-sky-500/10 transition-all duration-300 shadow-sm">
-                    <Mark className="h-6 w-6 text-sky-400" />
-                  </div>
-                  <span className="font-heading font-extrabold text-lg tracking-tight text-slate-100">
-                    DataEngine
-                  </span>
-                </Link>
-              </div>
-
-              {/* Command Menu */}
-              <div className="px-3 pt-4 pb-2">
-                <CommandMenu />
-              </div>
-
-              {/* Organization Indicator Card */}
-              <div className="mx-3 my-2 rounded-2xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md">
-                <div className="flex items-center justify-between">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Active Client
-                  </p>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-300 border border-sky-500/20">
-                    <ShieldCheck className="w-3 h-3 text-sky-400" />
-                    {role}
-                  </span>
-                </div>
-                <p className="mt-1.5 truncate font-heading text-sm font-bold text-slate-100" title={orgName}>
-                  {orgName}
-                </p>
-              </div>
-
-              {/* Navigation Links */}
-              <nav className="flex flex-col gap-1 px-3 py-3">
-                {NAV.map((item) => (
-                  <NavLink key={item.href} href={item.href} icon={item.icon}>
-                    {item.label}
-                  </NavLink>
-                ))}
-              </nav>
+          {/* --- Desktop rail --- */}
+          <div className="hidden lg:flex lg:h-full lg:flex-col">
+            <div className="flex items-center border-b border-border-subtle px-5 py-4">
+              <Link href="/app" className="group flex items-center gap-2.5">
+                <Mark className="h-6 w-6 text-accent transition-transform duration-[--duration] group-hover:scale-105" />
+                <span className="font-heading text-[15px] font-semibold tracking-tight">
+                  DataEngine
+                </span>
+              </Link>
             </div>
 
-            {/* Bottom Status & Account */}
-            <div className="mt-auto border-t border-white/10">
+            <div className="px-3 pb-1 pt-3">
+              <CommandMenu />
+            </div>
+
+            {/* The client whose books are on screen. It is the single most
+                consequential piece of state in the product — every figure
+                below belongs to this org and to no other — so it is stated
+                once, plainly, above the navigation rather than dressed as a
+                card competing with it. */}
+            <div className="px-5 pb-1 pt-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.11em] text-subtle">
+                Active client
+              </p>
+              <div className="mt-1 flex items-baseline justify-between gap-2">
+                <p className="min-w-0 truncate font-heading text-sm font-semibold" title={orgName}>
+                  {orgName}
+                </p>
+                <span className="shrink-0 text-[11px] text-subtle">{role}</span>
+              </div>
+            </div>
+
+            <nav className="flex flex-col gap-0.5 px-3 py-4">
+              {NAV.map((item) => (
+                <NavLink key={item.href} href={item.href} icon={item.icon}>
+                  {item.label}
+                </NavLink>
+              ))}
+            </nav>
+
+            <div className="mt-auto border-t border-border-subtle">
               {isAdmin && <EngineStatus state={health.state} />}
 
-              <div className="p-4 bg-white/[0.02]">
+              <div className="px-5 py-4">
                 {email && (
-                  <p className="truncate text-xs font-mono text-slate-400 mb-3" title={email}>
+                  <p className="mb-2.5 truncate font-mono text-[11px] text-subtle" title={email}>
                     {email}
                   </p>
                 )}
                 <form action="/auth/signout" method="post">
-                  <button className="w-full px-3 py-2 rounded-xl text-xs font-semibold border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white transition-all cursor-pointer" type="submit">
-                    Sign out
-                  </button>
+                  <SignOutButton full />
                 </form>
               </div>
             </div>
           </div>
         </aside>
 
-        {/* --- Main Workspace View --- */}
+        {/* --- Main --- */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-8 sm:py-10">
+          <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-8 sm:py-10">
             {children}
           </main>
 
-          <footer className="mt-16 border-t border-white/5 px-6 py-6 bg-[#040710]/90">
-            <div className="mx-auto max-w-2xl text-center">
-              <p className="text-xs leading-relaxed text-slate-400">
-                DataEngine · Enterprise Financial Intelligence Copilot
-              </p>
-            </div>
+          <footer className="border-t border-border-subtle px-6 py-5">
+            <p className="text-center text-[11px] text-subtle">
+              DataEngine · categorisation is proposed, never applied without approval
+            </p>
           </footer>
         </div>
       </div>
@@ -159,23 +161,37 @@ export async function AppShell({
   );
 }
 
-function EngineStatus({ state }: { state: 'ok' | 'degraded' | 'unknown' }) {
-  const label = { ok: 'Engine Connected', degraded: 'Engine Degraded', unknown: 'Connecting...' }[state];
-  const color = {
-    ok: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]',
-    degraded: 'bg-amber-400',
-    unknown: 'bg-slate-500',
-  }[state];
-
+/** One sign-out control, at two widths, rather than two that drifted apart. */
+function SignOutButton({ full = false }: { full?: boolean }) {
   return (
-    <div className="px-5 py-3.5 bg-white/[0.02] flex items-center justify-between">
-      <div className="flex items-center gap-2">
-        <Cpu className="w-4 h-4 text-sky-400" />
-        <span className="text-xs font-semibold text-slate-300">{label}</span>
-      </div>
-      <span aria-hidden className={`h-2 w-2 rounded-full ${color}`} />
-    </div>
+    <button
+      type="submit"
+      className={`inline-flex h-8 cursor-pointer items-center justify-center rounded-[var(--radius)] border border-border bg-surface-2 px-3 text-xs font-medium text-muted transition-colors hover:border-border-strong hover:text-foreground ${
+        full ? 'w-full' : ''
+      }`}
+    >
+      Sign out
+    </button>
   );
 }
 
+/**
+ * Whether the worker that does the actual categorising is answering.
+ *
+ * Admins only, at the foot of the rail: it is the difference between "the
+ * queue is slow" and "nothing you upload tonight will be processed", and an
+ * accountant who cannot act on it does not need to carry it.
+ */
+function EngineStatus({ state }: { state: 'ok' | 'degraded' | 'unknown' }) {
+  const label = { ok: 'Engine connected', degraded: 'Engine degraded', unknown: 'Connecting…' }[
+    state
+  ];
+  const tone = ({ ok: 'success', degraded: 'warning', unknown: 'neutral' } as const)[state];
 
+  return (
+    <div className="flex items-center justify-between gap-2 px-5 py-3">
+      <span className="text-[11px] font-medium text-muted">{label}</span>
+      <StatusDot tone={tone} live={state === 'ok'} />
+    </div>
+  );
+}

@@ -108,52 +108,15 @@ function Assurance({ title, children }: { title: string; children: React.ReactNo
  */
 export function Mark({ className = 'h-6 w-6' }: { className?: string }) {
   return (
-    <svg viewBox="0 0 32 32" className={className} aria-hidden fill="none" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="deGradPrimary" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#06b6d4" />
-          <stop offset="50%" stopColor="#10b981" />
-          <stop offset="100%" stopColor="#6366f1" />
-        </linearGradient>
-        <linearGradient id="deGradPulse" x1="16" y1="4" x2="16" y2="28" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#38bdf8" />
-          <stop offset="100%" stopColor="#34d399" />
-        </linearGradient>
-      </defs>
-      
-      {/* Outer Diamond Framework */}
-      <path 
-        d="M16 2L30 16L16 30L2 16L16 2Z" 
-        stroke="url(#deGradPrimary)" 
-        strokeWidth="2.5" 
-        strokeLinejoin="round"
-        className="drop-shadow-[0_0_8px_rgba(6,182,212,0.5)]"
-      />
-      
-      {/* Core Node Flow Matrix */}
-      <path 
-        d="M8 20L14 14L18 18L24 12" 
-        stroke="url(#deGradPulse)" 
-        strokeWidth="2.5" 
-        strokeLinecap="round" 
-        strokeLinejoin="round" 
-      />
-      
-      {/* Precision Node Points */}
-      <circle cx="8" cy="20" r="2" fill="#38bdf8" />
-      <circle cx="14" cy="14" r="2" fill="#10b981" />
-      <circle cx="18" cy="18" r="2" fill="#34d399" />
-      <circle cx="24" cy="12" r="2.5" fill="#38bdf8" className="animate-pulse" />
-      
-      {/* Forward Arrow Engine Peak */}
-      <path 
-        d="M20 12H24V16" 
-        stroke="#38bdf8" 
-        strokeWidth="2.5" 
-        strokeLinecap="round" 
-        strokeLinejoin="round" 
-      />
+    <svg viewBox="0 0 32 32" className={className} aria-hidden fill="none">
+      {/* Three ragged rows — the spreadsheet as it arrives. Drawn in the
+          inherited colour at falling opacity so the eye reads them as one
+          group rather than three facts. */}
+      <rect x="4" y="5" width="15" height="3" rx="1.5" fill="currentColor" opacity="0.35" />
+      <rect x="4" y="11" width="21" height="3" rx="1.5" fill="currentColor" opacity="0.45" />
+      <rect x="4" y="17" width="11" height="3" rx="1.5" fill="currentColor" opacity="0.35" />
+      {/* One clean row: the answer. Full strength, full width. */}
+      <rect x="4" y="24" width="24" height="3" rx="1.5" fill="currentColor" />
     </svg>
   );
 }
-

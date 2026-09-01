@@ -12,7 +12,6 @@ import {
 } from '@/lib/agent';
 import type { Json } from '@/lib/database.types';
 import {
-  Badge,
   ErrorText,
   Fact,
   Money,
@@ -333,43 +332,43 @@ function ChangeRow({
   const deciding = busy?.startsWith(change.group_key) ?? false;
 
   return (
-    <li className="group px-5 py-4 transition-colors hover:bg-slate-900/60">
+    <li className="group px-5 py-4 transition-colors hover:bg-surface">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1">
             <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
               blocking 
-                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' 
-                : 'bg-cyan-950 text-cyan-300 border border-cyan-500/30'
+                ? 'bg-danger-soft text-danger border border-danger/30' 
+                : 'bg-accent-soft text-accent border border-accent/30'
             }`}>
               {CONFIDENCE_LABELS[change.confidence]}
             </span>
             {change.column_name ? (
-              <span className="font-mono text-xs text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+              <span className="font-mono text-xs text-muted bg-background px-2 py-0.5 rounded border border-border">
                 col: {change.column_name}
               </span>
             ) : null}
           </div>
 
-          <p className="font-heading text-base font-bold text-slate-100 leading-snug">
+          <p className="font-heading text-base font-bold text-foreground leading-snug">
             {change.title}
           </p>
 
-          <p className="mt-1.5 max-w-prose text-sm text-slate-300 leading-relaxed">
+          <p className="mt-1.5 max-w-prose text-sm text-muted leading-relaxed">
             {change.rationale}
           </p>
 
-          <div className="mt-3.5 flex flex-wrap items-center gap-6 text-xs text-slate-400">
+          <div className="mt-3.5 flex flex-wrap items-center gap-6 text-xs text-muted">
             {money !== '—' ? (
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Impact:</span>
-                <span className="font-mono text-sm font-extrabold text-cyan-300">{money}</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Impact:</span>
+                <span className="font-mono text-sm font-extrabold text-accent">{money}</span>
               </div>
             ) : null}
 
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Rows:</span>
-              <span className="font-mono font-medium text-slate-200">{change.affected_rows.toLocaleString('en-GB')}</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Rows:</span>
+              <span className="font-mono font-medium text-foreground">{change.affected_rows.toLocaleString('en-GB')}</span>
             </div>
           </div>
         </div>
@@ -377,7 +376,7 @@ function ChangeRow({
         <div className="flex shrink-0 items-center gap-2.5 lg:pt-0.5">
           <button
             type="button"
-            className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-300 bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:text-slate-100 hover:border-slate-700 transition-all cursor-pointer disabled:opacity-50"
+            className={`${secondaryButtonClass('sm')} cursor-pointer`}
             disabled={busy !== null}
             onClick={() => onDecide([change.group_key], false)}
           >
@@ -385,7 +384,7 @@ function ChangeRow({
           </button>
           <button
             type="button"
-            className="px-4 py-1.5 rounded-lg text-xs font-semibold text-slate-950 bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 hover:to-teal-300 shadow-md shadow-cyan-500/20 transition-all cursor-pointer disabled:opacity-50"
+            className={`${buttonClass('sm')} cursor-pointer`}
             disabled={busy !== null}
             onClick={() => onDecide([change.group_key], true)}
           >
@@ -395,10 +394,10 @@ function ChangeRow({
       </div>
 
       {hasEvidence(change.evidence) ? (
-        <div className="mt-3.5 pt-2 border-t border-slate-800/40">
+        <div className="mt-3.5 pt-2 border-t border-border/40">
           <button
             type="button"
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-cyan-400 hover:text-cyan-300 transition-colors cursor-pointer"
+            className={`${disclosureClass} cursor-pointer`}
             aria-expanded={open}
             onClick={() => setOpen(!open)}
           >
@@ -408,7 +407,7 @@ function ChangeRow({
             {open ? 'Hide Audit Evidence' : 'Inspect Raw Evidence Payload'}
           </button>
           {open ? (
-            <pre className="mt-2.5 max-h-64 overflow-auto rounded-xl border border-slate-800 bg-slate-950 p-4 font-mono text-[11px] leading-relaxed text-cyan-200/90 shadow-inner">
+            <pre className="mt-2.5 max-h-64 overflow-auto rounded-[var(--radius)] border border-border bg-background p-4 font-mono text-[11px] leading-relaxed text-muted">
               {JSON.stringify(change.evidence, null, 2)}
             </pre>
           ) : null}

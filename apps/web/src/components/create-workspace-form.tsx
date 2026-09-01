@@ -33,7 +33,7 @@ export function CreateWorkspaceForm({ orgId }: { orgId: string }) {
     <form
       ref={formRef}
       action={formAction}
-      className="w-full max-w-md space-y-3 rounded-lg border border-black/10 p-4 dark:border-white/15"
+      className="w-full max-w-md space-y-3 rounded-lg border border-black/10 p-4 dark:border-border"
     >
       <input type="hidden" name="orgId" value={orgId} />
 

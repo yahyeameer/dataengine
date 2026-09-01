@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Download, FileSpreadsheet, Loader2, UploadCloud } from 'lucide-react';
 
 import { createBrowserSupabase } from '@/lib/supabase/client';
 import {
@@ -10,7 +11,15 @@ import {
   isAcceptedFilename,
   mimeForFilename,
 } from '@/lib/storage';
-import { buttonClass, secondaryButtonClass } from '@/components/ui';
+import {
+  ErrorText,
+  KpiTile,
+  RailSection,
+  RightRail,
+  StatusDot,
+  buttonClass,
+  secondaryButtonClass,
+} from '@/components/ui';
 
 /**
  * Upload, wait, download.
@@ -29,6 +38,16 @@ import { buttonClass, secondaryButtonClass } from '@/components/ui';
  * The upload path is the existing one, unchanged: reserve a signed URL, PUT the
  * bytes straight to storage, confirm. The bytes never pass through the Next
  * server, which is as true here as it was on the old form.
+ *
+ * --- on the layout ---------------------------------------------------------
+ * The screen is a task column with a rail of context beside it, and the rail
+ * does not move between the three states. It previously centred a 550px-tall
+ * dropzone in an otherwise empty page and stacked three marketing cards under
+ * it, which is the shape of a landing page: it told a first-time visitor what
+ * the product was and told the accountant using it daily nothing at all. The
+ * rail now carries the run — the same seven steps before, during and after,
+ * so the reader can see what the engine is going to do before they commit a
+ * client's file to it, and where it got to afterwards.
  */
 
 type Step = { label: string; status: 'done' | 'active' | 'waiting' | 'failed' };
@@ -57,6 +76,23 @@ type Status =
  * not a problem.
  */
 const POLL_MS = 2_000;
+
+/**
+ * What the engine will do, in the order it does it.
+ *
+ * Shown before anything is uploaded as well as during the run. The server
+ * sends the same seven labels back with live statuses attached, so the reader
+ * is watching the list they were shown rather than a different one.
+ */
+const PLANNED_STEPS: Step[] = [
+  { label: 'File uploaded', status: 'waiting' },
+  { label: 'Reading transaction data', status: 'waiting' },
+  { label: 'Identifying transaction columns', status: 'waiting' },
+  { label: 'Categorising with HMRC categories', status: 'waiting' },
+  { label: 'Checking the results', status: 'waiting' },
+  { label: 'Preparing your file', status: 'waiting' },
+  { label: 'Ready to download', status: 'waiting' },
+];
 
 export function CategoriseFlow() {
   const [uploadId, setUploadId] = useState<string | null>(null);
@@ -172,31 +208,146 @@ export function CategoriseFlow() {
     setError(null);
   }
 
-  if (uploadId && status?.state === 'ready') {
-    return <Result status={status} onAnother={reset} />;
-  }
+  const steps = status?.steps ?? PLANNED_STEPS;
+  const started = Boolean(uploadId);
 
-  if (uploadId && status?.state === 'failed') {
-    return <Failure status={status} onRetry={reset} />;
-  }
+  return (
+    <RightRail
+      railLabel="Run status"
+      rail={
+        <>
+          <RailSection
+            title="This run"
+            hint={<RunState status={status} started={started} />}
+          >
+            <StepList steps={steps} dimmed={!started} />
+          </RailSection>
 
-  if (uploadId) {
-    return <Working status={status} filename={status?.filename ?? null} />;
-  }
+          {status?.state === 'ready' && (
+            <RailSection title="Result">
+              <KpiTile label="Transactions read" value={num(status.summary.transactions)} />
+              <KpiTile
+                label="Auto-categorised"
+                value={num(status.summary.categorised)}
+                tone="success"
+              />
+              <KpiTile
+                label="Flagged for review"
+                value={num(status.summary.flagged)}
+                tone={status.summary.flagged > 0 ? 'warning' : 'neutral'}
+                hint={status.summary.flagged > 0 ? 'Needs your sign-off' : undefined}
+              />
+              <KpiTile label="Categories used" value={num(status.summary.categories)} />
+            </RailSection>
+          )}
 
-  return <Dropzone busy={uploading} error={error} onFile={upload} />;
+          {/* Three claims that are load-bearing for an accountant deciding
+              whether to put a client's book through this at all. They used to
+              be three marketing cards under the fold; they belong beside the
+              control that acts on them. */}
+          <RailSection title="What this does">
+            <dl className="space-y-3">
+              <Guarantee term="Nothing is overwritten">
+                Your file is stored as uploaded. Categories are written to a new
+                dataset version beside it.
+              </Guarantee>
+              <Guarantee term="HMRC SA103F boxes">
+                Transactions are mapped to the self-assessment categories, not to
+                invented ones.
+              </Guarantee>
+              <Guarantee term="Every decision is logged">
+                Each category carries the rule or model reply behind it, in the
+                activity log.
+              </Guarantee>
+            </dl>
+          </RailSection>
+        </>
+      }
+    >
+      {status?.state === 'ready' ? (
+        <Result status={status} onAnother={reset} />
+      ) : status?.state === 'failed' ? (
+        <Failure status={status} onRetry={reset} />
+      ) : started ? (
+        <Working status={status} filename={status?.filename ?? null} />
+      ) : (
+        <Dropzone busy={uploading} error={error} onFile={upload} />
+      )}
+    </RightRail>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* The rail                                                                    */
+/* -------------------------------------------------------------------------- */
+
+function RunState({ status, started }: { status: Status | null; started: boolean }) {
+  if (!started) return <span className="text-subtle">Not started</span>;
+  if (status?.state === 'ready') return <span className="text-success">Done</span>;
+  if (status?.state === 'failed') return <span className="text-danger">Failed</span>;
+  if (status?.state === 'working' && status.queued)
+    return <span className="text-warning">Queued</span>;
+  return <span className="text-info">Running</span>;
+}
+
+/**
+ * The seven steps, in one list, in every state.
+ *
+ * `dimmed` is the un-started reading of the same list: the steps are a plan
+ * rather than a report, so they are quieter, but they are the same seven
+ * labels in the same order and the reader is not shown a different thing once
+ * the run begins.
+ */
+function StepList({ steps, dimmed = false }: { steps: Step[]; dimmed?: boolean }) {
+  return (
+    <ol className={dimmed ? 'opacity-55' : ''}>
+      {steps.map((step) => (
+        <li key={step.label} className="flex items-center gap-2.5 py-[5px] text-[13px]">
+          <StepMark status={step.status} />
+          <span
+            className={
+              step.status === 'active'
+                ? 'font-medium text-foreground'
+                : step.status === 'failed'
+                  ? 'text-danger'
+                  : step.status === 'done'
+                    ? 'text-muted'
+                    : 'text-subtle'
+            }
+          >
+            {step.label}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function StepMark({ status }: { status: Step['status'] }) {
+  if (status === 'done') return <StatusDot tone="success" />;
+  if (status === 'failed') return <StatusDot tone="danger" />;
+  if (status === 'active') return <StatusDot tone="info" live />;
+  // A ring rather than a filled dot: the step exists but has not happened.
+  return (
+    <span
+      aria-hidden
+      className="inline-block h-2 w-2 shrink-0 rounded-full border border-border-strong"
+    />
+  );
+}
+
+function Guarantee({ term, children }: { term: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <dt className="text-[13px] font-medium text-foreground">{term}</dt>
+      <dd className="mt-0.5 text-[12px] leading-relaxed text-subtle">{children}</dd>
+    </div>
+  );
 }
 
 /* -------------------------------------------------------------------------- */
 /* State 1 — upload                                                            */
 /* -------------------------------------------------------------------------- */
-
-/* -------------------------------------------------------------------------- */
-/* State 1 — upload                                                            */
-/* -------------------------------------------------------------------------- */
-
-import { motion, AnimatePresence } from 'framer-motion';
-import { UploadCloud, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, Sparkles, Download, ArrowRight, ShieldCheck } from 'lucide-react';
 
 function Dropzone({
   busy,
@@ -211,25 +362,18 @@ function Dropzone({
   const [over, setOver] = useState(false);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 15 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-      className="mx-auto max-w-3xl"
-    >
-      <div className="text-center space-y-3">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-sky-300 text-xs font-mono tracking-wide">
-          <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-          <span>HMRC AI Tax Engine v2.4</span>
-        </div>
-        <h1 className="font-heading text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-100">
-          Categorise Your Bank Transactions
-        </h1>
-        <p className="mx-auto max-w-xl text-base text-slate-400 leading-relaxed">
-          Upload any CSV or Excel statement. DataEngine maps transactions directly to official HMRC categories with complete auditability.
-        </p>
-      </div>
+    <div>
+      <h1 className="text-[28px] font-semibold leading-tight tracking-tight text-balance sm:text-[32px]">
+        Categorise a bank statement
+      </h1>
+      <p className="mt-2 max-w-xl text-[15px] leading-relaxed text-muted">
+        Drop a CSV or Excel statement in. It comes back with an HMRC category
+        against every transaction and the ones worth a second look flagged.
+      </p>
 
+      {/* The label is the control: clicking anywhere in the box opens the file
+          picker, and the input inside it keeps the keyboard path — tab to it,
+          space to open. A div with an onClick would have lost that. */}
       <label
         onDragOver={(event) => {
           event.preventDefault();
@@ -242,11 +386,11 @@ function Dropzone({
           const file = event.dataTransfer.files?.[0];
           if (file && !busy) onFile(file);
         }}
-        className={`relative mt-8 flex cursor-pointer flex-col items-center justify-center rounded-3xl border border-white/10 px-8 py-20 text-center transition-all duration-300 backdrop-blur-xl overflow-hidden ${
+        className={`mt-7 flex cursor-pointer flex-col items-center justify-center rounded-[var(--radius-lg)] border border-dashed px-8 py-14 text-center transition-[color,background-color,border-color,box-shadow] duration-[--duration] focus-within:border-accent focus-within:ring-2 focus-within:ring-[var(--accent-ring)] ${
           over
-            ? 'border-sky-400/50 bg-sky-500/10 shadow-[0_0_50px_rgba(14,165,233,0.2)] scale-[1.01]'
-            : 'bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04] shadow-2xl'
-        } ${busy ? 'pointer-events-none opacity-80' : ''}`}
+            ? 'border-accent bg-accent-soft'
+            : 'border-border-strong bg-surface hover:border-accent/50'
+        } ${busy ? 'pointer-events-none opacity-70' : ''}`}
       >
         <input
           ref={inputRef}
@@ -261,158 +405,82 @@ function Dropzone({
           }}
         />
 
-        <div className="relative z-10 flex flex-col items-center">
-          <div className="p-4 rounded-2xl bg-white/5 border border-white/10 text-sky-400 mb-5 shadow-lg group-hover:scale-105 transition-transform duration-300">
-            {busy ? (
-              <Loader2 className="w-9 h-9 animate-spin text-sky-400" />
-            ) : (
-              <UploadCloud className="w-9 h-9 text-sky-400" />
-            )}
-          </div>
+        <span className="mb-4 flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface-2 text-accent">
+          {busy ? (
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+          ) : (
+            <UploadCloud className="h-5 w-5" aria-hidden />
+          )}
+        </span>
 
-          <p className="font-heading text-lg font-bold text-slate-100">
-            {busy ? `${busy} file...` : 'Drag & drop your bank statement here'}
-          </p>
+        <span className="text-[15px] font-medium">
+          {busy ? `${busy} your file…` : 'Drop your statement here'}
+        </span>
 
-          {!busy ? (
-            <>
-              <p className="mt-1 text-sm text-slate-400">or browse from your device</p>
-              <span className="mt-5 inline-flex items-center gap-2 rounded-xl bg-sky-500 px-5 py-2.5 text-sm font-semibold text-slate-950 shadow-lg shadow-sky-500/20 hover:bg-sky-400 transition-all duration-200">
-                <FileSpreadsheet className="w-4 h-4" />
-                Select File
-              </span>
-              <p className="mt-6 text-xs text-slate-400 font-mono">
-                Supports .CSV, .XLSX, .XLS up to {formatBytes(MAX_UPLOAD_BYTES)}
-              </p>
-            </>
-          ) : null}
-        </div>
+        {!busy && (
+          <>
+            <span className="mt-1 text-sm text-muted">or choose one from your device</span>
+            <span className={`${buttonClass()} pointer-events-none mt-5`}>
+              <FileSpreadsheet className="h-4 w-4" aria-hidden />
+              Select file
+            </span>
+            <span className="mt-5 font-mono text-[11px] text-subtle">
+              {ACCEPTED_EXTENSIONS.join(' · ')} · up to {formatBytes(MAX_UPLOAD_BYTES)}
+            </span>
+          </>
+        )}
       </label>
 
-      {error ? (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mt-4 flex items-center gap-3 rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300"
-        >
-          <AlertCircle className="w-5 h-5 shrink-0 text-rose-400" />
-          <span>{error}</span>
-        </motion.div>
-      ) : null}
-
-      <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
-        <div className="p-4 rounded-2xl border border-white/10 bg-white/[0.02]">
-          <ShieldCheck className="w-5 h-5 text-sky-400 mb-2" />
-          <p className="text-xs font-semibold text-slate-200">Zero Overwrites</p>
-          <p className="text-[11px] text-slate-400 mt-1">Original files stay safe. Categories created as a new dataset.</p>
-        </div>
-        <div className="p-4 rounded-2xl border border-white/10 bg-white/[0.02]">
-          <Sparkles className="w-5 h-5 text-teal-400 mb-2" />
-          <p className="text-xs font-semibold text-slate-200">HMRC Box Mappings</p>
-          <p className="text-[11px] text-slate-400 mt-1">Direct SA103F tax categorization for instant self-assessment prep.</p>
-        </div>
-        <div className="p-4 rounded-2xl border border-white/10 bg-white/[0.02]">
-          <FileSpreadsheet className="w-5 h-5 text-indigo-400 mb-2" />
-          <p className="text-xs font-semibold text-slate-200">Instant Export</p>
-          <p className="text-[11px] text-slate-400 mt-1">Download ready-to-use Excel or CSV files in seconds.</p>
-        </div>
-      </div>
-    </motion.div>
+      {error && <div className="mt-4"><ErrorText>{error}</ErrorText></div>}
+    </div>
   );
 }
-
 
 /* -------------------------------------------------------------------------- */
 /* State 2 — processing                                                        */
 /* -------------------------------------------------------------------------- */
 
 function Working({ status, filename }: { status: Status | null; filename: string | null }) {
-  const steps = status?.steps ?? [
-    { label: 'File uploaded', status: 'done' as const },
-    { label: 'Reading transaction data', status: 'active' as const },
-    { label: 'Identifying transaction columns', status: 'waiting' as const },
-    { label: 'Categorising with HMRC categories', status: 'waiting' as const },
-    { label: 'Checking the results', status: 'waiting' as const },
-    { label: 'Preparing your file', status: 'waiting' as const },
-    { label: 'Ready to download', status: 'waiting' as const },
-  ];
-
+  const steps = status?.steps ?? PLANNED_STEPS;
   const active = steps.find((step) => step.status === 'active');
+  const queued = status?.state === 'working' && status.queued;
+  const done = steps.filter((step) => step.status === 'done').length;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="mx-auto max-w-xl text-center"
-    >
-      <div className="relative inline-flex items-center justify-center p-4 rounded-full bg-cyan-950/60 border border-cyan-500/40 text-cyan-400 mb-6 shadow-[0_0_30px_rgba(6,182,212,0.3)]">
-        <Loader2 className="w-8 h-8 animate-spin" />
-      </div>
-
-      <h1 className="font-heading text-2xl font-bold tracking-tight text-slate-100">
-        {active?.label ?? 'AI Processing Engine Active'}
-      </h1>
-      {filename ? <p className="mt-1 text-sm font-mono text-cyan-400/80">{filename}</p> : null}
-
-      <div className="mt-8 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-2xl backdrop-blur-xl text-left">
-        <ul className="space-y-3.5">
-          {steps.map((step, idx) => (
-            <motion.li
-              key={step.label}
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: idx * 0.05 }}
-              className="flex items-center gap-3.5 text-sm"
-            >
-              <StepMark status={step.status} />
-              <span
-                className={`font-medium ${
-                  step.status === 'waiting'
-                    ? 'text-slate-400'
-                    : step.status === 'active'
-                      ? 'text-cyan-300 font-semibold'
-                      : 'text-slate-200'
-                }`}
-              >
-                {step.label}
-              </span>
-            </motion.li>
-          ))}
-        </ul>
-      </div>
-
-      <p className="mt-6 text-xs text-slate-400">
-        {status?.state === 'working' && status.queued
-          ? 'Queued in worker pool. Processing starts in a few seconds...'
-          : 'Categorising transactions... You can keep this tab open.'}
+    <div className="rise">
+      <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-accent">
+        {queued ? 'Queued' : 'Working'}
       </p>
-    </motion.div>
-  );
-}
+      <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-balance">
+        {active?.label ?? 'Starting on your file'}
+      </h1>
+      {filename && <p className="mt-2 font-mono text-[13px] text-muted">{filename}</p>}
 
-function StepMark({ status }: { status: Step['status'] }) {
-  if (status === 'done') {
-    return (
-      <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 border border-emerald-400/50 text-emerald-400">
-        <CheckCircle2 className="w-3.5 h-3.5" />
+      {/* One bar, because there is one thing happening and its progress is
+          genuinely known — the step list beside it is the detail. A spinner
+          here would have said only "wait". */}
+      <div className="mt-7 max-w-md">
+        <div
+          className="h-1 overflow-hidden rounded-full bg-surface-2"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={steps.length}
+          aria-valuenow={done}
+          aria-label="Categorisation progress"
+        >
+          <div
+            className="h-full rounded-full bg-accent transition-[width] duration-[--duration-slow] ease-[--ease-out]"
+            style={{ width: `${Math.round((done / steps.length) * 100)}%` }}
+          />
+        </div>
+        <p className="mt-3 text-sm leading-relaxed text-muted">
+          {queued
+            ? 'Waiting for a free worker. This usually takes a few seconds.'
+            : 'You can leave this page — the run carries on without the tab open, and the file will be waiting in the workspace.'}
+        </p>
       </div>
-    );
-  }
-  if (status === 'failed') {
-    return (
-      <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-500/20 border border-rose-400/50 text-rose-400">
-        <AlertCircle className="w-3.5 h-3.5" />
-      </div>
-    );
-  }
-  if (status === 'active') {
-    return (
-      <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-cyan-400/60 bg-cyan-950">
-        <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
-      </div>
-    );
-  }
-  return <div className="h-5 w-5 shrink-0 rounded-full border border-slate-800" />;
+    </div>
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -448,76 +516,56 @@ function Result({
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="mx-auto max-w-2xl text-center"
-    >
-      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/20 border border-emerald-400/40 text-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.3)] mb-4">
-        <CheckCircle2 className="w-8 h-8" />
-      </div>
-
-      <h1 className="font-heading text-3xl font-bold tracking-tight text-slate-100">
-        Categorised Statement Ready
-      </h1>
-      <p className="mt-1.5 text-sm font-mono text-cyan-400">{status.filename}</p>
-
-      {/* Modern Dashboard KPI Cards */}
-      <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Figure value={summary.transactions} label="Transactions Read" />
-        <Figure value={summary.categorised} label="Auto-Categorised" highlight />
-        <Figure
-          value={summary.flagged}
-          label="Flagged for Review"
-          hint={summary.flagged > 0 ? 'Requires human sign-off' : undefined}
-        />
-      </div>
-
-      <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
-        <button
-          type="button"
-          onClick={download}
-          disabled={busy}
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 px-6 py-3 text-base font-semibold text-slate-950 shadow-lg shadow-cyan-500/25 hover:from-cyan-400 hover:to-teal-400 transition-all duration-200 cursor-pointer"
-        >
-          {busy ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : (
-            <Download className="w-5 h-5" />
-          )}
-          <span>{busy ? 'Preparing File...' : 'Download Categorised Excel'}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={onAnother}
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 px-5 py-3 text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-slate-100 transition-all cursor-pointer"
-        >
-          Categorise Another File
-        </button>
-      </div>
-
-      {error ? <p className="mt-4 text-sm text-rose-400">{error}</p> : null}
-    </motion.div>
-  );
-}
-
-function Figure({ value, label, hint, highlight = false }: { value: number; label: string; hint?: string; highlight?: boolean }) {
-  return (
-    <div className={`rounded-xl border p-5 text-left transition-all ${
-      highlight 
-        ? 'border-cyan-500/40 bg-cyan-950/30 shadow-[0_0_20px_-5px_rgba(6,182,212,0.2)]'
-        : 'border-slate-800 bg-slate-900/40'
-    }`}>
-      <p className="font-mono text-3xl font-extrabold text-slate-100 tracking-tight">
-        {value.toLocaleString('en-GB')}
+    <div className="rise">
+      <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-success">
+        <StatusDot tone="success" />
+        Ready
       </p>
-      <p className="mt-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">{label}</p>
-      {hint ? <p className="mt-2 text-[11px] text-amber-400">{hint}</p> : null}
+      <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-balance sm:text-[32px]">
+        Your categorised statement is ready
+      </h1>
+      <p className="mt-2 font-mono text-[13px] text-muted">{status.filename}</p>
+
+      {/* The sentence an accountant actually needs before they open the file:
+          how much of it the engine was willing to decide on its own, and how
+          much is coming back to them. */}
+      <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-muted">
+        {summary.categorised.toLocaleString('en-GB')} of{' '}
+        {summary.transactions.toLocaleString('en-GB')} transactions were categorised across{' '}
+        {summary.categories.toLocaleString('en-GB')}{' '}
+        {summary.categories === 1 ? 'category' : 'categories'}.{' '}
+        {summary.flagged > 0 ? (
+          <>
+            <span className="text-warning">
+              {summary.flagged.toLocaleString('en-GB')}{' '}
+              {summary.flagged === 1 ? 'transaction is' : 'transactions are'} flagged
+            </span>{' '}
+            for you to check in the workspace.
+          </>
+        ) : (
+          'Nothing was flagged for review.'
+        )}
+      </p>
+
+      <div className="mt-8 flex flex-wrap items-center gap-3">
+        <button type="button" onClick={download} disabled={busy} className={buttonClass()}>
+          {busy ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          ) : (
+            <Download className="h-4 w-4" aria-hidden />
+          )}
+          {busy ? 'Preparing…' : 'Download Excel'}
+        </button>
+
+        <button type="button" onClick={onAnother} className={secondaryButtonClass()}>
+          Categorise another file
+        </button>
+      </div>
+
+      {error && <div className="mt-4 max-w-md"><ErrorText>{error}</ErrorText></div>}
     </div>
   );
 }
-
 
 /* -------------------------------------------------------------------------- */
 /* Failure                                                                     */
@@ -531,12 +579,30 @@ function Failure({
   onRetry: () => void;
 }) {
   return (
-    <div className="mx-auto max-w-2xl text-center">
-      <h1 className="text-[26px] font-semibold tracking-tight">We couldn&rsquo;t finish that file</h1>
-      <p className="mx-auto mt-3 max-w-md text-[15px] leading-relaxed text-muted">
-        {status.message}
+    <div className="rise">
+      <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-danger">
+        <StatusDot tone="danger" />
+        Failed
       </p>
-      <p className="mt-2 text-sm text-subtle">{status.filename}</p>
+      <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-balance">
+        We couldn&rsquo;t finish that file
+      </h1>
+      <p className="mt-2 font-mono text-[13px] text-muted">{status.filename}</p>
+
+      <dl className="mt-6 max-w-xl space-y-3 text-[15px] leading-relaxed">
+        <div>
+          <dt className="font-medium">What happened</dt>
+          <dd className="text-muted">{status.message}</dd>
+        </div>
+        <div>
+          <dt className="font-medium">What you can do</dt>
+          <dd className="text-muted">
+            Check the statement opens in Excel and has a header row with a date, a
+            description and an amount. Then send it through again — nothing from this
+            attempt was saved over your file.
+          </dd>
+        </div>
+      </dl>
 
       <button type="button" onClick={onRetry} className={`${buttonClass()} mt-8`}>
         Try another file
@@ -546,6 +612,11 @@ function Failure({
 }
 
 /* -------------------------------------------------------------------------- */
+
+/** Counts are read down a column in the rail, so they are tabular. */
+function num(value: number) {
+  return value.toLocaleString('en-GB');
+}
 
 async function postJson(url: string, body: unknown): Promise<Record<string, unknown>> {
   const response = await fetch(url, {

@@ -10,7 +10,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import { Sparkles, FileSpreadsheet, Building2, Activity, ArrowRight } from 'lucide-react';
+import { Search, FileSpreadsheet, Building2, Activity, ArrowRight } from 'lucide-react';
 
 export function CommandMenu() {
   const [open, setOpen] = useState(false);
@@ -34,35 +34,39 @@ export function CommandMenu() {
 
   return (
     <>
+      {/* A search field's shape, because that is what it does. It read as
+          "Quick Command Palette…" on two wrapped lines in a 224px rail, which
+          is a label describing the mechanism rather than the job. */}
       <button
+        type="button"
         onClick={() => setOpen(true)}
-        className="hidden md:flex items-center gap-2 px-3 py-1.5 text-xs text-slate-400 bg-slate-900/70 border border-slate-800 rounded-lg hover:border-cyan-500/40 hover:bg-slate-800/60 transition-all duration-200 group shadow-sm"
+        className="group flex h-9 w-full cursor-pointer items-center gap-2 rounded-[var(--radius)] border border-border bg-surface-2 px-2.5 text-[13px] text-subtle transition-colors hover:border-border-strong hover:text-muted"
       >
-        <Sparkles className="w-3.5 h-3.5 text-cyan-400 group-hover:animate-pulse" />
-        <span>Quick Command Palette...</span>
-        <kbd className="ml-2 font-mono text-[10px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700">
+        <Search className="h-3.5 w-3.5 shrink-0" />
+        <span>Search</span>
+        <kbd className="ml-auto rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-[10px] text-subtle">
           ⌘K
         </kbd>
       </button>
 
       <CommandDialog open={open} onOpenChange={setOpen}>
-        <CommandInput placeholder="Type a command or search DataEngine..." />
+        <CommandInput placeholder="Search DataEngine…" />
         <CommandList>
           <CommandEmpty>No results found.</CommandEmpty>
-          <CommandGroup heading="Core Actions">
+          <CommandGroup heading="Go to">
             <CommandItem onSelect={() => runCommand(() => router.push('/app'))}>
-              <FileSpreadsheet className="h-4 w-4 text-cyan-400" />
-              <span>Categorise New File</span>
+              <FileSpreadsheet className="h-4 w-4 text-subtle" />
+              <span>Categorise a file</span>
               <ArrowRight className="ml-auto h-3.5 w-3.5 opacity-40" />
             </CommandItem>
             <CommandItem onSelect={() => runCommand(() => router.push('/app/workspaces'))}>
-              <Building2 className="h-4 w-4 text-emerald-400" />
-              <span>View Client Workspaces</span>
+              <Building2 className="h-4 w-4 text-subtle" />
+              <span>Workspaces</span>
               <ArrowRight className="ml-auto h-3.5 w-3.5 opacity-40" />
             </CommandItem>
             <CommandItem onSelect={() => runCommand(() => router.push('/app/audit'))}>
-              <Activity className="h-4 w-4 text-purple-400" />
-              <span>View Engine Activity & Audit Logs</span>
+              <Activity className="h-4 w-4 text-subtle" />
+              <span>Activity log</span>
               <ArrowRight className="ml-auto h-3.5 w-3.5 opacity-40" />
             </CommandItem>
           </CommandGroup>
