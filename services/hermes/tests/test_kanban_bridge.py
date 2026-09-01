@@ -460,7 +460,21 @@ def _drive(context: JobContext, limit: int = 12) -> tuple[dict[str, Any] | None,
 
 
 def _artifact_path() -> str:
-    return f"{ORG_ID}/{WORKSPACE_ID}/2026-08/{JOB_ID}__kanban-report.md"
+    """
+    Where the bridge will look for the report.
+
+    Derived from the run's creation time, because that is what bridge.py derives
+    it from -- deliberately, so a chain that starts on the 31st and finishes on
+    the 1st does not go looking in a folder nobody wrote to.
+
+    The month here was the literal `2026-08` until it stopped being August, and
+    the suite then began failing at midnight on the 1st with a path mismatch
+    that named neither the date nor the reason. That is the same lesson `_stamp`
+    above records, one function later: a date written as a literal is a test
+    that passes until the calendar disagrees.
+    """
+    created = dt.datetime.fromisoformat(_stamp(-60))
+    return f"{ORG_ID}/{WORKSPACE_ID}/{created:%Y-%m}/{JOB_ID}__kanban-report.md"
 
 
 # =============================================================================
