@@ -364,7 +364,34 @@ def _score_header_row(grid: list[list[Any]], index: int, body_width: int) -> tup
         return 0.0, ["nothing beneath it"]
 
     # Width agreement: a header spans the same columns its data does.
-    width_match = 1.0 - min(1.0, abs(len(populated) - body_width) / max(body_width, 1))
+    #
+    # Asymmetric, and that is the whole point. Comparing counts with abs()
+    # punished a header for being *wider* than its body exactly as hard as for
+    # being narrower, and those are opposite situations:
+    #
+    #   - Wider is ordinary. A bank exports every column its format defines and
+    #     fills in the handful that apply, so `Further Information`, `ASX Code`
+    #     and `Field2` are labelled and empty. Eighteen labels over six used
+    #     columns scored 0.0 for width -- and a two-cell title block above it
+    #     ('123456789 - CASH MANAGEMENT ACCOUNT', 'ABC Super Fund') scored 0.333
+    #     and won the row by two hundredths. The file then parsed with the title
+    #     as its header, the real header as its first data row, and no column of
+    #     descriptions to categorise.
+    #
+    #   - Narrower is the thing worth catching. A row that labels two of the six
+    #     columns beneath it is a title, not a header.
+    #
+    # So score coverage -- does the header name the columns the data actually
+    # uses -- and treat surplus labels as a mild smell rather than a
+    # disqualification.
+    header_columns = {i for i, cell in enumerate(row) if _cell_populated(cell)}
+    body_columns = _body_column_indices(grid, index + 1)
+    if body_columns:
+        covered = len(header_columns & body_columns) / len(body_columns)
+        surplus = len(header_columns - body_columns) / max(len(header_columns), 1)
+        width_match = covered * (1.0 - 0.3 * surplus)
+    else:
+        width_match = 1.0 - min(1.0, abs(len(populated) - body_width) / max(body_width, 1))
 
     # Typed contrast: the body should be more numeric/date-ish than the header.
     body_typed = 0
@@ -409,6 +436,33 @@ def _score_header_row(grid: list[list[Any]], index: int, body_width: int) -> tup
         reasons.append("all cells are distinct short labels spanning the data width")
 
     return score, reasons
+
+
+def _body_column_indices(grid: list[list[Any]], start: int) -> set[int]:
+    """
+    Which columns the rows beneath a candidate header actually use.
+
+    A count of populated cells cannot tell a header that spans its data from one
+    that spans two of its six columns, because it throws away *which* columns.
+    This keeps them.
+
+    The threshold exists so a single stray cell in a footnote does not enrol a
+    column into the table: a column belongs to the body when at least a fifth of
+    the body's rows put something in it. That is low on purpose -- a `Debit`
+    column is empty on every credit row and must still count.
+    """
+    rows = [row for row in grid[start : start + 60] if _row_populated_count(row) > 1]
+    if not rows:
+        return set()
+
+    counts = Counter(
+        index
+        for row in rows
+        for index, cell in enumerate(row)
+        if _cell_populated(cell)
+    )
+    threshold = max(1, len(rows) // 5)
+    return {index for index, seen in counts.items() if seen >= threshold}
 
 
 def _modal_body_width(grid: list[list[Any]], start: int) -> int:
@@ -653,6 +707,7 @@ def _infer_columns(
         date_orders: Counter[str] = Counter()
         ambiguous_dates = 0
         bool_hits = 0
+        serial_only_hits = 0
 
         for value in non_null:
             parsed_number = parse_number(value)
@@ -666,6 +721,10 @@ def _infer_columns(
                 date_orders[parsed_date.order] += 1
                 if parsed_date.ambiguous:
                     ambiguous_dates += 1
+                # Whether this cell is a date only because a bare number can be
+                # read as an Excel serial. See the tie-break below.
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    serial_only_hits += 1
 
             text = normalize_text(value).lower()
             if text in {"true", "false", "yes", "no", "y", "n"}:
@@ -679,8 +738,41 @@ def _infer_columns(
         # Dates win ties against numbers. A four-digit year parses as a number
         # and an Excel serial parses as both, so preferring "number" would turn
         # every date column into a numeric one.
-        if date_ratio >= 0.7 and date_ratio >= number_ratio:
-            inferred: ColumnType = "date"
+        #
+        # With one exception, and it is the difference between a correct export
+        # and a wrong one. `parse_date` reads any bare integer from 61 to 60000
+        # as an Excel serial, and that range is most of the money on a bank
+        # statement: a deposits column of 1500, 1200, 2000 parsed as dates and
+        # came out of the pipeline as 1904-02-08, 1903-04-14, 1905-06-24. Not a
+        # failure anyone would see -- a plausible date sitting where an amount
+        # should be, in a file an accountant is meant to file a return from.
+        #
+        # The signal that separates them is where the date came from. Excel
+        # hands openpyxl a real `datetime` for any cell it has formatted as a
+        # date, and that is caught at the top of `parse_date` before the serial
+        # branch is reached. So a column whose every date hit came from a bare
+        # number is a column Excel itself does not consider dates -- and if it
+        # reads cleanly as numbers, that is what it is.
+        #
+        # The header still gets a say, because a column actually labelled `Date`
+        # that arrived as raw serials is the one case where the coercion was
+        # right all along.
+        header_hints_date = any(
+            word in header.lower() for word in ("date", "day", "period", "month", "year")
+        )
+        serial_masquerade = (
+            date_hits > 0
+            and serial_only_hits == date_hits
+            and number_ratio >= 0.7
+            and not header_hints_date
+        )
+
+        if serial_masquerade:
+            inferred: ColumnType = "number"
+            confidence = number_ratio
+            failures = [v for v in non_null if not parse_number(v).ok]
+        elif date_ratio >= 0.7 and date_ratio >= number_ratio:
+            inferred = "date"
             confidence = date_ratio
             failures = [v for v in non_null if not parse_date(v).ok]
         elif number_ratio >= 0.7:

@@ -2304,9 +2304,22 @@ def handle_categorise_statement(context: JobContext) -> dict[str, Any]:
     requested = str(context.payload.get("column") or "").strip()
     column = requested or autopilot.choose_description_column(list(rows[0].keys()), rows)
     if not column:
+        # Name what was actually found. The bare refusal read as a fault in the
+        # product, and the two files it is said about need opposite responses
+        # from the reader: one is a statement we failed to understand, the other
+        # is a survey export that was never a statement at all. Listing the
+        # columns is what lets them tell those apart at a glance, without
+        # opening the file or filing a bug.
+        visible = [name for name in rows[0] if not name.startswith("__")]
+        shown = ", ".join(repr(name) for name in visible[:6])
+        if len(visible) > 6:
+            shown += f", and {len(visible) - 6} more"
         raise JobError(
-            "We could not find a column of transaction descriptions in this file. It may be "
-            "a summary rather than a list of transactions."
+            "We could not find a column of transaction descriptions in this file. "
+            f"Its columns are: {shown}. "
+            "If one of those is the merchant or payee, re-run the job naming it; "
+            "otherwise this looks like a summary or a different kind of "
+            "spreadsheet rather than a list of transactions."
         )
     if column not in rows[0]:
         raise JobError(f"there is no column called {column!r} in this file")

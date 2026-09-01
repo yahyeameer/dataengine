@@ -23,7 +23,9 @@ resembles them exactly, because it is one of them.
 
 from __future__ import annotations
 
-from hermes.tools.parse import _column_contrast, find_header_row
+import datetime as dt
+
+from hermes.tools.parse import _column_contrast, detect_table, find_header_row
 
 
 def _survey_grid() -> list[list[object]]:
@@ -114,3 +116,125 @@ def test_a_title_block_is_still_not_a_header():
     index, _score, _reasons = find_header_row(grid)
 
     assert index == 3, f"expected the Date/Vendor/Net/VAT row, got row {index}"
+
+
+def _bank_export_grid() -> list[list[object]]:
+    """
+    A real bank export: an account title over a header with unused columns.
+
+    The shape that matters is the width mismatch. The bank labels every column
+    its format defines -- eighteen of them -- and fills in the six that apply to
+    a cash account, so the header is three times wider than its own data. The
+    title above it is two cells wide.
+    """
+    return [
+        ["123456789 - CASH MANAGEMENT ACCOUNT", "ABC Super Fund", *[None] * 5],
+        ["Date", "Category", "Description", "Debit", "Credit", "Balance", "ASX Code"],
+        ["2017-04-28", "DEPOSIT", "MACQUARIE CMA INTEREST", None, 0.02, "$3.08 CR", None],
+        ["2017-04-18", "WITHDRAWAL", "BPAY To ASIC", 47, None, "$3.06 CR", None],
+        ["2017-03-31", "DEPOSIT", "MACQUARIE CMA INTEREST", None, 0.05, "$50.06 CR", None],
+        ["2017-02-28", "DEPOSIT", "MACQUARIE CMA INTEREST", None, 0.01, "$50.01 CR", None],
+        ["2017-02-20", "DEPOSIT", "Trustee Non- Con Contr", None, 50, "$50.00 CR", None],
+    ]
+
+
+def test_a_header_wider_than_its_data_still_wins():
+    """
+    The bug this exists for, and it cost a customer their upload.
+
+    Width agreement was computed with abs(), so a header spanning *more* columns
+    than its body was punished exactly as hard as one spanning fewer. Eighteen
+    labels over six used columns scored 0.0 for width; the two-cell account
+    title above scored 0.333 and took the row by two hundredths.
+
+    The file then parsed with 'ABC Super Fund' as a column name and the real
+    header as its first row of data, and the categorise job refused it with
+    'we could not find a column of transaction descriptions'.
+    """
+    grid = _bank_export_grid()
+
+    index, _score, reasons = find_header_row(grid)
+
+    assert index == 1, (
+        f"picked row {None if index is None else index + 1} -- the account title, "
+        f"not the header; reasons={reasons}"
+    )
+
+
+def test_the_account_title_above_it_loses():
+    """The other side of the same comparison, stated directly."""
+    grid = _bank_export_grid()
+
+    title_width = len([cell for cell in grid[0] if cell is not None])
+    header_width = len([cell for cell in grid[1] if cell is not None])
+
+    assert title_width == 2 and header_width == 7, "fixture no longer has the width gap"
+    assert find_header_row(grid)[0] != 0
+
+
+# =============================================================================
+# Amounts that arrive as bare numbers
+# =============================================================================
+
+
+def _deposits_grid() -> list[list[object]]:
+    """A deposits table whose amounts are whole pounds."""
+    return [
+        ["Deposit No.", "Date", "Amount", "Description", "Reconciled"],
+        [1, dt.date(2013, 6, 2), 1500, "job 1, check 1", "yes"],
+        [2, dt.date(2013, 6, 15), 1200, "job 2, check 1", "yes"],
+        [3, dt.date(2013, 6, 16), 1500, "job 1, check 2", "yes"],
+        [4, dt.date(2013, 6, 20), 1200, "job 2, check 2", "yes"],
+    ]
+
+
+def test_whole_pound_amounts_do_not_become_dates():
+    """
+    `parse_date` reads any bare integer from 61 to 60000 as an Excel serial, and
+    that range is most of the money on a bank statement. Dates won ties against
+    numbers, so a deposits column of 1500, 1200, 1500 was typed `date` and left
+    the pipeline as 1904-02-08, 1903-04-14, 1904-02-08.
+
+    Nothing failed. The export just had plausible dates where the amounts should
+    have been, in a file an accountant files a return from.
+
+    Excel hands openpyxl a real `datetime` for anything it has formatted as a
+    date, so a column whose every date hit came from a bare number is one Excel
+    itself does not treat as dates.
+    """
+    interpretation, _skipped = detect_table(_deposits_grid(), "Deposits")
+    types = {column.name: column.inferred_type for column in interpretation.columns}
+
+    assert types["amount"] == "number", (
+        f"the amount column was typed {types['amount']!r}; whole-pound amounts "
+        "have been read as Excel serials again"
+    )
+
+
+def test_a_real_date_column_is_still_a_date():
+    """The tie-break the exception must not undo."""
+    interpretation, _skipped = detect_table(_deposits_grid(), "Deposits")
+    types = {column.name: column.inferred_type for column in interpretation.columns}
+
+    assert types["date"] == "date"
+
+
+def test_a_serial_column_named_like_a_date_is_still_a_date():
+    """
+    The one case where reading a bare number as a serial was right all along: a
+    column labelled `Date` that arrived as raw serials because the exporter
+    never formatted it. The header gets the deciding vote.
+    """
+    grid: list[list[object]] = [
+        ["Date", "Payee", "Amount"],
+        [42000, "ACME Ltd", 1500],
+        [42010, "Globex", 1200],
+        [42020, "Initech", 1500],
+        [42030, "ACME Ltd", 1200],
+    ]
+
+    interpretation, _skipped = detect_table(grid, "Ledger")
+    types = {column.name: column.inferred_type for column in interpretation.columns}
+
+    assert types["date"] == "date"
+    assert types["amount"] == "number"
