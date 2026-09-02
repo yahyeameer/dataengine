@@ -21,8 +21,12 @@ export function CreateOrgForm() {
 
       <ErrorText>{state.error}</ErrorText>
 
-      <button className={buttonClass()} type="submit" disabled={pending}>
-        {pending ? 'Creating…' : 'Create organization'}
+      {/* "Create firm", not "Create organization". The field above it asks for
+          a firm name, the screen around it is headed "Set up your firm", and
+          the sign-up page promised a firm -- the button was the one control
+          still speaking the database's word for it. */}
+      <button className={`${buttonClass()} w-full`} type="submit" disabled={pending}>
+        {pending ? 'Creating…' : 'Create firm'}
       </button>
     </form>
   );

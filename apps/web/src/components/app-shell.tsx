@@ -10,7 +10,7 @@ import { Mark } from '@/components/product-story';
 import { SystemHealthBanner } from '@/components/system-health-banner';
 import { getSystemHealth } from '@/lib/system-health';
 import { CommandMenu } from '@/components/command-menu';
-import { StatusDot } from '@/components/ui';
+import { StatusDot, secondaryButtonClass } from '@/components/ui';
 
 /**
  * The frame every signed-in screen sits in.
@@ -161,14 +161,19 @@ export async function AppShell({
   );
 }
 
-/** One sign-out control, at two widths, rather than two that drifted apart. */
+/**
+ * One sign-out control, at two widths, rather than two that drifted apart.
+ *
+ * It used to spell out a secondary button by hand -- the same height, radius,
+ * border and hover as `secondaryButtonClass('sm')`, arrived at independently
+ * and free to drift from it. `ui.tsx` is the source of truth for a control's
+ * shape, so this asks for the shape by name.
+ */
 function SignOutButton({ full = false }: { full?: boolean }) {
   return (
     <button
       type="submit"
-      className={`inline-flex h-8 cursor-pointer items-center justify-center rounded-[var(--radius)] border border-border bg-surface-2 px-3 text-xs font-medium text-muted transition-colors hover:border-border-strong hover:text-foreground ${
-        full ? 'w-full' : ''
-      }`}
+      className={`${secondaryButtonClass('sm')} ${full ? 'w-full' : ''}`}
     >
       Sign out
     </button>

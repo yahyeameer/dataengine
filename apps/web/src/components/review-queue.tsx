@@ -376,7 +376,7 @@ function ChangeRow({
         <div className="flex shrink-0 items-center gap-2.5 lg:pt-0.5">
           <button
             type="button"
-            className={`${secondaryButtonClass('sm')} cursor-pointer`}
+            className={secondaryButtonClass('sm')}
             disabled={busy !== null}
             onClick={() => onDecide([change.group_key], false)}
           >
@@ -384,7 +384,7 @@ function ChangeRow({
           </button>
           <button
             type="button"
-            className={`${buttonClass('sm')} cursor-pointer`}
+            className={buttonClass('sm')}
             disabled={busy !== null}
             onClick={() => onDecide([change.group_key], true)}
           >
@@ -397,7 +397,7 @@ function ChangeRow({
         <div className="mt-3.5 pt-2 border-t border-border/40">
           <button
             type="button"
-            className={`${disclosureClass} cursor-pointer`}
+            className={disclosureClass}
             aria-expanded={open}
             onClick={() => setOpen(!open)}
           >

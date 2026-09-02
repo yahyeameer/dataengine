@@ -137,10 +137,24 @@ export function SectionHeading({
    than it saves.
    -------------------------------------------------------------------------- */
 
+/**
+ * `cursor-pointer` is here, and it is not decoration.
+ *
+ * Tailwind v3's preflight carried `button { cursor: pointer }`; v4's does not,
+ * and the browser default for a button is an arrow. Nothing in `globals.css`
+ * put it back, so 26 of the 28 controls in the product answered the mouse with
+ * the same cursor as a paragraph of text. The two that behaved were the two
+ * where somebody had appended `cursor-pointer` at the call site, which is the
+ * shape of a bug being fixed one symptom at a time.
+ *
+ * `disabled:cursor-not-allowed` still wins over it: `.disabled\:cursor-not-allowed:disabled`
+ * carries a pseudo-class the plain utility does not, so it outranks it on
+ * specificity rather than on source order.
+ */
 const controlBase =
-  'inline-flex items-center justify-center gap-2 rounded-[var(--radius)] font-medium ' +
-  'transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45 ' +
-  'disabled:shadow-none';
+  'inline-flex cursor-pointer items-center justify-center gap-2 rounded-[var(--radius)] ' +
+  'font-medium transition-colors duration-150 disabled:cursor-not-allowed ' +
+  'disabled:opacity-45 disabled:shadow-none';
 
 /**
  * Two control sizes and no others.
@@ -202,8 +216,8 @@ export function dangerButtonClass(size: ControlSize = 'md') {
  * control that opens the evidence behind a decision worth millions.
  */
 export const disclosureClass =
-  'inline-flex min-h-8 items-center gap-1.5 rounded-[var(--radius)] py-1.5 text-[13px] ' +
-  'font-medium text-accent transition-colors hover:text-accent-hover';
+  'inline-flex min-h-8 cursor-pointer items-center gap-1.5 rounded-[var(--radius)] py-1.5 ' +
+  'text-[13px] font-medium text-accent transition-colors hover:text-accent-hover';
 
 export const inputClass =
   'w-full min-w-0 rounded-[var(--radius)] border border-border bg-surface px-3 text-sm text-foreground ' +
