@@ -5,6 +5,8 @@ import {
   AssistantIcon,
   CategoriseIcon,
   NavLink,
+  RecipesIcon,
+  SettingsIcon,
   WorkspacesIcon,
 } from '@/components/nav-link';
 import { Mark } from '@/components/product-story';
@@ -31,7 +33,12 @@ const NAV = [
   // looking for -- and it now carries the whole conversation history, which
   // used to be buried in a section of a client page.
   { href: '/app/assistant', label: 'Assistant', icon: <AssistantIcon /> },
+  // Between Workspaces and the Assistant, because a recipe is a thing a
+  // workspace has rather than a thing you go and ask about. It is the screen
+  // somebody opens when a replay did something they did not expect.
+  { href: '/app/recipes', label: 'Recipes', icon: <RecipesIcon /> },
   { href: '/app/audit', label: 'Activity Log', icon: <ActivityIcon /> },
+  { href: '/app/settings/branding', label: 'Branding', icon: <SettingsIcon /> },
 ];
 
 export async function AppShell({

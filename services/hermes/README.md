@@ -43,7 +43,8 @@ solving later:
 | `apply_cleaning` | Applies what a human approved, into a **new** version — nothing is ever overwritten |
 | `query_dataset` | A question in English or a structured query → validated SQL → an answer with the source rows behind it |
 | `reconcile_sources` | Two versions matched on a key: matched, matched-with-a-difference, unmatched either side |
-| `generate_report` | A month-end report in the `exports` bucket, as Markdown, PDF, Word or Excel |
+| `generate_report` | A month-end report in the `exports` bucket, as Markdown, PDF, Word or Excel, branded from the organisation's own identity |
+| `replay_recipe` | Runs a learned recipe against a new month's file, writes a new version, and produces the recipe's configured report |
 
 `parse_workbook` chains the next two itself, so "Analyse" in the dashboard is
 one click and three visible stages.
@@ -51,11 +52,40 @@ one click and three visible stages.
 ### Report formats
 
 `generate_report` takes `format` on the payload — `md` (the default), `pdf`,
-`docx` or `xlsx` — and `branding`, which is `{name, accent, footer}`. The accent
-is one hex colour; the deep tone, the tint behind a figure card and whether the
-band carries white or near-black text are derived from it, so a client's
-document takes one setting rather than a palette. An unusable value falls back
-to the product's own blue rather than failing the job.
+`docx` or `xlsx` — or `formats` for several at once, which is what a recipe's
+deliverable sends. Where more than one is asked for, each is rendered
+independently: one failing marks that format failed and the others are still
+stored, because a pack that arrives as a PDF without its workbook is better than
+one that does not arrive.
+
+### Whose name is on it
+
+Nothing has to send a name any more. `_resolve_branding` walks the order in
+`tools/branding.py` — an explicit payload override, then `organization_branding`,
+then the organisation, then the workspace, then a stated fallback — and the
+logo is resolved the same way: the organisation's stored object, then an
+approved image discovered inside an upload, then an administrator's https URL,
+then none. "None" is an ordinary outcome: the header becomes the business name
+set in the brand colour, never an empty box.
+
+The accent is one hex colour; the deep tone, the tint behind a figure card and
+whether the band carries white or near-black text are derived from it. An
+unusable value falls back to the product's own blue and records a warning rather
+than failing the job, and so does a logo that will not download or decode.
+
+A remote logo URL is a request this server makes on a user's behalf, so it is
+checked before a socket opens: https only, no credentials, and every address the
+host resolves to must be public — a hostname answering `10.0.0.5` is refused
+exactly like `localhost` is. Redirects are not followed, because a redirect is a
+second URL the check never saw.
+
+### Images inside an upload
+
+`parse_workbook` also reads the pictures out of an .xlsx, .docx or .pptx and
+records them as *candidates* with a score and the sentences behind it. It never
+promotes one: a month-end workbook holds a logo, a product photograph, a chart
+and sometimes a signature, and a person picks on the branding screen. Discovery
+failing costs the suggestion and never the upload.
 
 What the report *says* is built once, as typed blocks, in `tools/report.py`.
 The four renderings live beside it: Markdown there, and PDF, Word and Excel in

@@ -37,6 +37,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from .branding import LogoAsset
 from .report import (
     Bars,
     Callout,
@@ -132,6 +133,20 @@ class Brand:
     warning: str = "#9a6700"
     footer: str = ""
 
+    #: The organisation's logo, already validated and in a format all three
+    #: renderers can place. `None` is an ordinary, supported state: the header
+    #: becomes the business name set in the accent colour rather than an empty
+    #: box waiting for an image (section 11, priority 5).
+    logo: LogoAsset | None = None
+
+    #: A public URL for the logo, for Markdown only. Never a signed storage
+    #: URL: those expire, and one pasted into a document that gets forwarded is
+    #: a credential in an email.
+    logo_url: str | None = None
+
+    #: What the report covers, e.g. "September 2026". Drawn under the title.
+    period: str = ""
+
     @classmethod
     def for_client(
         cls,
@@ -139,9 +154,15 @@ class Brand:
         name: str | None = None,
         accent: Any = None,
         footer: str | None = None,
+        logo: LogoAsset | None = None,
+        logo_url: str | None = None,
+        period: str | None = None,
     ) -> "Brand":
         base = _hex(accent, cls.accent)
         return cls(
+            logo=logo,
+            logo_url=logo_url if isinstance(logo_url, str) else None,
+            period=(period or "").strip()[:60],
             # A firm's name can be anything a person typed into a form. Trimmed
             # and truncated because it is drawn into a fixed band, and a
             # 300-character organisation name would run off the page rather
@@ -504,12 +525,52 @@ def render_pdf(document: ReportDocument, brand: Brand) -> bytes:
         canvas.saveState()
         canvas.setFillColor(accent)
         canvas.rect(0, page_height - band_height, page_width, band_height, stroke=0, fill=1)
+
+        # The logo, when there is one, and nothing at all when there is not.
+        #
+        # Drawn first so the name can start after it. Sized by height and
+        # clamped by width, because the two shapes a real logo takes -- a
+        # square mark and a long wordmark -- fail in opposite directions if you
+        # size by one dimension only: the mark overflows the band vertically or
+        # the wordmark runs into the middle of the page.
+        cursor_x = margin
+        if brand.logo is not None:
+            drawn = False
+            try:
+                from reportlab.lib.utils import ImageReader
+
+                logo_height = 11 * mm
+                logo_width = logo_height * (brand.logo.aspect or 1.0)
+                maximum = 46 * mm
+                if logo_width > maximum:
+                    logo_width = maximum
+                    logo_height = logo_width / (brand.logo.aspect or 1.0)
+
+                canvas.drawImage(
+                    ImageReader(io.BytesIO(brand.logo.data)),
+                    margin,
+                    page_height - band_height + (band_height - logo_height) / 2,
+                    width=logo_width,
+                    height=logo_height,
+                    mask="auto",
+                    preserveAspectRatio=True,
+                    anchor="sw",
+                )
+                cursor_x = margin + logo_width + 5 * mm
+                drawn = True
+            except Exception:  # noqa: BLE001 - section 22: the logo is not the report
+                drawn = False
+            if not drawn:
+                cursor_x = margin
+
         canvas.setFillColor(accent_ink)
         canvas.setFont("Helvetica-Bold", 13)
-        canvas.drawString(margin, page_height - band_height + 9.5 * mm, brand.name)
+        canvas.drawString(cursor_x, page_height - band_height + 9.5 * mm, brand.name)
         canvas.setFont("Helvetica", 8.5)
         canvas.drawRightString(
-            page_width - margin, page_height - band_height + 9.9 * mm, "Month-end report"
+            page_width - margin,
+            page_height - band_height + 9.9 * mm,
+            brand.period or "Month-end report",
         )
         canvas.restoreState()
         _footer(canvas, _doc)
@@ -591,8 +652,16 @@ def render_pdf(document: ReportDocument, brand: Brand) -> bytes:
         Paragraph(_escape(document.title), title),
         Paragraph(
             _escape(
-                f"{document.workspace_name} · dataset version {document.version_no} · "
-                f"generated {document.generated_at.strftime('%d %B %Y %H:%M UTC')}"
+                " · ".join(
+                    part
+                    for part in (
+                        document.period,
+                        document.workspace_name,
+                        f"dataset version {document.version_no}",
+                        f"generated {document.generated_at.strftime('%d %B %Y %H:%M UTC')}",
+                    )
+                    if part
+                )
             ),
             subtitle,
         ),
@@ -827,9 +896,29 @@ def render_docx(document: ReportDocument, brand: Brand) -> bytes:
     banner.paragraph_format.tab_stops.add_tab_stop(
         Emu(int(usable) - int(Inches(0.3))), WD_TAB_ALIGNMENT.RIGHT
     )
+    # The logo goes in as a real inline picture, in its own paragraph above the
+    # name, so the recipient can click it, resize it or replace it with their
+    # own -- which is the point of sending a .docx rather than a PDF. A picture
+    # welded into a header graphic would look the same and edit like a
+    # screenshot.
+    if brand.logo is not None:
+        logo_paragraph = band_cell.paragraphs[0]
+        logo_paragraph.paragraph_format.space_after = Pt(2)
+        try:
+            logo_paragraph.add_run().add_picture(
+                io.BytesIO(brand.logo.data), height=Pt(22)
+            )
+            banner = band_cell.add_paragraph()
+            banner.paragraph_format.tab_stops.add_tab_stop(
+                Emu(int(usable) - int(Inches(0.3))), WD_TAB_ALIGNMENT.RIGHT
+            )
+        except Exception:  # noqa: BLE001 - section 22: no logo beats no report
+            for empty in list(logo_paragraph.runs):
+                empty.text = ""
+
     run(banner, brand.name, size=13, bold=True, ink=brand.accent_ink)
     banner.add_run("\t")
-    run(banner, "Month-end report", size=8.5, ink=brand.accent_ink)
+    run(banner, brand.period or "Month-end report", size=8.5, ink=brand.accent_ink)
 
     heading_paragraph = doc.add_paragraph()
     heading_paragraph.paragraph_format.space_before = Pt(14)
@@ -840,8 +929,16 @@ def render_docx(document: ReportDocument, brand: Brand) -> bytes:
     meta.paragraph_format.space_after = Pt(10)
     run(
         meta,
-        f"{document.workspace_name} · dataset version {document.version_no} · "
-        f"generated {document.generated_at.strftime('%d %B %Y %H:%M UTC')}",
+        " · ".join(
+            part
+            for part in (
+                document.period,
+                document.workspace_name,
+                f"dataset version {document.version_no}",
+                f"generated {document.generated_at.strftime('%d %B %Y %H:%M UTC')}",
+            )
+            if part
+        ),
         size=8.5,
         ink=brand.muted,
     )
@@ -1116,15 +1213,39 @@ def render_xlsx(document: ReportDocument, brand: Brand) -> bytes:
         sheet.column_dimensions[column].width = width
 
     # --- the band ----------------------------------------------------------
+    #
+    # Two rows, and the first one grows to hold the logo when there is one.
+    # A floating image is the only way openpyxl can place a picture, so it is
+    # anchored to a row sized to fit it rather than left to overlap the figures
+    # underneath -- section 17: the workbook is opened to check a number, and
+    # decoration that lands on top of one has cost more than it bought.
+    logo_row_height = 8
+    if brand.logo is not None:
+        logo_row_height = 40
+
     for column in range(1, 8):
         for row in (1, 2):
             sheet.cell(row=row, column=column).fill = fill(brand.accent)
-    sheet.row_dimensions[1].height = 8
+    sheet.row_dimensions[1].height = logo_row_height
     sheet.row_dimensions[2].height = 24
+
+    if brand.logo is not None:
+        try:
+            from openpyxl.drawing.image import Image as XlsxImage
+
+            drawn_height = 34
+            image = XlsxImage(io.BytesIO(brand.logo.data))
+            image.height = drawn_height
+            image.width = max(16, int(drawn_height * (brand.logo.aspect or 1.0)))
+            image.anchor = "B1"
+            sheet.add_image(image)
+        except Exception:  # noqa: BLE001 - section 22: the logo is not the report
+            sheet.row_dimensions[1].height = 8
+
     banner = sheet.cell(row=2, column=2, value=brand.name)
     banner.font = font(14, bold=True, ink=brand.accent_ink)
     banner.alignment = Alignment(vertical="center")
-    corner = sheet.cell(row=2, column=6, value="Month-end report")
+    corner = sheet.cell(row=2, column=6, value=brand.period or "Month-end report")
     corner.font = font(9, ink=brand.accent_ink)
     corner.alignment = Alignment(vertical="center", horizontal="right")
     sheet.merge_cells(start_row=2, start_column=6, end_row=2, end_column=7)
@@ -1135,9 +1256,15 @@ def render_xlsx(document: ReportDocument, brand: Brand) -> bytes:
     meta = sheet.cell(
         row=5,
         column=2,
-        value=(
-            f"{document.workspace_name} · dataset version {document.version_no} · "
-            f"generated {document.generated_at.strftime('%d %B %Y %H:%M UTC')}"
+        value=" · ".join(
+            part
+            for part in (
+                document.period,
+                document.workspace_name,
+                f"dataset version {document.version_no}",
+                f"generated {document.generated_at.strftime('%d %B %Y %H:%M UTC')}",
+            )
+            if part
         ),
     )
     meta.font = font(9, ink=brand.muted)
@@ -1340,6 +1467,12 @@ def render_document(
     report is not the thing to fail over a typo in a query parameter.
     """
     chosen = fmt if fmt in FORMATS else "md"
+    # Whether a caller *supplied* a brand, not whether one exists. Markdown's
+    # header only becomes "# Energy Gain / ## January shipments" when there is a
+    # resolved organisation identity to put there; the default Brand is the
+    # product's own palette with a placeholder name, and printing that above
+    # every report would state an owner the document does not have.
+    branded = brand is not None
     brand = brand or Brand()
 
     if chosen == "pdf":
@@ -1348,13 +1481,63 @@ def render_document(
         return render_docx(document, brand), CONTENT_TYPES["docx"], "docx"
     if chosen == "xlsx":
         return render_xlsx(document, brand), CONTENT_TYPES["xlsx"], "xlsx"
-    return render_markdown(document).encode("utf-8"), CONTENT_TYPES["md"], "md"
+    return (
+        render_markdown(document, brand if branded else None).encode("utf-8"),
+        CONTENT_TYPES["md"],
+        "md",
+    )
+
+
+@dataclass(frozen=True)
+class Rendered:
+    """One finished file, or one format's failure with the reason."""
+
+    format: str
+    payload: bytes | None = None
+    content_type: str = ""
+    error: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.payload is not None
+
+
+def render_all(
+    document: ReportDocument, formats: list[str] | tuple[str, ...], brand: Brand | None = None
+) -> list[Rendered]:
+    """
+    Render several formats, keeping the ones that work.
+
+    Section 22 asks for exactly this behaviour and it is worth being explicit
+    about why: a recipe configured for PDF and Excel that loses the workbook to
+    a bad chart should still deliver the PDF. Raising on the first failure would
+    throw away a document that had already been produced correctly, and the
+    month-end pack would arrive as nothing rather than as most of itself.
+    """
+    brand = brand or Brand()
+    results: list[Rendered] = []
+
+    for fmt in formats:
+        if fmt not in FORMATS:
+            results.append(Rendered(format=fmt, error=f"{fmt} is not a report format"))
+            continue
+        try:
+            payload, content_type, extension = render_document(document, fmt, brand)
+            results.append(
+                Rendered(format=extension, payload=payload, content_type=content_type)
+            )
+        except Exception as error:  # noqa: BLE001 - one format's failure, not the job's
+            results.append(Rendered(format=fmt, error=f"{type(error).__name__}: {error}"[:300]))
+
+    return results
 
 
 __all__ = [
     "CONTENT_TYPES",
     "FORMATS",
     "Brand",
+    "Rendered",
+    "render_all",
     "render_docx",
     "render_document",
     "render_pdf",

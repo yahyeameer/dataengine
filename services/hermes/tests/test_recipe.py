@@ -472,3 +472,69 @@ def test_a_missing_required_column_blocks(september, recipe, august_vocabulary, 
 
     assert columns_check["passed"] is False
     assert any(d.severity == "block" for d in deviations)
+
+
+# -----------------------------------------------------------------------------
+# Month one is evidence, and replaying month two must not touch it
+# -----------------------------------------------------------------------------
+
+
+def test_replaying_september_leaves_august_untouched(
+    august, september, august_cleaned, recipe, august_vocabulary, expected_columns
+):
+    """
+    The immutability promise, asserted at the level where it could actually
+    break.
+
+    The database enforces it for stored versions — `dataset_versions` has an
+    append-only trigger — but the replay engine works on in-memory tables, and
+    an operation that mutated its input rather than a copy would corrupt last
+    month's numbers while every row in the audit trail continued to look
+    correct. That failure is invisible in production and cheap to catch here.
+    """
+    _parsed, september_table, september_profile = september
+    steps, invariants = recipe
+
+    before_rows = august_cleaned.row_count
+    before_columns = {name: list(values) for name, values in august_cleaned.columns.items()}
+    before_source_rows = list(august_cleaned.source_rows)
+
+    result = replay(
+        september_table,
+        steps,
+        september_profile,
+        august_vocabulary,
+        expected_columns=expected_columns,
+    )
+
+    # September produced its own, separate cleaned result...
+    assert result.cleaned.row_count > 0
+    assert result.cleaned.columns is not august_cleaned.columns
+
+    # ...and August is byte-for-byte what it was.
+    assert august_cleaned.row_count == before_rows
+    assert august_cleaned.source_rows == before_source_rows
+    for name, values in before_columns.items():
+        assert august_cleaned.columns[name] == values
+
+
+def test_a_second_replay_of_the_same_file_is_reproducible(
+    september, recipe, august_vocabulary, expected_columns
+):
+    """
+    Two replays of one file agree.
+
+    A recipe whose output depends on how many times it has been run is not a
+    recipe, and the ordering inside `_resolve_mapping_step` — which walks values
+    by frequency — is exactly the sort of thing that drifts when a dict's
+    insertion order changes underneath it.
+    """
+    _parsed, table, profile = september
+    steps, _invariants = recipe
+
+    first = replay(table, steps, profile, august_vocabulary, expected_columns=expected_columns)
+    second = replay(table, steps, profile, august_vocabulary, expected_columns=expected_columns)
+
+    assert first.cleaned.columns == second.cleaned.columns
+    assert first.summary()["deviations"] == second.summary()["deviations"]
+    assert [d.group_key for d in first.deviations] == [d.group_key for d in second.deviations]

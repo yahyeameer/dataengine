@@ -318,17 +318,100 @@ export type Database = {
           },
         ]
       }
+      brand_asset_candidates: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          byte_size: number | null
+          created_at: string
+          dismissed_at: string | null
+          height: number | null
+          id: string
+          mime_type: string
+          organization_id: string
+          raw_upload_id: string | null
+          reasons: Json
+          rejected_reason: string | null
+          score: number
+          sha256: string | null
+          source_name: string
+          storage_path: string
+          usable: boolean
+          width: number | null
+          workspace_id: string | null
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          byte_size?: number | null
+          created_at?: string
+          dismissed_at?: string | null
+          height?: number | null
+          id?: string
+          mime_type: string
+          organization_id: string
+          raw_upload_id?: string | null
+          reasons?: Json
+          rejected_reason?: string | null
+          score?: number
+          sha256?: string | null
+          source_name: string
+          storage_path: string
+          usable?: boolean
+          width?: number | null
+          workspace_id?: string | null
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          byte_size?: number | null
+          created_at?: string
+          dismissed_at?: string | null
+          height?: number | null
+          id?: string
+          mime_type?: string
+          organization_id?: string
+          raw_upload_id?: string | null
+          reasons?: Json
+          rejected_reason?: string | null
+          score?: number
+          sha256?: string | null
+          source_name?: string
+          storage_path?: string
+          usable?: boolean
+          width?: number | null
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brand_asset_candidates_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "brand_asset_candidates_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cleaning_recipes: {
         Row: {
           created_at: string
           created_by: string | null
           current_version_id: string | null
           dataset_id: string | null
+          description: string | null
           enabled: boolean
           id: string
           name: string
           source_signature: string | null
           template_origin_id: string | null
+          updated_at: string
           workspace_id: string
         }
         Insert: {
@@ -336,11 +419,13 @@ export type Database = {
           created_by?: string | null
           current_version_id?: string | null
           dataset_id?: string | null
+          description?: string | null
           enabled?: boolean
           id?: string
           name: string
           source_signature?: string | null
           template_origin_id?: string | null
+          updated_at?: string
           workspace_id: string
         }
         Update: {
@@ -348,11 +433,13 @@ export type Database = {
           created_by?: string | null
           current_version_id?: string | null
           dataset_id?: string | null
+          description?: string | null
           enabled?: boolean
           id?: string
           name?: string
           source_signature?: string | null
           template_origin_id?: string | null
+          updated_at?: string
           workspace_id?: string
         }
         Relationships: [
@@ -785,6 +872,65 @@ export type Database = {
           },
         ]
       }
+      organization_branding: {
+        Row: {
+          accent_color: string | null
+          business_name: string | null
+          created_at: string
+          footer_text: string | null
+          legal_name: string | null
+          logo_byte_size: number | null
+          logo_height: number | null
+          logo_mime_type: string | null
+          logo_storage_path: string | null
+          logo_url: string | null
+          logo_width: number | null
+          organization_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          accent_color?: string | null
+          business_name?: string | null
+          created_at?: string
+          footer_text?: string | null
+          legal_name?: string | null
+          logo_byte_size?: number | null
+          logo_height?: number | null
+          logo_mime_type?: string | null
+          logo_storage_path?: string | null
+          logo_url?: string | null
+          logo_width?: number | null
+          organization_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          accent_color?: string | null
+          business_name?: string | null
+          created_at?: string
+          footer_text?: string | null
+          legal_name?: string | null
+          logo_byte_size?: number | null
+          logo_height?: number | null
+          logo_mime_type?: string | null
+          logo_storage_path?: string | null
+          logo_url?: string | null
+          logo_width?: number | null
+          organization_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_branding_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organizations: {
         Row: {
           created_at: string
@@ -976,6 +1122,7 @@ export type Database = {
           invariant_status: string | null
           job_id: string | null
           recipe_version_id: string
+          report_artifact_id: string | null
           rows_matched: number
           rows_processed: number
           started_at: string
@@ -994,6 +1141,7 @@ export type Database = {
           invariant_status?: string | null
           job_id?: string | null
           recipe_version_id: string
+          report_artifact_id?: string | null
           rows_matched?: number
           rows_processed?: number
           started_at?: string
@@ -1012,6 +1160,7 @@ export type Database = {
           invariant_status?: string | null
           job_id?: string | null
           recipe_version_id?: string
+          report_artifact_id?: string | null
           rows_matched?: number
           rows_processed?: number
           started_at?: string
@@ -1073,6 +1222,7 @@ export type Database = {
           invariants: Json
           learned_from: string | null
           recipe_id: string
+          report_config: Json | null
           steps: Json
           version_no: number
         }
@@ -1084,6 +1234,7 @@ export type Database = {
           invariants?: Json
           learned_from?: string | null
           recipe_id: string
+          report_config?: Json | null
           steps?: Json
           version_no: number
         }
@@ -1095,6 +1246,7 @@ export type Database = {
           invariants?: Json
           learned_from?: string | null
           recipe_id?: string
+          report_config?: Json | null
           steps?: Json
           version_no?: number
         }
@@ -1104,6 +1256,81 @@ export type Database = {
             columns: ["recipe_id"]
             isOneToOne: false
             referencedRelation: "cleaning_recipes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      report_artifacts: {
+        Row: {
+          branding_snapshot: Json
+          bucket: string
+          created_by: string | null
+          dataset_id: string | null
+          dataset_version_id: string | null
+          error: string | null
+          formats: Json
+          generated_at: string
+          id: string
+          job_id: string | null
+          org_id: string
+          period: string | null
+          recipe_id: string | null
+          recipe_version_id: string | null
+          status: Database["public"]["Enums"]["report_artifact_status"]
+          title: string | null
+          workspace_id: string
+        }
+        Insert: {
+          branding_snapshot?: Json
+          bucket?: string
+          created_by?: string | null
+          dataset_id?: string | null
+          dataset_version_id?: string | null
+          error?: string | null
+          formats?: Json
+          generated_at?: string
+          id?: string
+          job_id?: string | null
+          org_id: string
+          period?: string | null
+          recipe_id?: string | null
+          recipe_version_id?: string | null
+          status?: Database["public"]["Enums"]["report_artifact_status"]
+          title?: string | null
+          workspace_id: string
+        }
+        Update: {
+          branding_snapshot?: Json
+          bucket?: string
+          created_by?: string | null
+          dataset_id?: string | null
+          dataset_version_id?: string | null
+          error?: string | null
+          formats?: Json
+          generated_at?: string
+          id?: string
+          job_id?: string | null
+          org_id?: string
+          period?: string | null
+          recipe_id?: string | null
+          recipe_version_id?: string | null
+          status?: Database["public"]["Enums"]["report_artifact_status"]
+          title?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_artifacts_recipe_id_fkey"
+            columns: ["recipe_id"]
+            isOneToOne: false
+            referencedRelation: "cleaning_recipes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_artifacts_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -1861,6 +2088,173 @@ export type Database = {
         }
       }
       try_uuid: { Args: { p_text: string }; Returns: string }
+      approve_brand_asset: {
+        Args: { p_candidate_id: string }
+        Returns: {
+          accent_color: string | null
+          business_name: string | null
+          created_at: string
+          footer_text: string | null
+          legal_name: string | null
+          logo_byte_size: number | null
+          logo_height: number | null
+          logo_mime_type: string | null
+          logo_storage_path: string | null
+          logo_url: string | null
+          logo_width: number | null
+          organization_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+      }
+      clear_organization_logo: {
+        Args: { p_organization_id: string }
+        Returns: {
+          accent_color: string | null
+          business_name: string | null
+          created_at: string
+          footer_text: string | null
+          legal_name: string | null
+          logo_byte_size: number | null
+          logo_height: number | null
+          logo_mime_type: string | null
+          logo_storage_path: string | null
+          logo_url: string | null
+          logo_width: number | null
+          organization_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+      }
+      describe_recipe: {
+        Args: { p_description?: string; p_name?: string; p_recipe_id: string }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          current_version_id: string | null
+          dataset_id: string | null
+          description: string | null
+          enabled: boolean
+          id: string
+          name: string
+          source_signature: string | null
+          template_origin_id: string | null
+          updated_at: string
+          workspace_id: string
+        }
+      }
+      dismiss_brand_asset: {
+        Args: { p_candidate_id: string }
+        Returns: boolean
+      }
+      duplicate_recipe: {
+        Args: { p_name?: string; p_recipe_id: string; p_target_workspace_id?: string }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          current_version_id: string | null
+          dataset_id: string | null
+          description: string | null
+          enabled: boolean
+          id: string
+          name: string
+          source_signature: string | null
+          template_origin_id: string | null
+          updated_at: string
+          workspace_id: string
+        }
+      }
+      set_organization_logo: {
+        Args: {
+          p_actor?: string
+          p_byte_size: number
+          p_height: number
+          p_mime_type: string
+          p_organization_id: string
+          p_storage_path: string
+          p_width: number
+        }
+        Returns: {
+          accent_color: string | null
+          business_name: string | null
+          created_at: string
+          footer_text: string | null
+          legal_name: string | null
+          logo_byte_size: number | null
+          logo_height: number | null
+          logo_mime_type: string | null
+          logo_storage_path: string | null
+          logo_url: string | null
+          logo_width: number | null
+          organization_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+      }
+      set_recipe_enabled: {
+        Args: { p_enabled: boolean; p_reason?: string; p_recipe_id: string }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          current_version_id: string | null
+          dataset_id: string | null
+          description: string | null
+          enabled: boolean
+          id: string
+          name: string
+          source_signature: string | null
+          template_origin_id: string | null
+          updated_at: string
+          workspace_id: string
+        }
+      }
+      update_recipe_definition: {
+        Args: {
+          p_change_note?: string
+          p_invariants?: Json
+          p_recipe_id: string
+          p_report_config?: Json
+          p_steps?: Json
+        }
+        Returns: {
+          change_note: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          invariants: Json
+          learned_from: string | null
+          recipe_id: string
+          report_config: Json | null
+          steps: Json
+          version_no: number
+        }
+      }
+      upsert_organization_branding: {
+        Args: {
+          p_accent_color?: string
+          p_business_name?: string
+          p_footer_text?: string
+          p_legal_name?: string
+          p_logo_url?: string
+          p_organization_id: string
+        }
+        Returns: {
+          accent_color: string | null
+          business_name: string | null
+          created_at: string
+          footer_text: string | null
+          legal_name: string | null
+          logo_byte_size: number | null
+          logo_height: number | null
+          logo_mime_type: string | null
+          logo_storage_path: string | null
+          logo_url: string | null
+          logo_width: number | null
+          organization_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+      }
       update_recipe_steps: {
         Args: { p_change_note?: string; p_recipe_id: string; p_steps: Json }
         Returns: {
@@ -1871,6 +2265,7 @@ export type Database = {
           invariants: Json
           learned_from: string | null
           recipe_id: string
+          report_config: Json | null
           steps: Json
           version_no: number
         }
@@ -1951,6 +2346,7 @@ export type Database = {
         | "rejected"
         | "applied"
         | "superseded"
+      report_artifact_status: "succeeded" | "partial" | "failed"
       recipe_run_status:
         | "running"
         | "succeeded"

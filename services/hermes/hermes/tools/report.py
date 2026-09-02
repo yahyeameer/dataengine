@@ -56,6 +56,30 @@ def _label(name: str) -> str:
     )
 
 
+def _period_label(period: dict[str, Any]) -> str:
+    """
+    The reporting period, phrased the way a covering email would phrase it.
+
+    One month collapses to "September 2026"; a range spanning months keeps both
+    ends. An absent or unparseable range returns "", and every renderer treats
+    that as "print nothing" rather than as a gap to fill -- a header reading
+    "Period: unknown" is worse than a header that does not mention one.
+    """
+    earliest, latest = period.get("earliest"), period.get("latest")
+    if not isinstance(earliest, str) or not isinstance(latest, str):
+        return ""
+    try:
+        start = dt.date.fromisoformat(earliest[:10])
+        end = dt.date.fromisoformat(latest[:10])
+    except ValueError:
+        return ""
+    if (start.year, start.month) == (end.year, end.month):
+        return start.strftime("%B %Y")
+    if start.year == end.year:
+        return f"{start.strftime('%B')} to {end.strftime('%B %Y')}"
+    return f"{start.strftime('%B %Y')} to {end.strftime('%B %Y')}"
+
+
 def _table(headers: list[str], rows: list[list[str]]) -> str:
     if not rows:
         return "_No rows._\n"
@@ -203,6 +227,12 @@ class ReportDocument:
     version_no: int
     generated_at: dt.datetime
     blocks: list[Block]
+    #: What the figures cover, as a person would say it -- "September 2026",
+    #: or "January to March 2026". Derived from the data's own date range
+    #: rather than from the clock, because a report produced in October about
+    #: September is a September report, and dating it by when it was rendered
+    #: is how a month-end pack ends up filed under the wrong month.
+    period: str = ""
 
 
 def build_report_document(
@@ -223,6 +253,7 @@ def build_report_document(
     """
     generated = generated_at or dt.datetime.now(dt.timezone.utc)
     blocks: list[Block] = []
+    period_label = _period_label(kpis.get("period") or {})
 
     # The caveat goes at the top, not in a footnote. A report whose totals do
     # not reconcile against the source file must say so before anyone reads the
@@ -438,10 +469,11 @@ def build_report_document(
         version_no=version_no,
         generated_at=generated,
         blocks=blocks,
+        period=period_label,
     )
 
 
-def render_markdown(document: ReportDocument) -> str:
+def render_markdown(document: ReportDocument, brand: Any = None) -> str:
     """
     The plain-text rendering, and still the default one.
 
@@ -450,8 +482,33 @@ def render_markdown(document: ReportDocument) -> str:
     `documents.py` exist for the copy that goes *to the client*, where the
     layout is part of the product; this one is for the copy that goes into the
     file, where being editable and diffable matters more than being beautiful.
+
+    `brand` is duck-typed rather than imported. `documents.Brand` lives in the
+    module that imports this one, and a report that renders as text must not
+    depend on the module that needs reportlab -- typing the parameter properly
+    would buy a cycle and an import of three rendering libraries to produce a
+    string.
+
+    Markdown cannot show a private logo (section 18), and this deliberately does
+    not try. A signed storage URL expires and is a credential; what appears here
+    is the business name, and an image only when an administrator has supplied a
+    public URL for one.
     """
-    parts: list[str] = [f"# {document.title}\n"]
+    parts: list[str] = []
+    business_name = getattr(brand, "name", None) if brand is not None else None
+
+    if business_name:
+        logo_url = getattr(brand, "logo_url", None)
+        if isinstance(logo_url, str) and logo_url.startswith("https://"):
+            parts.append(f"![{business_name}]({logo_url})\n")
+        parts.append(f"# {business_name}\n")
+        parts.append(f"## {document.title}\n")
+    else:
+        parts.append(f"# {document.title}\n")
+
+    if document.period:
+        parts.append(f"{document.period}\n")
+
     parts.append(
         f"**{document.workspace_name}** · dataset version {document.version_no} · "
         f"generated {document.generated_at.strftime('%d %B %Y %H:%M UTC')}\n"
@@ -489,6 +546,10 @@ def render_markdown(document: ReportDocument) -> str:
 
         elif isinstance(block, Footnote):
             parts.append(f"\n---\n\n_{block.text}_\n")
+
+    footer = getattr(brand, "footer", None) if brand is not None else None
+    if isinstance(footer, str) and footer.strip():
+        parts.append(f"\n_{footer.strip()}_\n")
 
     return "\n".join(parts)
 

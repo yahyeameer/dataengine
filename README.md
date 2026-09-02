@@ -12,8 +12,13 @@ approves or rejects; approved changes are applied into a new immutable version. 
 month-end reports run off that version, and every figure traces back to its source rows.
 
 Recipes — capturing an approved session and replaying it against next month's file (PRD section 4)
-— are the next thing to build, and they are what turn this from a good cleaning tool into the
-product the PRD describes.
+— now exist end to end: the engine that captures and replays them, the schema that versions them
+immutably, and a Recipes section in the app where a person can read one, see which of its steps
+will stop for approval, change what it delivers and inspect every run it has had.
+
+The report that comes out the other end carries the firm's own identity. Settings → Organisation →
+Branding stores the business name, accent colour, footer and logo once; every report resolves them
+itself rather than being told what to say.
 
 ## Layout
 
@@ -145,6 +150,17 @@ npm run test:agent:e2e      # the agent seam over real HTTP, worker included
 
 cd services/hermes && .venv/Scripts/python -m pytest    # the agent's own tools
 ```
+
+`supabase/tests/isolation_branding_recipes.sql` is the same kind of check for the branding and
+recipe tables, written as SQL and run against a database with the migrations applied:
+
+```bash
+psql "$(supabase status -o json | jq -r .DB_URL)" -f supabase/tests/isolation_branding_recipes.sql
+```
+
+It prints one line per rule — that a member cannot change branding, that one firm can neither read
+nor write another's logo, recipes or reports, that a logo path outside its own organisation is
+refused, and that a recipe version and a generated report cannot be rewritten once written.
 
 `test:isolation` and `test:agent` are the two that matter most. Two accounting firms sharing one
 database is the entire risk model of this product (PRD section 13), and between them these suites

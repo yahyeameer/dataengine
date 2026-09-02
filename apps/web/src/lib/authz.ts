@@ -97,6 +97,37 @@ export async function requireWorkspaceAccess(workspaceId: string): Promise<Works
   return { user, workspaceId: workspace.id, orgId: workspace.org_id, role: membership.role };
 }
 
+export type OrgContext = { user: User; orgId: string; role: OrgRole };
+
+/**
+ * Proves the caller is an owner or admin of one organization.
+ *
+ * Branding is what every client sees on every document the firm sends, so it
+ * sits at the same level as creating a billable workspace rather than at member
+ * level. The membership row is read through the caller's own RLS-bound client,
+ * so a caller who cannot see the organization gets the same answer as one who
+ * is not in it -- 404, never a 403 that confirms the id is real.
+ */
+export async function requireOrgAdmin(orgId: string): Promise<OrgContext> {
+  const user = await requireApiUser();
+  const supabase = await createServerSupabase();
+
+  const { data: membership, error } = await supabase
+    .from('organization_members')
+    .select('role, org_id')
+    .eq('org_id', orgId)
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (error) throw new AuthzError(`Organization lookup failed: ${error.message}`, 403);
+  if (!membership) throw new AuthzError('Organization not found', 404);
+  if (membership.role !== 'owner' && membership.role !== 'admin') {
+    throw new AuthzError('Only an owner or admin may change this', 403);
+  }
+
+  return { user, orgId: membership.org_id, role: membership.role };
+}
+
 /**
  * The caller's organizations, most recent first. A user with none is sent to
  * /onboarding; a user with several sees the first until multi-org switching
@@ -130,6 +161,6 @@ export async function requireCurrentOrg() {
  * the proven context as an argument makes the ordering visible at every call
  * site rather than relying on the author remembering it.
  */
-export function adminFor(_context: WorkspaceContext) {
+export function adminFor(_context: WorkspaceContext | OrgContext) {
   return createAdminSupabase();
 }

@@ -119,6 +119,36 @@ export function AssistantIcon() {
   );
 }
 
+/** A card with a repeat mark: a workflow written down to be run again. */
+export function RecipesIcon() {
+  return (
+    <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" aria-hidden>
+      <rect x="2.25" y="1.75" width="11.5" height="12.5" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
+      <path
+        d="M5.25 5.25h5.5M5.25 8h5.5M5.25 10.75h3"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** A cog. The only settings destination in the product. */
+export function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" aria-hidden>
+      <circle cx="8" cy="8" r="2.25" stroke="currentColor" strokeWidth="1.4" />
+      <path
+        d="M8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5M3.6 3.6l1.05 1.05M11.35 11.35l1.05 1.05M12.4 3.6l-1.05 1.05M4.65 11.35 3.6 12.4"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function ActivityIcon() {
   return (
     <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" aria-hidden>

@@ -179,50 +179,117 @@ def test_a_table_with_no_column_names_is_a_definition_list():
 
 
 class _StubSupabase:
-    def __init__(self, rows: list[dict]) -> None:
-        self.rows = rows
+    """
+    Enough of the client for branding resolution: table-keyed reads and a
+    download that is never expected to be reached unless a logo path exists.
+    """
+
+    def __init__(self, rows: dict[str, list[dict]] | list[dict]) -> None:
+        # A bare list keeps the older, single-table tests readable.
+        self.rows = rows if isinstance(rows, dict) else {"organizations": rows}
         self.calls: list[str] = []
+        self.downloads: list[tuple[str, str]] = []
+        self.blob: bytes | None = None
 
     def select(self, table: str, **_kwargs: object) -> list[dict]:
         self.calls.append(table)
-        return self.rows
+        return self.rows.get(table, [])
+
+    def download(self, bucket: str, path: str, max_bytes: int) -> bytes:
+        self.downloads.append((bucket, path))
+        if self.blob is None:
+            raise RuntimeError("no such object")
+        return self.blob
 
 
 class _StubContext:
-    def __init__(self, rows: list[dict]) -> None:
+    def __init__(self, rows: dict[str, list[dict]] | list[dict]) -> None:
         self.supabase = _StubSupabase(rows)
-        self.job = {"org_id": "org-1"}
+        self.job = {"org_id": "org-1", "workspace_id": "ws-1"}
+        self.workspace_id = "ws-1"
+
+    def requested_by(self) -> str | None:
+        return None
 
 
 def test_the_report_carries_the_organisation_name_by_default():
     from hermes.jobs import _brand_for
 
-    context = _StubContext([{"id": "org-1", "name": "Acme Accounting"}])
-    brand = _brand_for(context, None)
+    context = _StubContext({"organizations": [{"id": "org-1", "name": "Acme Accounting"}]})
+    brand, resolved = _brand_for(context, None)
 
     assert brand.name == "Acme Accounting"
-    assert context.supabase.calls == ["organizations"]
+    assert resolved.name_source == "organization"
 
 
-def test_a_payload_override_names_the_client_without_a_second_query():
+def test_stored_branding_outranks_the_organisation_row():
+    # Section 10's order. The organisation is the accounting firm; the branding
+    # row is what the firm decided its documents should say.
     from hermes.jobs import _brand_for
 
-    context = _StubContext([])
-    brand = _brand_for(
+    context = _StubContext(
+        {
+            "organization_branding": [
+                {
+                    "organization_id": "org-1",
+                    "business_name": "Energy Gain",
+                    "accent_color": "#8a1538",
+                    "footer_text": "energygain.example",
+                }
+            ],
+            "organizations": [{"id": "org-1", "name": "Acme Accounting"}],
+        }
+    )
+    brand, resolved = _brand_for(context, None)
+
+    assert brand.name == "Energy Gain"
+    assert brand.accent == "#8a1538"
+    assert brand.footer == "energygain.example"
+    assert resolved.name_source == "organization_branding"
+
+
+def test_a_payload_override_still_wins_for_an_internal_workflow():
+    from hermes.jobs import _brand_for
+
+    context = _StubContext({"organizations": [{"id": "org-1", "name": "Acme Accounting"}]})
+    brand, resolved = _brand_for(
         context, {"name": "Kentex Cargo", "accent": "#8a1538", "footer": "Acme · acme.co.uk"}
     )
 
     assert brand.name == "Kentex Cargo"
     assert brand.accent == "#8a1538"
     assert brand.footer == "Acme · acme.co.uk"
-    assert context.supabase.calls == []
+    assert resolved.name_source == "override"
+
+
+def test_an_override_naming_only_a_colour_keeps_the_organisation_name():
+    # The bug the old payload-only path had: sending an accent used to cost you
+    # the name, because the two arrived together or not at all.
+    from hermes.jobs import _brand_for
+
+    context = _StubContext({"organizations": [{"id": "org-1", "name": "Acme Accounting"}]})
+    brand, _resolved = _brand_for(context, {"accent": "#8a1538"})
+
+    assert brand.name == "Acme Accounting"
+    assert brand.accent == "#8a1538"
 
 
 def test_an_organisation_that_has_gone_missing_still_produces_a_report():
     from hermes.jobs import _brand_for
 
-    brand = _brand_for(_StubContext([]), {"accent": "#8a1538"})
-    assert brand.name == "DataEngine"
+    brand, resolved = _brand_for(_StubContext([]), {"accent": "#8a1538"})
+    assert brand.name == "DataEngine Report"
+    assert resolved.name_source == "fallback"
+
+
+def test_a_workspace_client_name_is_used_before_the_generic_fallback():
+    from hermes.jobs import _brand_for
+
+    context = _StubContext({"workspaces": [{"id": "ws-1", "name": "Acme", "client_name": "Kentex Cargo"}]})
+    brand, resolved = _brand_for(context, None)
+
+    assert brand.name == "Kentex Cargo"
+    assert resolved.name_source == "workspace"
 
 
 def test_characters_the_pdf_font_cannot_draw_are_substituted():

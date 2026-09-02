@@ -34,6 +34,9 @@ from .job_types import JobContext, JobDeferred, JobError
 from .llm.redact import build_context
 from .supabase import SupabaseError
 from .tools import analyze, autopilot, documents, govuk, hmrc, report
+from .tools import brand_assets
+from .tools import recipe_schema
+from .tools import branding as branding_tools
 from .tools.clean import ADVISORY_OPERATIONS, apply_operations, column_hash, to_parquet
 from .tools.parse import ParsedTable, SheetInterpretation, SkippedRow, parse_workbook
 from .tools.profile import Profile, profile_table
@@ -53,6 +56,7 @@ log = logging.getLogger("hermes.jobs")
 RAW_BUCKET = "raw"
 PARQUET_BUCKET = "parquet"
 EXPORTS_BUCKET = "exports"
+BRANDING_BUCKET = "branding"
 
 # -----------------------------------------------------------------------------
 # Categorisation quality floors.
@@ -594,10 +598,16 @@ def handle_parse_workbook(context: JobContext) -> dict[str, Any]:
         },
     )
 
+    # Images the workbook was carrying (section 11, priority 3). Last, and
+    # never fatal: this is a bonus on top of an ingest that has already
+    # succeeded, and a workbook whose zip directory is odd must still parse.
+    brand_candidates = _discover_brand_assets(context, upload, data)
+
     return {
         "dataset_version_id": version["id"],
         "version_no": version["version_no"],
         "parquet_path": stored.path,
+        "brand_asset_candidates": brand_candidates,
         "autopilot": autopilot_requested,
         "rows": table.row_count,
         "columns": len(table.interpretation.columns),
@@ -616,6 +626,79 @@ def handle_parse_workbook(context: JobContext) -> dict[str, Any]:
         ),
         "next": next_kind,
     }
+
+
+def _discover_brand_assets(
+    context: JobContext, upload: dict[str, Any], data: bytes
+) -> int:
+    """
+    Store the images found inside an uploaded workbook, as candidates.
+
+    None of them becomes the logo here. The bytes go into the organisation's
+    branding prefix and a row records what was found and how much it looks like
+    a logo; a person picks one on the branding screen, and until they do the
+    reports carry a text header. Section 11 is explicit that this is the right
+    trade -- "this is preferable to hallucinating" -- and it is also the only
+    version of the feature that survives a workbook containing a logo, a product
+    photograph, a chart and somebody's signature.
+
+    Returns how many new candidates were recorded. Every failure is a zero: a
+    picture nobody can extract costs a branding suggestion, not an upload.
+    """
+    filename = upload.get("original_filename") or ""
+    if not brand_assets.is_container(filename):
+        return 0
+
+    try:
+        candidates = brand_assets.discover_images(data, filename)
+    except Exception:  # noqa: BLE001
+        log.warning("image discovery failed for %s", filename)
+        return 0
+
+    if not candidates:
+        return 0
+
+    org_id = context.job["org_id"]
+    rows: list[dict[str, Any]] = []
+
+    for candidate in candidates:
+        if candidate.rejected:
+            # Recorded so the screen can say "we found this and cannot use it",
+            # but not stored: there is no reason to keep bytes nothing can use.
+            rows.append({**candidate.to_row(), "storage_path": f"unstored/{candidate.sha256}"})
+            continue
+        path = f"organizations/{org_id}/branding/candidates/{candidate.sha256}"
+        try:
+            context.supabase.upload(
+                BRANDING_BUCKET,
+                path,
+                candidate.data,
+                content_type=candidate.mime,
+                upsert=True,
+            )
+        except Exception:  # noqa: BLE001
+            log.warning("could not store candidate logo %s", candidate.name)
+            continue
+        rows.append({**candidate.to_row(), "storage_path": path})
+
+    if not rows:
+        return 0
+
+    try:
+        recorded = context.supabase.rpc(
+            "record_brand_asset_candidates",
+            {
+                "p_organization_id": org_id,
+                "p_workspace_id": context.workspace_id,
+                "p_raw_upload_id": upload.get("id"),
+                "p_candidates": rows,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        log.warning("could not record brand asset candidates")
+        return 0
+
+    return int(recorded or 0)
 
 
 # -----------------------------------------------------------------------------
@@ -1001,6 +1084,19 @@ def _capture_recipe_from(
     if not steps:
         return None
 
+    # The same validation a hand-written recipe goes through, applied to one
+    # the system wrote itself. Not defensive theatre: `capture_steps` copies
+    # operation parameters out of approved proposals, so an operation the
+    # cleaning engine gained without a safety classification would otherwise
+    # reach a stored recipe and be replayed unattended. Refusing to save is the
+    # right outcome -- the cleaning already happened and is already versioned;
+    # what is lost is the shortcut for next month, not this month's work.
+    try:
+        steps = recipe_schema.validate_steps(steps)
+    except recipe_schema.RecipeInvalid as error:
+        log.warning("declining to capture a recipe: %s", error)
+        return None
+
     # Invariants are derived from the cleaned output, because that is the shape
     # future months are expected to match.
     cleaned_profile, _cleaned_table = _profile_from_columns(result.columns, result.source_rows)
@@ -1096,6 +1192,8 @@ def handle_replay_recipe(context: JobContext) -> dict[str, Any]:
             "p_job_id": context.job_id,
         },
     )
+
+    summary_report: dict[str, Any] | None = None
 
     try:
         context.heartbeat({"stage": "replaying", "steps": len(recipe["steps"])})
@@ -1201,6 +1299,27 @@ def handle_replay_recipe(context: JobContext) -> dict[str, Any]:
             status = "succeeded"
             output_version = written["id"]
 
+            # The deliverable (section 6, steps 7 and 8).
+            #
+            # Only on a clean run, and only after the output version exists,
+            # because a report is a statement about a dataset version -- one
+            # produced from a run that stopped for review would describe rows
+            # nobody has approved yet, in a document with the client's name on
+            # it. A recipe with no report configuration produces no report,
+            # which is the ordinary case for a recipe that only cleans.
+            report_config = recipe.get("report_config") or {}
+            formats = report_config.get("formats") if isinstance(report_config, dict) else None
+            if formats:
+                context.heartbeat({"stage": "reporting"})
+                summary_report = _report_for_run(
+                    context,
+                    output_version_id=output_version,
+                    formats=formats,
+                    recipe_id=recipe["recipe_id"],
+                    recipe_version_id=recipe["recipe_version_id"],
+                    run_id=run["id"],
+                )
+
         context.supabase.rpc(
             "finish_recipe_run",
             {
@@ -1213,7 +1332,7 @@ def handle_replay_recipe(context: JobContext) -> dict[str, Any]:
                 "p_deviations_count": len(result.deviations),
                 "p_automation_rate": result.automation_rate,
                 "p_invariant_status": status_text,
-                "p_summary": summary,
+                "p_summary": {**summary, **({"report": summary_report} if summary_report else {})},
             },
         )
 
@@ -1242,6 +1361,59 @@ def handle_replay_recipe(context: JobContext) -> dict[str, Any]:
         "automation_rate": result.automation_rate,
         "invariants": status_text,
         "summary": summary,
+        "report": summary_report,
+    }
+
+
+def _report_for_run(
+    context: JobContext,
+    *,
+    output_version_id: str,
+    formats: list[str],
+    recipe_id: str,
+    recipe_version_id: str,
+    run_id: str,
+) -> dict[str, Any] | None:
+    """
+    The report a recipe run produces, attached to the run that produced it.
+
+    Deliberately forgiving in one direction only. A report that cannot be
+    rendered must not undo a replay that worked: the cleaned version is written,
+    the lineage is recorded, and the failure is reported as a failure of the
+    report rather than of the run (section 22). What it is not forgiving about
+    is silence -- a run whose report failed says so on the run's summary, so
+    nobody goes looking in the exports bucket for a document that was never
+    produced.
+    """
+    try:
+        version = _load_version(context, output_version_id)
+        document, _extras = _assemble_report(context, version)
+        brand, resolved = _brand_for(context, None, period=document.period)
+        stored = _store_report(
+            context,
+            document=document,
+            version=version,
+            formats=formats,
+            brand=brand,
+            resolved=resolved,
+            recipe_id=recipe_id,
+            recipe_version_id=recipe_version_id,
+        )
+    except Exception as error:  # noqa: BLE001 - the run succeeded; the report did not
+        log.exception("recipe run %s produced no report", run_id)
+        return {"status": "failed", "error": f"{type(error).__name__}: {error}"[:300]}
+
+    if stored.get("report_artifact_id"):
+        context.supabase.rpc(
+            "attach_run_report",
+            {"p_run_id": run_id, "p_report_artifact_id": stored["report_artifact_id"]},
+        )
+
+    return {
+        "status": stored["status"],
+        "report_artifact_id": stored["report_artifact_id"],
+        "formats": stored["formats"],
+        "branding": resolved.snapshot(),
     }
 
 
@@ -1572,46 +1744,181 @@ def _report_provenance(context: JobContext, version: dict[str, Any]) -> dict[str
     return provenance
 
 
-def _brand_for(context: JobContext, branding: Any) -> documents.Brand:
+def _organization_branding(context: JobContext) -> dict[str, Any]:
+    """The organisation's stored branding row, or an empty dict."""
+    rows = context.supabase.select(
+        "organization_branding",
+        columns=(
+            "organization_id,business_name,legal_name,logo_storage_path,logo_mime_type,"
+            "logo_width,logo_height,logo_url,accent_color,footer_text"
+        ),
+        filters={"organization_id": f"eq.{context.job['org_id']}"},
+        limit=1,
+    )
+    return rows[0] if rows else {}
+
+
+def _logo_bytes(context: JobContext, branding: dict[str, Any]) -> tuple[bytes | None, str]:
     """
-    Whose name goes on the document.
+    The logo's bytes, and which priority produced them (section 11).
 
-    The organisation's own name is the default, because the ordinary case is a
-    practice sending a report to its own client and the alternative -- "Report"
-    in the corner of a document a firm is charging for -- looks like a draft.
+    Priorities 1 and 2 are the same fetch: an explicit logo and an approved
+    discovery both end up as an object in the `branding` bucket, because
+    approving a discovered image is a metadata write rather than a copy. What
+    separates them is only which screen set the path, and the report does not
+    care.
 
-    An override arrives on the job payload rather than from a settings table,
-    and that is a deliberate first cut: there is no branding screen yet, and a
-    column added before the screen that fills it is a guess at its shape. The
-    payload path is enough for the report to carry a client's colour today, and
-    when the screen exists it writes into the same three fields.
+    Priority 4 -- an administrator's URL -- is fetched here, behind
+    `assert_safe_logo_url`. Every failure in this function is a missing logo,
+    never a failed report: section 22 is explicit that a report without a logo
+    is the correct outcome when the logo cannot be had.
     """
-    override = branding if isinstance(branding, dict) else {}
+    path = branding.get("logo_storage_path")
+    if isinstance(path, str) and path:
+        try:
+            return context.supabase.download(
+                BRANDING_BUCKET, path, max_bytes=branding_tools.MAX_LOGO_BYTES
+            ), "organization_logo"
+        except Exception:  # noqa: BLE001
+            log.warning("branding logo %s could not be downloaded", path)
+            return None, "none"
 
-    name = override.get("name")
-    if not isinstance(name, str) or not name.strip():
-        rows = context.supabase.select(
-            "organizations",
-            columns="id,name",
-            filters={"id": f"eq.{context.job['org_id']}"},
-            limit=1,
-        )
-        name = rows[0]["name"] if rows else None
+    url = branding.get("logo_url")
+    if isinstance(url, str) and url:
+        try:
+            safe = branding_tools.assert_safe_logo_url(url)
+        except branding_tools.UnsafeLogoUrl as error:
+            log.warning("refusing to fetch logo url: %s", error)
+            return None, "none"
+        try:
+            import httpx
 
-    footer = override.get("footer")
-    return documents.Brand.for_client(
-        name=name,
-        accent=override.get("accent"),
-        footer=footer if isinstance(footer, str) else None,
+            with httpx.Client(
+                timeout=8.0,
+                # No redirect following. A redirect is a second URL that the
+                # safety check never saw, and "https://cdn.example/logo.png"
+                # answering 302 to http://169.254.169.254 is the whole trick.
+                follow_redirects=False,
+            ) as client:
+                response = client.get(safe)
+            if response.status_code != 200:
+                return None, "none"
+            payload = response.content[: branding_tools.MAX_LOGO_BYTES + 1]
+            if len(payload) > branding_tools.MAX_LOGO_BYTES:
+                return None, "none"
+            return payload, "remote_url"
+        except Exception:  # noqa: BLE001
+            log.warning("logo url fetch failed")
+            return None, "none"
+
+    return None, "none"
+
+
+def _resolve_branding(
+    context: JobContext, override: Any = None
+) -> branding_tools.ResolvedBranding:
+    """
+    Whose name and whose logo go on this document (sections 10, 11 and 14).
+
+    The caller no longer has to send a name. A report knows its organisation,
+    the organisation has a stored identity, and this walks the resolution order
+    in one place -- which is what makes "the name on the PDF" a fact about the
+    tenant rather than a property of whichever screen happened to enqueue the
+    job.
+
+    An explicit override is still honoured, because an internal or admin
+    workflow producing a document on someone else's behalf is a real case. It is
+    first in the order, not a replacement for it: an override that names only a
+    colour still gets the organisation's name.
+    """
+    branding = _organization_branding(context)
+
+    organization = None
+    rows = context.supabase.select(
+        "organizations", columns="id,name", filters={"id": f"eq.{context.job['org_id']}"}, limit=1
+    )
+    if rows:
+        organization = rows[0]
+
+    workspace = None
+    workspace_rows = context.supabase.select(
+        "workspaces",
+        columns="id,name,client_name",
+        filters={"id": f"eq.{context.workspace_id}"},
+        limit=1,
+    )
+    if workspace_rows:
+        workspace = workspace_rows[0]
+
+    logo_bytes, logo_source = _logo_bytes(context, branding)
+
+    return branding_tools.resolve_branding(
+        override=override if isinstance(override, dict) else None,
+        branding=branding,
+        organization=organization,
+        workspace=workspace,
+        logo_bytes=logo_bytes,
+        logo_source=logo_source,
     )
 
 
-def handle_generate_report(context: JobContext) -> dict[str, Any]:
-    version_id = context.job.get("dataset_version_id")
-    if not version_id:
-        raise JobError("this job has no dataset version attached")
+def _brand_for(
+    context: JobContext, branding: Any, period: str = ""
+) -> tuple[documents.Brand, branding_tools.ResolvedBranding]:
+    """
+    The renderer's `Brand`, plus the resolution that produced it.
 
-    version = _load_version(context, version_id)
+    Both are returned because the report row needs the second one. Section 19
+    has the recipe reference current branding rather than copy it, so the only
+    record of what a document actually said is the snapshot taken when it was
+    rendered.
+    """
+    resolved = _resolve_branding(context, branding)
+    brand = documents.Brand.for_client(
+        name=resolved.business_name,
+        accent=resolved.accent,
+        footer=resolved.footer,
+        logo=resolved.logo,
+        logo_url=resolved.public_logo_url,
+        period=period,
+    )
+    return brand, resolved
+
+
+def _requested_formats(payload: dict[str, Any]) -> list[str]:
+    """
+    Which formats to render.
+
+    `format` (one) and `formats` (several) both work: the dashboard sends the
+    first, a recipe's report configuration sends the second, and neither should
+    have to know about the other.
+    """
+    several = payload.get("formats")
+    if isinstance(several, list) and several:
+        chosen = [value for value in several if isinstance(value, str)]
+    else:
+        one = payload.get("format")
+        chosen = [one] if isinstance(one, str) else ["md"]
+
+    ordered: list[str] = []
+    for value in chosen:
+        if value in documents.FORMATS and value not in ordered:
+            ordered.append(value)
+    return ordered or ["md"]
+
+
+def _assemble_report(
+    context: JobContext, version: dict[str, Any]
+) -> tuple[report.ReportDocument, dict[str, Any]]:
+    """
+    Everything a month-end report says, for one dataset version.
+
+    Split out of the job handler so a recipe run can produce the same document
+    at the end of a replay without a second copy of the assembly. The handler
+    keeps the parts that are about *the job* -- which formats, where the bytes
+    go, what the result row says.
+    """
+    version_id = version["id"]
     parquet_bytes = _load_parquet(context, version)
 
     context.heartbeat({"stage": "profiling"})
@@ -1731,47 +2038,164 @@ def handle_generate_report(context: JobContext) -> dict[str, Any]:
         narrative=narrative,
     )
 
-    # Markdown is still what goes back on the job row: the assistant renders it
-    # in the thread, and it costs nothing to produce. The chosen format is what
-    # goes into the bucket for the client.
-    markdown = report.render_markdown(document)
-
-    requested = context.payload.get("format")
-    fmt = requested if isinstance(requested, str) else "md"
-    if fmt != "md":
-        context.heartbeat({"stage": "rendering"})
-    payload, content_type, extension = documents.render_document(
-        document,
-        fmt,
-        # Only the client-facing formats have a cover band to put a name on, and
-        # finding the name costs a query.
-        _brand_for(context, context.payload.get("branding")) if fmt != "md" else None,
-    )
-
-    period = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m")
-    path = (
-        f"{context.job['org_id']}/{context.workspace_id}/{period}/"
-        f"{version['dataset_id']}__v{version['version_no']}__report.{extension}"
-    )
-    stored = context.supabase.upload(
-        EXPORTS_BUCKET, path, payload, content_type=content_type, upsert=True
-    )
-
-    return {
-        "report_path": stored.path,
-        "bucket": EXPORTS_BUCKET,
-        "format": extension,
-        # Carried so the download route can name the saved file after the
-        # dataset rather than after its uuid. See downloadName() in
-        # apps/web/src/app/api/exports/route.ts.
-        "dataset_name": dataset_rows[0]["name"] if dataset_rows else "Report",
-        "version_no": version["version_no"],
-        "markdown": markdown,
+    return document, {
         "kpis": kpis,
         "comparison": comparison,
         "narrative": narrative,
         "model_used": model_used,
+        "dataset_name": dataset_rows[0]["name"] if dataset_rows else "Report",
     }
+
+
+def _store_report(
+    context: JobContext,
+    *,
+    document: report.ReportDocument,
+    version: dict[str, Any],
+    formats: list[str],
+    brand: documents.Brand,
+    resolved: branding_tools.ResolvedBranding,
+    recipe_id: str | None = None,
+    recipe_version_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Render the requested formats, store what worked, and record what happened.
+
+    Section 22's failure rule is the shape of this function: one renderer
+    failing marks that format failed and keeps the others. A pack of a PDF and a
+    workbook where the workbook hits a bad chart is still a PDF the client can
+    be sent, and throwing it away to raise cleanly would be a worse outcome
+    dressed as a stricter one.
+    """
+    if any(fmt != "md" for fmt in formats):
+        context.heartbeat({"stage": "rendering"})
+
+    rendered = documents.render_all(document, formats, brand)
+
+    period_folder = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m")
+    entries: list[dict[str, Any]] = []
+    primary: dict[str, Any] | None = None
+
+    for item in rendered:
+        if not item.ok:
+            log.warning("report format %s failed: %s", item.format, item.error)
+            entries.append({"format": item.format, "ok": False, "error": item.error})
+            continue
+
+        path = (
+            f"{context.job['org_id']}/{context.workspace_id}/{period_folder}/"
+            f"{version['dataset_id']}__v{version['version_no']}__report.{item.format}"
+        )
+        stored = context.supabase.upload(
+            EXPORTS_BUCKET, path, item.payload, content_type=item.content_type, upsert=True
+        )
+        entry = {
+            "format": item.format,
+            "ok": True,
+            "path": stored.path,
+            "bytes": len(item.payload or b""),
+        }
+        entries.append(entry)
+        if primary is None:
+            primary = entry
+
+    succeeded = [entry for entry in entries if entry["ok"]]
+    if not succeeded:
+        status = "failed"
+    elif len(succeeded) < len(entries):
+        status = "partial"
+    else:
+        status = "succeeded"
+
+    artifact = context.supabase.rpc(
+        "record_report_artifact",
+        {
+            "p_workspace_id": context.workspace_id,
+            "p_dataset_id": version["dataset_id"],
+            "p_dataset_version_id": version["id"],
+            "p_recipe_id": recipe_id,
+            "p_recipe_version_id": recipe_version_id,
+            "p_job_id": context.job_id,
+            "p_formats": entries,
+            "p_bucket": EXPORTS_BUCKET,
+            "p_status": status,
+            "p_error": "; ".join(
+                str(entry.get("error")) for entry in entries if not entry["ok"]
+            )[:500]
+            or None,
+            "p_branding_snapshot": resolved.snapshot(),
+            "p_title": document.title,
+            "p_period": document.period,
+            "p_created_by": context.requested_by(),
+        },
+    )
+
+    return {
+        "report_artifact_id": (artifact or {}).get("id"),
+        "status": status,
+        "formats": entries,
+        "primary": primary,
+    }
+
+
+def handle_generate_report(context: JobContext) -> dict[str, Any]:
+    version_id = context.job.get("dataset_version_id")
+    if not version_id:
+        raise JobError("this job has no dataset version attached")
+
+    version = _load_version(context, version_id)
+    document, extras = _assemble_report(context, version)
+
+    # Branding is resolved from the organisation rather than sent by the
+    # caller (section 14). The payload override survives for the internal case
+    # and is now the first step of a resolution order rather than the only
+    # source of a name.
+    brand, resolved = _brand_for(
+        context, context.payload.get("branding"), period=document.period
+    )
+
+    # Markdown is still what goes back on the job row: the assistant renders it
+    # in the thread, and it costs nothing to produce. The chosen formats are
+    # what go into the bucket for the client.
+    markdown = report.render_markdown(document, brand)
+
+    formats = _requested_formats(context.payload)
+    stored = _store_report(
+        context,
+        document=document,
+        version=version,
+        formats=formats,
+        brand=brand,
+        resolved=resolved,
+    )
+
+    primary = stored["primary"]
+    if primary is None:
+        raise JobError(
+            "The report could not be rendered in any of the requested formats. "
+            + "; ".join(str(entry.get("error")) for entry in stored["formats"])[:300]
+        )
+
+    return {
+        "report_path": primary["path"],
+        "bucket": EXPORTS_BUCKET,
+        "format": primary["format"],
+        "formats": stored["formats"],
+        "report_artifact_id": stored["report_artifact_id"],
+        "report_status": stored["status"],
+        "branding": resolved.snapshot(),
+        # Carried so the download route can name the saved file after the
+        # dataset rather than after its uuid. See downloadName() in
+        # apps/web/src/app/api/exports/route.ts.
+        "dataset_name": extras["dataset_name"],
+        "version_no": version["version_no"],
+        "markdown": markdown,
+        "kpis": extras["kpis"],
+        "comparison": extras["comparison"],
+        "narrative": extras["narrative"],
+        "model_used": extras["model_used"],
+    }
+
 
 
 def _concat_parquet(first: bytes, second: bytes) -> bytes | None:
