@@ -19,6 +19,7 @@ import {
 } from '@/lib/agent';
 import type { Json } from '@/lib/database.types';
 import { isDownloadable } from '@/lib/history';
+import { useArtefactDownload } from '@/components/artefact-download';
 
 export type { DownloadableJob };
 import {
@@ -362,8 +363,7 @@ export function DownloadButton({
   /** The version the workspace is on now, so an older file can say so. */
   currentVersionNo?: number | null;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, download } = useArtefactDownload(job.id);
 
   const name = artefactName(job);
   if (!name) return null;
@@ -371,25 +371,6 @@ export function DownloadButton({
   const versionNo = exportVersionNo(job);
   const superseded =
     versionNo !== null && currentVersionNo !== null && versionNo < currentVersionNo;
-
-  async function download() {
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/exports?jobId=${job.id}`, { cache: 'no-store' });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? 'Could not prepare the download');
-
-      // The signed URL carries its own Content-Disposition, so navigating to it
-      // saves the file rather than replacing the page. The link is good for a
-      // minute, which is why it is minted on click rather than on render.
-      window.location.href = body.url as string;
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not prepare the download');
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <>

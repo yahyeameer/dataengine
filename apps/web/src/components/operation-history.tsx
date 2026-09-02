@@ -1,6 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { DownloadButton } from '@/components/agent-panel';
 import {
@@ -60,13 +62,29 @@ function toneFor(status: Operation['status']) {
 export function OperationHistory({
   operations,
   currentVersionNo = null,
+  openOperationId = null,
+  datasetId = null,
+  datasetLabel = null,
 }: {
   operations: Operation[];
   /** So a file made before the latest changes can say so, as it does elsewhere. */
   currentVersionNo?: number | null;
+  /**
+   * An operation to open on arrival, from `?op=` in the URL.
+   *
+   * This is what makes a result addressable. A reference in an answer, a
+   * bookmark and a link pasted to a colleague all land on the same opened row,
+   * because the state lives in the URL rather than in this component.
+   */
+  openOperationId?: string | null;
+  /** Narrow to one dataset, from `?dataset=` in the URL. */
+  datasetId?: string | null;
+  /** That dataset's name, so the notice can say which one. */
+  datasetLabel?: string | null;
 }) {
   const [family, setFamily] = useState<OperationFamily | 'all'>('all');
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(openOperationId);
+  const pathname = usePathname();
 
   // Only the families this workspace has actually produced. A filter offering
   // "Reports" to a workspace that has never run one is a control that can only
@@ -76,10 +94,12 @@ export function OperationHistory({
     return FAMILY_ORDER.filter((candidate) => present.has(candidate));
   }, [operations]);
 
-  const shown = useMemo(
-    () => (family === 'all' ? operations : operations.filter((o) => o.family === family)),
-    [operations, family],
-  );
+  const shown = useMemo(() => {
+    const byDataset = datasetId
+      ? operations.filter((operation) => operation.datasetId === datasetId)
+      : operations;
+    return family === 'all' ? byDataset : byDataset.filter((o) => o.family === family);
+  }, [operations, family, datasetId]);
 
   if (operations.length === 0) {
     return (
@@ -92,6 +112,24 @@ export function OperationHistory({
 
   return (
     <div>
+      {/* A filter that arrived from a link has to explain itself. Somebody who
+          clicked a dataset name in an answer did not set this and should not
+          have to work out why the list is short. */}
+      {datasetId && (
+        <p className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-[var(--radius)] border border-accent/25 bg-accent-soft/40 px-3.5 py-2.5 text-[13px]">
+          <span className="text-muted">
+            Showing only what has been run on{' '}
+            <span className="font-medium text-foreground">{datasetLabel ?? 'this dataset'}</span>.
+          </span>
+          <Link
+            href={pathname}
+            className="rounded-[var(--radius-sm)] font-medium text-accent underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)]"
+          >
+            Show everything
+          </Link>
+        </p>
+      )}
+
       <Toolbar
         title="History"
         count={`${shown.length} of ${operations.length}`}
@@ -109,17 +147,29 @@ export function OperationHistory({
         )}
       </Toolbar>
 
-      <ul className="divide-y divide-border-subtle overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
-        {shown.map((operation) => (
-          <OperationRow
-            key={operation.id}
-            operation={operation}
-            open={openId === operation.id}
-            onToggle={() => setOpenId(openId === operation.id ? null : operation.id)}
-            currentVersionNo={currentVersionNo}
-          />
-        ))}
-      </ul>
+      {shown.length === 0 ? (
+        // Reachable from a link: a dataset can exist with nothing yet run on
+        // it, and a family filter can be narrowed to empty. Rendering the list
+        // regardless left an empty bordered box that looked like a fault.
+        <p className="rounded-[var(--radius-lg)] border border-border bg-surface px-4 py-6 text-center text-[13px] text-subtle">
+          {datasetId
+            ? 'Nothing has been run on this dataset yet.'
+            : 'No operations of this type in this workspace.'}
+        </p>
+      ) : (
+        <ul className="divide-y divide-border-subtle overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
+          {shown.map((operation) => (
+            <OperationRow
+              key={operation.id}
+              operation={operation}
+              open={openId === operation.id}
+              arrivedAt={openOperationId === operation.id}
+              onToggle={() => setOpenId(openId === operation.id ? null : operation.id)}
+              currentVersionNo={currentVersionNo}
+            />
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -127,16 +177,30 @@ export function OperationHistory({
 function OperationRow({
   operation,
   open,
+  arrivedAt,
   onToggle,
   currentVersionNo,
 }: {
   operation: Operation;
   open: boolean;
+  /** This is the row the URL asked for, so bring it into view. */
+  arrivedAt: boolean;
   onToggle: () => void;
   currentVersionNo: number | null;
 }) {
   const rows = formatRows(operation.rows);
-  const detailId = `operation-${operation.id}`;
+  const detailId = `operation-${operation.id}-detail`;
+  const anchorId = `operation-${operation.id}`;
+  const anchor = useRef<HTMLLIElement | null>(null);
+
+  // The fragment in the link would do this on its own for a row that is
+  // already in the document, but the row can be behind a filter or below a
+  // long list on a page that has just hydrated. Doing it here means the
+  // reference always lands on the thing it named.
+  useEffect(() => {
+    if (!arrivedAt) return;
+    anchor.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [arrivedAt]);
 
   // The job's own row, not a reconstruction of one. `DownloadButton` names the
   // file from the stored path, so a synthesised result would put an invented
@@ -151,7 +215,13 @@ function OperationRow({
   };
 
   return (
-    <li className="row-hover">
+    <li
+      id={anchorId}
+      ref={anchor}
+      className={`row-hover scroll-mt-24 ${
+        arrivedAt ? 'ring-subject' : ''
+      }`}
+    >
       <div className="flex flex-wrap items-start gap-x-4 gap-y-3 px-4 py-3.5">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">

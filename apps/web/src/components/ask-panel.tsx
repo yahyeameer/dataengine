@@ -1,9 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import { type Ref, useCallback, useEffect, useRef, useState } from 'react';
 
+import { useArtefactDownload } from '@/components/artefact-download';
 import { Mark } from '@/components/product-story';
 import { ErrorText, buttonClass } from '@/components/ui';
+import { type Reference, referenceHref, splitReferences } from '@/lib/references';
 import { createBrowserSupabase } from '@/lib/supabase/client';
 
 /**
@@ -70,9 +73,16 @@ const SUGGESTIONS = [
 export function AskPanel({
   workspaceId,
   initialTurns = [],
+  references = [],
 }: {
   workspaceId: string;
   initialTurns?: Turn[];
+  /**
+   * The names in this workspace an answer might mention -- its files and its
+   * datasets. Resolved on the server so the panel never guesses at what a
+   * name refers to; see `lib/references`.
+   */
+  references?: Reference[];
 }) {
   const [turns, setTurns] = useState<Turn[]>(initialTurns);
   const [question, setQuestion] = useState('');
@@ -193,7 +203,11 @@ export function AskPanel({
           <ol className="space-y-7">
             {turns.map((turn) => (
               <li key={turn.requestId}>
-                <ConversationTurn turn={turn} />
+                <ConversationTurn
+                  turn={turn}
+                  references={references}
+                  workspaceId={workspaceId}
+                />
               </li>
             ))}
           </ol>
@@ -255,7 +269,15 @@ function EmptyConversation({ onPick }: { onPick: (text: string) => void }) {
 }
 
 /** One question and what came back for it. */
-function ConversationTurn({ turn }: { turn: Turn }) {
+function ConversationTurn({
+  turn,
+  references,
+  workspaceId,
+}: {
+  turn: Turn;
+  references: Reference[];
+  workspaceId: string;
+}) {
   return (
     <div>
       {/* The question, marked as the reader's own words. Indented and quieter
@@ -284,7 +306,11 @@ function ConversationTurn({ turn }: { turn: Turn }) {
             </p>
           ) : (
             <div className="rise">
-              <AnswerBody text={turn.answer ?? ''} />
+              <AnswerBody
+                text={turn.answer ?? ''}
+                references={references}
+                workspaceId={workspaceId}
+              />
             </div>
           )}
         </div>
@@ -338,7 +364,15 @@ function Thinking() {
  * a way for a stray asterisk in an account name to change how the answer
  * reads.
  */
-function AnswerBody({ text }: { text: string }) {
+function AnswerBody({
+  text,
+  references,
+  workspaceId,
+}: {
+  text: string;
+  references: Reference[];
+  workspaceId: string;
+}) {
   const blocks = parseBlocks(text);
 
   return (
@@ -364,7 +398,7 @@ function AnswerBody({ text }: { text: string }) {
             >
               {block.items.map((item, itemIndex) => (
                 <li key={itemIndex}>
-                  <Inline text={item} />
+                  <Inline text={item} references={references} workspaceId={workspaceId} />
                 </li>
               ))}
             </List>
@@ -373,7 +407,7 @@ function AnswerBody({ text }: { text: string }) {
 
         return (
           <p key={index}>
-            <Inline text={block.text} />
+            <Inline text={block.text} references={references} workspaceId={workspaceId} />
           </p>
         );
       })}
@@ -467,7 +501,15 @@ function parseBlocks(text: string): Block[] {
  * considers load-bearing. Rendering those two and leaving every other
  * character alone is the whole of it.
  */
-function Inline({ text }: { text: string }) {
+function Inline({
+  text,
+  references,
+  workspaceId,
+}: {
+  text: string;
+  references: Reference[];
+  workspaceId: string;
+}) {
   const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
 
   return (
@@ -490,8 +532,117 @@ function Inline({ text }: { text: string }) {
             </strong>
           );
         }
-        return <span key={index}>{part}</span>;
+        // Only plain prose is searched for names the workspace can resolve.
+        // Code spans are left exactly as written -- a column called
+        // `Transactions_August.xlsx` inside backticks is being quoted, not
+        // linked to.
+        return (
+          <Referenced
+            key={index}
+            text={part}
+            references={references}
+            workspaceId={workspaceId}
+          />
+        );
       })}
+    </>
+  );
+}
+
+/**
+ * Prose, with the names this workspace can resolve made into controls.
+ *
+ * A reference is rendered as a link to the thing itself -- the operation's own
+ * row in the history, or the history filtered to that dataset -- and, when the
+ * operation left a file behind, a download beside it that goes through the
+ * same signed-URL route as every other download in the product.
+ *
+ * Everything else stays text. The matcher only emits a reference when a real
+ * row backs it, so an answer that mentions a file nobody uploaded reads as an
+ * ordinary sentence rather than as a dead link.
+ */
+function Referenced({
+  text,
+  references,
+  workspaceId,
+}: {
+  text: string;
+  references: Reference[];
+  workspaceId: string;
+}) {
+  const segments = splitReferences(text, references);
+
+  return (
+    <>
+      {segments.map((segment, index) =>
+        segment.type === 'text' ? (
+          <span key={index}>{segment.text}</span>
+        ) : (
+          <ReferenceChip
+            key={index}
+            text={segment.text}
+            reference={segment.reference}
+            workspaceId={workspaceId}
+          />
+        ),
+      )}
+    </>
+  );
+}
+
+function ReferenceChip({
+  text,
+  reference,
+  workspaceId,
+}: {
+  text: string;
+  reference: Reference;
+  workspaceId: string;
+}) {
+  return (
+    <span className="inline-flex items-baseline gap-1 whitespace-nowrap">
+      <Link
+        href={referenceHref(reference, workspaceId)}
+        title={
+          reference.type === 'operation'
+            ? `Open this ${reference.operationLabel.toLowerCase()} in the history below`
+            : 'Show everything run on this dataset'
+        }
+        className="rounded-[var(--radius-sm)] border-b border-dotted border-accent/50 font-medium text-accent underline-offset-2 transition-colors hover:border-solid hover:text-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)]"
+      >
+        {text}
+      </Link>
+      {reference.type === 'operation' && reference.downloadable && (
+        <InlineDownload jobId={reference.jobId} />
+      )}
+    </span>
+  );
+}
+
+/**
+ * The download, at the size of a footnote.
+ *
+ * It sits inside a sentence, so it cannot be a button-shaped button; what it
+ * still has to be is a real control with the states one needs -- hover, focus,
+ * a disabled-and-working state while the URL is signed, and somewhere for the
+ * failure to go.
+ */
+function InlineDownload({ jobId }: { jobId: string }) {
+  const { busy, error, download } = useArtefactDownload(jobId);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={download}
+        disabled={busy}
+        title="Download the file this produced"
+        aria-label="Download the file this produced"
+        className="cursor-pointer rounded-[var(--radius-sm)] px-1 text-[11px] font-medium text-subtle transition-colors hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)] disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {busy ? 'preparing…' : 'download'}
+      </button>
+      {error && <span className="text-[11px] text-danger">{error}</span>}
     </>
   );
 }

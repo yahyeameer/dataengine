@@ -26,12 +26,24 @@ import {
 import { OperationHistory } from '@/components/operation-history';
 import { type DownloadableJob, exportVersionNo, isAdvisory } from '@/lib/agent';
 import { HISTORY_KINDS, type HistoryJobRow, isDownloadable, toOperations } from '@/lib/history';
+import { buildReferences } from '@/lib/references';
 import { requireCurrentOrg } from '@/lib/authz';
 import { createServerSupabase } from '@/lib/supabase/server';
 import { formatBytes } from '@/lib/storage';
 
-export default async function WorkspacePage({ params }: PageProps<'/app/workspaces/[id]'>) {
+export default async function WorkspacePage({
+  params,
+  searchParams,
+}: PageProps<'/app/workspaces/[id]'>) {
   const { id } = await params;
+  // `?op=` and `?dataset=` are how a result becomes addressable: a reference
+  // in an answer, a bookmark and a link sent to a colleague all reopen the
+  // same row. Both are read as plain strings and only ever compared against
+  // rows this workspace already returned, so an id from a stranger's URL
+  // matches nothing rather than fetching anything.
+  const query = await searchParams;
+  const openOperationId = typeof query.op === 'string' ? query.op : null;
+  const datasetFilterId = typeof query.dataset === 'string' ? query.dataset : null;
   const { org } = await requireCurrentOrg();
   const supabase = await createServerSupabase();
 
@@ -150,6 +162,11 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
   // The recoverable record. Built here rather than in the component so the
   // component receives plain data and the page keeps the one query.
   const operations = toOperations((historyJobs ?? []) as HistoryJobRow[], datasetNames);
+
+  // The names an answer might mention that this workspace can actually resolve.
+  // Built from the same rows the history renders, so a reference in an answer
+  // and the row it points at can never disagree.
+  const references = buildReferences(operations, datasets ?? []);
   const datasetIds = (datasets ?? []).map((d) => d.id);
 
   // The review queue belongs to a version, not to the workspace, so find the
@@ -541,7 +558,11 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
       {!isNew ? (
         <div className="mb-10">
           <SectionHeading hint="Reads this workspace only">Ask about this data</SectionHeading>
-          <AskPanel workspaceId={workspace.id} initialTurns={turns} />
+          <AskPanel
+            workspaceId={workspace.id}
+            initialTurns={turns}
+            references={references}
+          />
         </div>
       ) : null}
 
@@ -552,11 +573,17 @@ export default async function WorkspacePage({ params }: PageProps<'/app/workspac
           the one they came for. Every row is a job that has always been in the
           database; what was missing was an address for it. */}
       {!isNew ? (
-        <div className="mb-10">
+        <div className="mb-10 scroll-mt-24" id="history">
           <SectionHeading description="Everything this workspace has run, with the file each one produced. Results stay downloadable after you leave the page.">
             Operation history
           </SectionHeading>
-          <OperationHistory operations={operations} currentVersionNo={latestVersionNo} />
+          <OperationHistory
+            operations={operations}
+            currentVersionNo={latestVersionNo}
+            openOperationId={openOperationId}
+            datasetId={datasetFilterId}
+            datasetLabel={datasetFilterId ? (datasetNames.get(datasetFilterId) ?? null) : null}
+          />
         </div>
       ) : null}
 

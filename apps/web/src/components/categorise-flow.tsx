@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, FileSpreadsheet, Loader2, UploadCloud } from 'lucide-react';
 
 import { createBrowserSupabase } from '@/lib/supabase/client';
+import { useArtefactDownload } from '@/components/artefact-download';
 import {
   ACCEPTED_EXTENSIONS,
   MAX_UPLOAD_BYTES,
@@ -500,26 +501,12 @@ function Result({
   status: Extract<Status, { state: 'ready' }>;
   onAnother: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const { summary } = status;
-
-  async function download() {
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/exports?jobId=${status.download.jobId}`, {
-        cache: 'no-store',
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error("We couldn't prepare that download. Please try again.");
-      window.location.href = body.url as string;
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Please try again.');
-    } finally {
-      setBusy(false);
-    }
-  }
+  // The shared fetch, with this screen's own wording over the top of it. The
+  // customer here has just watched a run finish and is not the audience for
+  // whatever the storage layer had to say about it.
+  const { busy, error: failed, download } = useArtefactDownload(status.download.jobId);
+  const error = failed ? "We couldn't prepare that download. Please try again." : null;
 
   return (
     <div className="rise">
