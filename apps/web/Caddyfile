@@ -1,12 +1,35 @@
-# Replace with the domain or subdomain pointed at this VPS. An A record for it
-# must already resolve to the server's IP before the first start, because Caddy
-# proves control of the name over port 80 to get the certificate -- a domain
-# that does not resolve yet fails the challenge and retries with backoff.
+# The fallback front door, used only when Traefik is not the one serving.
 #
-# For a first run without a domain, replace the whole block with `:80 {` and the
-# same reverse_proxy line. Sign-in will not work over plain http (Supabase's
-# auth cookies are Secure), but the app will serve and the agent path can be
-# tested end to end.
-app.example.com {
+# The hostname comes from WEB_DOMAIN, the same variable the Traefik labels in
+# docker-compose.yml read, so the two front doors can never be pointed at
+# different names. Caddy substitutes `{$VAR}` from its own environment, which is
+# why the `proxy` service passes WEB_DOMAIN through.
+#
+# An A record for that name must already resolve to this VPS before the first
+# start: Caddy proves control of the name over port 80 to get its certificate,
+# and a name that does not resolve yet fails the challenge and retries with
+# backoff. `dig +short <name>` on the box is the check.
+#
+# For a first run with no name at all, replace the site line with `:80` and keep
+# the reverse_proxy. The app serves, and sign-in does not: Supabase's auth
+# cookies are `Secure`, so a browser will not store them over plain http on a
+# hostname. Everything up to the sign-in form is testable that way; nothing
+# behind it is.
+{$WEB_DOMAIN} {
 	reverse_proxy web:3100
+
+	# Uploads go through this proxy to the app, which signs them on to Supabase
+	# Storage. Caddy's default request body limit would truncate the 50 MB
+	# workbook the product exists to read, and the failure arrives as a broken
+	# stream rather than as a message anyone can act on.
+	request_body {
+		max_size 60MB
+	}
+
+	encode zstd gzip
+
+	log {
+		output stdout
+		format console
+	}
 }

@@ -127,6 +127,14 @@ the stack and they change, copy them across from that output.
 The local stack runs on ports `544xx` rather than the Supabase defaults, so it can coexist with
 another project's stack on the same machine.
 
+## Showing it to someone
+
+The deployed copy on the VPS is reachable only through an SSH tunnel, which is fine for proving
+the pipeline and useless for handing to a person. [`docs/PUBLIC-DEMO.md`](./docs/PUBLIC-DEMO.md)
+takes it to a public HTTPS URL on a free subdomain, using the Traefik and Let's Encrypt setup that
+is already on the box — and says what to change on the day you buy a real domain.
+[`docs/RUNBOOK.md`](./docs/RUNBOOK.md) is for when something there goes wrong.
+
 ## Tests
 
 ```bash

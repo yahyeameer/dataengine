@@ -58,6 +58,36 @@ services:
       # not the transport.
       HERMES_WEBHOOK_URL: ${HERMES_WEBHOOK_URL:?set in .env}
       HERMES_WEBHOOK_SECRET: ${HERMES_WEBHOOK_SECRET:?set in .env}
+
+      # Per-route HMAC secrets, and the reason this block is not optional.
+      #
+      # Hermes keys the secret to the *route*, not to the gateway, so one shared
+      # HERMES_WEBHOOK_SECRET can only ever be right for one of them. On this
+      # installation it is the job route's, which is why job dispatch worked
+      # while every question came back `401 {"error": "Invalid signature"}`.
+      # `secretForRoute` in lib/hermes.ts resolves these and falls back to the
+      # shared one, so a gateway with a single global secret is unaffected by
+      # leaving them unset.
+      #
+      # These lived only in docker-compose.demo.yml until now. Compose passes an
+      # explicit environment list, so a variable that is in `.env` and not in
+      # this block never reaches the process -- switching the front door from
+      # the demo file to this one would have taken the assistant offline with a
+      # 401 and no other symptom.
+      HERMES_ASK_SECRET: ${HERMES_ASK_SECRET:-}
+      HERMES_JOB_SECRET: ${HERMES_JOB_SECRET:-}
+
+      # Selects /p/<profile>/webhooks/<route>. Empty means the unprefixed path,
+      # which the gateway serves from the `default` profile. Only set this once
+      # the route's own JSON names the same profile -- the adapter fails closed
+      # with a 404 when the two disagree.
+      HERMES_GATEWAY_PROFILE: ${HERMES_GATEWAY_PROFILE:-}
+
+      # The customer-facing half of the Kanban bridge. Unset, /api/agent/jobs
+      # answers 404 for `kanban_report` and every other kind is untouched. The
+      # agent host has its own switch; both are required, on purpose.
+      KANBAN_BRIDGE_ENABLED: ${KANBAN_BRIDGE_ENABLED:-}
+
       HERMES_WEBHOOK_SIGNING: ${HERMES_WEBHOOK_SIGNING:-github}
       HERMES_JOB_ROUTE: ${HERMES_JOB_ROUTE:-dataengine-job}
       HERMES_WORKER_ID: ${HERMES_WORKER_ID:-hermes-agent}
@@ -136,6 +166,13 @@ services:
     profiles: ["caddy"]
     image: caddy:2-alpine
     restart: unless-stopped
+
+    # The Caddyfile reads `{$WEB_DOMAIN}`, so it has to be in this container's
+    # environment and not only in the shell that ran compose. Same variable the
+    # Traefik labels use, so the two front doors cannot disagree about the name.
+    environment:
+      WEB_DOMAIN: ${WEB_DOMAIN:?set your domain in .env}
+
     ports:
       - "80:80"
       - "443:443"
