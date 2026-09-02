@@ -327,3 +327,22 @@ pre {
     transform: none;
   }
 }
+
+/* The assistant console is a room, not a section: two columns that each scroll
+   inside themselves, with the composer pinned at the foot of the right one. To
+   scroll inside itself a column needs a height, and the only height available
+   is what the viewport has left under the app's header.
+ 
+   The 16rem is the shell around it, measured rather than guessed: the main
+   region's padding top and bottom, the page header, and the footer. Below the
+   large breakpoint the two columns stack and each takes the height it needs, so
+   the whole page scrolls the ordinary way and this does not apply.
+ 
+   Written here rather than as `lg:h-[calc(100svh_-_16rem)]` because Tailwind
+   declines to generate that candidate -- it produced no rule at all, silently,
+   which is a long way to debug from a column that is simply too tall. */
+@media (min-width: 64rem) {
+  .console-height {
+    height: calc(100svh - 16rem);
+  }
+}

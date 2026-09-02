@@ -62,8 +62,8 @@ export function NavLink({
 /* --------------------------------------------------------------------------
    Icons.
 
-   Inline and stroked to match the weight of the wordmark. Three of them, drawn
-   here rather than pulled from a dependency, because three icons is not worth a
+   Inline and stroked to match the weight of the wordmark. Four of them, drawn
+   here rather than pulled from a dependency, because four icons is not worth a
    package and a bundle.
    -------------------------------------------------------------------------- */
 
@@ -95,6 +95,26 @@ export function WorkspacesIcon() {
       <rect x="9.25" y="2.75" width="5" height="4.5" rx="1.25" stroke="currentColor" strokeWidth="1.4" />
       <rect x="1.75" y="8.75" width="5" height="4.5" rx="1.25" stroke="currentColor" strokeWidth="1.4" />
       <rect x="9.25" y="8.75" width="5" height="4.5" rx="1.25" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+/** A speech bubble: the one place in the product you type a sentence. */
+export function AssistantIcon() {
+  return (
+    <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" aria-hidden>
+      <path
+        d="M13.75 8.75a4.5 4.5 0 0 1-4.5 4.5H5.6L2.25 15v-2.6a4.5 4.5 0 0 1-.5-2.05v-1.6a4.5 4.5 0 0 1 4.5-4.5h3a4.5 4.5 0 0 1 4.5 4.5Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5.75 8.5h4.5M5.75 10.75h2.75"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

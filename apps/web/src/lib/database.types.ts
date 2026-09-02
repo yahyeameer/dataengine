@@ -633,6 +633,7 @@ export type Database = {
           answered_at: string | null
           asked_by: string | null
           created_at: string
+          deleted_at: string | null
           error: string | null
           id: string
           question: string
@@ -645,6 +646,7 @@ export type Database = {
           answered_at?: string | null
           asked_by?: string | null
           created_at?: string
+          deleted_at?: string | null
           error?: string | null
           id?: string
           question: string
@@ -657,6 +659,7 @@ export type Database = {
           answered_at?: string | null
           asked_by?: string | null
           created_at?: string
+          deleted_at?: string | null
           error?: string | null
           id?: string
           question?: string

@@ -1,16 +1,23 @@
 'use client';
 
 import Link from 'next/link';
-import { type Ref, useCallback, useEffect, useRef, useState } from 'react';
+import { type Ref, useCallback, useEffect, useState } from 'react';
 
 import { useArtefactDownload } from '@/components/artefact-download';
 import { Mark } from '@/components/product-story';
 import { ErrorText, buttonClass } from '@/components/ui';
+import type { Turn } from '@/lib/conversation-history';
 import { type Reference, referenceHref, splitReferences } from '@/lib/references';
 import { createBrowserSupabase } from '@/lib/supabase/client';
 
 /**
- * The conversation with the agent about this workspace.
+ * The parts a conversation with the agent is made of.
+ *
+ * The screen itself is `components/assistant-console`; this file is the round
+ * trip, the turn, the answer renderer and the composer it assembles. They were
+ * one component and one panel inside a workspace page until the history became
+ * a screen of its own, and splitting them is what let the console reuse the
+ * asking without reusing the layout.
  *
  * --- what this is, and what it is not --------------------------------------
  * It is one analyst working inside one client's books, not a general chat. It
@@ -43,14 +50,13 @@ import { createBrowserSupabase } from '@/lib/supabase/client';
  * survives a reload.
  */
 
-export type Turn = {
-  requestId: string;
-  question: string;
-  answer: string | null;
-  status: string;
-  error: string | null;
-  createdAt: string;
-};
+/**
+ * `Turn` itself lives in `lib/conversation-history`, with the grouping and
+ * duplicate-matching that operate on it. This module is `'use client'`, and in
+ * Next 16 every export of a client module is a client reference -- a server
+ * page importing the shape from here would typecheck and throw at request time.
+ */
+export type { Turn };
 
 const POLL_MS = 4000;
 const GIVE_UP_MS = 5 * 60 * 1000;
@@ -63,37 +69,52 @@ const GIVE_UP_MS = 5 * 60 * 1000;
  * of. Nothing here promises an action the product cannot perform: there is no
  * "build me a dashboard" among them, because there is no dashboard.
  */
-const SUGGESTIONS = [
+export const SUGGESTIONS = [
   'What changed in the latest version?',
   'Summarise this dataset in a few lines.',
   'Which transactions look unusual?',
   'What is still waiting for my approval?',
 ];
 
-export function AskPanel({
+/**
+ * The conversation, as state.
+ *
+ * Extracted from the panel it was written inside, so the one implementation of
+ * "ask, then wait for the row to settle" is not tied to a layout. The console
+ * at /app/assistant is the only caller today and owns everything this hook does
+ * not: which client is selected, the history list, and the deleting. The turns
+ * are handed back rather than sealed in so it can -- removing a turn is the
+ * console's business, and a hook that owned the array would have to grow an API
+ * for it.
+ */
+export function useConversation({
   workspaceId,
   initialTurns = [],
-  references = [],
 }: {
-  workspaceId: string;
+  /** Where the next question goes. Null on the console until a client is chosen. */
+  workspaceId: string | null;
   initialTurns?: Turn[];
-  /**
-   * The names in this workspace an answer might mention -- its files and its
-   * datasets. Resolved on the server so the panel never guesses at what a
-   * name refers to; see `lib/references`.
-   */
-  references?: Reference[];
 }) {
   const [turns, setTurns] = useState<Turn[]>(initialTurns);
-  const [question, setQuestion] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // The turn still being thought about, if any. Derived rather than stored:
-  // two sources of truth for "is it working" is how a spinner outlives the
-  // thing it was spinning for.
-  const waitingFor = turns.find((turn) => turn.status === 'pending') ?? null;
+  // Everything still being thought about, not just the first one. The console
+  // can have a question outstanding on two clients at once -- ask about
+  // Hendricks, switch to Aldridge, ask again -- and watching only the earliest
+  // left the second answer to arrive on a page refresh.
+  //
+  // Derived rather than stored: two sources of truth for "is it working" is how
+  // a spinner outlives the thing it was spinning for. Joined into a string so
+  // the effect below re-runs when the *set* changes rather than on every render
+  // that rebuilds an equal array.
+  const pendingIds = turns.filter((turn) => turn.status === 'pending').map((t) => t.requestId);
+  const pendingKey = pendingIds.join(',');
+
+  /** The turn the composer reports on: the newest one still open. */
+  const waitingFor =
+    [...turns].reverse().find((turn) => turn.status === 'pending' && turn.workspaceId === workspaceId) ??
+    null;
 
   const settle = useCallback((requestId: string, patch: Partial<Turn>) => {
     setTurns((current) =>
@@ -102,62 +123,84 @@ export function AskPanel({
   }, []);
 
   useEffect(() => {
-    const requestId = waitingFor?.requestId;
-    if (!requestId) return;
+    const ids = pendingKey ? pendingKey.split(',') : [];
+    if (ids.length === 0) return;
 
     const supabase = createBrowserSupabase();
     let cancelled = false;
 
-    const channel = supabase
-      .channel(`hermes_answers:${requestId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'hermes_answers',
-          filter: `request_id=eq.${requestId}`,
-        },
-        (message) => {
-          if (cancelled) return;
-          const row = message.new as { answer: string | null; status: string; error: string | null };
-          settle(requestId, { answer: row.answer, status: row.status, error: row.error });
-        },
-      )
-      .subscribe();
+    // Realtime's filter takes one value, so one channel per open question. In
+    // practice that is one or two; the poll below is what makes the count not
+    // matter.
+    const channels = ids.map((requestId) =>
+      supabase
+        .channel(`hermes_answers:${requestId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'hermes_answers',
+            filter: `request_id=eq.${requestId}`,
+          },
+          (message) => {
+            if (cancelled) return;
+            const row = message.new as {
+              answer: string | null;
+              status: string;
+              error: string | null;
+            };
+            settle(requestId, { answer: row.answer, status: row.status, error: row.error });
+          },
+        )
+        .subscribe(),
+    );
 
-    // The fallback. Also covers the case where the agent answered between the
-    // POST returning and this subscription being established.
+    // The fallback, in one query for all of them. Also covers the case where
+    // the agent answered between the POST returning and the subscription being
+    // established.
     const poll = setInterval(async () => {
       const { data } = await supabase
         .from('hermes_answers')
         .select('request_id, answer, status, error')
-        .eq('request_id', requestId)
-        .maybeSingle();
-      if (!cancelled && data && data.status !== 'pending') {
-        settle(requestId, { answer: data.answer, status: data.status, error: data.error });
+        .in('request_id', ids);
+
+      if (cancelled || !data) return;
+      for (const row of data) {
+        if (row.status !== 'pending') {
+          settle(row.request_id, { answer: row.answer, status: row.status, error: row.error });
+        }
       }
     }, POLL_MS);
 
     const timeout = setTimeout(() => {
       if (cancelled) return;
-      settle(requestId, {
-        status: 'failed',
-        error: 'No answer after five minutes. The question is saved — try asking again.',
-      });
+      for (const requestId of ids) {
+        settle(requestId, {
+          status: 'failed',
+          error: 'No answer after five minutes. The question is saved — try asking again.',
+        });
+      }
     }, GIVE_UP_MS);
 
     return () => {
       cancelled = true;
       clearInterval(poll);
       clearTimeout(timeout);
-      supabase.removeChannel(channel);
+      for (const channel of channels) supabase.removeChannel(channel);
     };
-  }, [waitingFor?.requestId, settle]);
+  }, [pendingKey, settle]);
 
-  async function ask(text: string) {
+  /**
+   * Ask, optionally somewhere other than the current workspace.
+   *
+   * The override exists for the console's "ask this again" control, which
+   * repeats a question from the history against the client it was originally
+   * asked about rather than whichever one happens to be selected.
+   */
+  async function ask(text: string, target: string | null = workspaceId) {
     const trimmed = text.trim();
-    if (!trimmed || busy) return;
+    if (!trimmed || busy || !target) return;
 
     setBusy(true);
     setError(null);
@@ -165,7 +208,7 @@ export function AskPanel({
       const response = await fetch('/api/hermes/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId, question: trimmed }),
+        body: JSON.stringify({ workspaceId: target, question: trimmed }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? 'Could not reach the agent');
@@ -174,14 +217,15 @@ export function AskPanel({
         ...current,
         {
           requestId: body.requestId as string,
+          workspaceId: target,
           question: trimmed,
           answer: null,
           status: 'pending',
           error: null,
           createdAt: new Date().toISOString(),
+          deletedAt: null,
         },
       ]);
-      setQuestion('');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not reach the agent');
     } finally {
@@ -189,42 +233,7 @@ export function AskPanel({
     }
   }
 
-  return (
-    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
-      <div className="max-h-[34rem] overflow-y-auto px-5 py-5">
-        {turns.length === 0 ? (
-          <EmptyConversation
-            onPick={(text) => {
-              setQuestion(text);
-              composerRef.current?.focus();
-            }}
-          />
-        ) : (
-          <ol className="space-y-7">
-            {turns.map((turn) => (
-              <li key={turn.requestId}>
-                <ConversationTurn
-                  turn={turn}
-                  references={references}
-                  workspaceId={workspaceId}
-                />
-              </li>
-            ))}
-          </ol>
-        )}
-      </div>
-
-      <Composer
-        ref={composerRef}
-        value={question}
-        onChange={setQuestion}
-        onSubmit={() => ask(question)}
-        busy={busy}
-        thinking={Boolean(waitingFor)}
-        error={error}
-      />
-    </section>
-  );
+  return { turns, setTurns, busy, error, setError, waitingFor, ask };
 }
 
 /**
@@ -234,7 +243,7 @@ export function AskPanel({
  * asks the reader to invent the product's capabilities from nothing, and the
  * usual result is one cautious question and no second one.
  */
-function EmptyConversation({ onPick }: { onPick: (text: string) => void }) {
+export function EmptyConversation({ onPick }: { onPick: (text: string) => void }) {
   return (
     <div className="py-4">
       <div className="flex items-center gap-2.5">
@@ -269,7 +278,7 @@ function EmptyConversation({ onPick }: { onPick: (text: string) => void }) {
 }
 
 /** One question and what came back for it. */
-function ConversationTurn({
+export function ConversationTurn({
   turn,
   references,
   workspaceId,
@@ -657,7 +666,7 @@ function InlineDownload({ jobId }: { jobId: string }) {
  * convention every messaging tool has taught, and the hint under the box says
  * so rather than leaving it to be discovered.
  */
-function Composer({
+export function Composer({
   ref,
   value,
   onChange,

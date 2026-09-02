@@ -10,7 +10,14 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import { Search, FileSpreadsheet, Building2, Activity, ArrowRight } from 'lucide-react';
+import {
+  Search,
+  FileSpreadsheet,
+  Building2,
+  Activity,
+  ArrowRight,
+  MessageSquareText,
+} from 'lucide-react';
 
 export function CommandMenu() {
   const [open, setOpen] = useState(false);
@@ -62,6 +69,11 @@ export function CommandMenu() {
             <CommandItem onSelect={() => runCommand(() => router.push('/app/workspaces'))}>
               <Building2 className="h-4 w-4 text-subtle" />
               <span>Workspaces</span>
+              <ArrowRight className="ml-auto h-3.5 w-3.5 opacity-40" />
+            </CommandItem>
+            <CommandItem onSelect={() => runCommand(() => router.push('/app/assistant'))}>
+              <MessageSquareText className="h-4 w-4 text-subtle" />
+              <span>Ask the assistant</span>
               <ArrowRight className="ml-auto h-3.5 w-3.5 opacity-40" />
             </CommandItem>
             <CommandItem onSelect={() => runCommand(() => router.push('/app/audit'))}>

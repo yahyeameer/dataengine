@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 import {
   ActivityIcon,
+  AssistantIcon,
   CategoriseIcon,
   NavLink,
   WorkspacesIcon,
@@ -25,6 +26,11 @@ import { StatusDot, secondaryButtonClass } from '@/components/ui';
 const NAV = [
   { href: '/app', label: 'Categorise', icon: <CategoriseIcon /> },
   { href: '/app/workspaces', label: 'Workspaces', icon: <WorkspacesIcon /> },
+  // Second from the top rather than last. It is the only screen a person opens
+  // without already knowing what they want done, so it is the one they go
+  // looking for -- and it now carries the whole conversation history, which
+  // used to be buried in a section of a client page.
+  { href: '/app/assistant', label: 'Assistant', icon: <AssistantIcon /> },
   { href: '/app/audit', label: 'Activity Log', icon: <ActivityIcon /> },
 ];
 

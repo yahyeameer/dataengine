@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type { ReactNode } from 'react';
 
 /**
@@ -125,6 +126,60 @@ export function SectionHeading({
         {hint && <span className="text-xs text-subtle">{hint}</span>}
       </div>
       {description && <p className="mt-1 text-sm leading-relaxed text-muted">{description}</p>}
+    </div>
+  );
+}
+
+/**
+ * Tabs across the top of a screen that is really three screens.
+ *
+ * Links rather than state, and deliberately so. A tab that lives in React state
+ * cannot be linked to, bookmarked or reopened, and the workspace has to be all
+ * three -- an answer references an operation, and the reference has to be able
+ * to land on the tab holding it. `?tab=` in the URL is what makes that work,
+ * and it costs no client JavaScript.
+ *
+ * `hint` is for a count that changes the reading of the tab: "4 waiting" on a
+ * queue is the reason somebody switches to it. Leave it off when the number is
+ * merely true.
+ */
+export function TabBar({
+  tabs,
+  current,
+}: {
+  tabs: readonly { key: string; href: string; label: string; hint?: ReactNode }[];
+  current: string;
+}) {
+  return (
+    <div className="mb-7 border-b border-border">
+      <nav className="-mb-px flex gap-1 overflow-x-auto" aria-label="Sections of this workspace">
+        {tabs.map((tab) => {
+          const active = tab.key === current;
+          return (
+            <Link
+              key={tab.key}
+              href={tab.href}
+              aria-current={active ? 'page' : undefined}
+              className={`flex shrink-0 items-center gap-2 border-b-2 px-3.5 py-2.5 text-sm transition-colors ${
+                active
+                  ? 'border-accent font-medium text-foreground'
+                  : 'border-transparent text-muted hover:border-border-strong hover:text-foreground'
+              }`}
+            >
+              {tab.label}
+              {tab.hint !== undefined && tab.hint !== null && (
+                <span
+                  className={`tabular rounded-full px-1.5 py-0.5 text-[11px] ${
+                    active ? 'bg-accent-soft text-accent' : 'bg-surface-2 text-subtle'
+                  }`}
+                >
+                  {tab.hint}
+                </span>
+              )}
+            </Link>
+          );
+        })}
+      </nav>
     </div>
   );
 }
