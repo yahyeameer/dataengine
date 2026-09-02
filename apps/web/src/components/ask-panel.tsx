@@ -1,55 +1,102 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { type Ref, useCallback, useEffect, useRef, useState } from 'react';
 
+import { Mark } from '@/components/product-story';
+import { ErrorText, buttonClass } from '@/components/ui';
 import { createBrowserSupabase } from '@/lib/supabase/client';
-import { ErrorText, buttonClass, inputClass } from '@/components/ui';
 
-type Answer = {
-  request_id: string;
+/**
+ * The conversation with the agent about this workspace.
+ *
+ * --- what this is, and what it is not --------------------------------------
+ * It is one analyst working inside one client's books, not a general chat. It
+ * reads this workspace and nothing else, it has no memory of other clients,
+ * and every answer is about data the reader can see on the same screen. The
+ * layout says so: answers are set as documents on the page rather than as
+ * bubbles in a stream, because an accountant reads an answer about their books
+ * the way they read a note from a colleague, not the way they read a text
+ * message.
+ *
+ * --- the round trip ---------------------------------------------------------
+ * Deliberately two halves, because the agent's gateway is fire-and-forget: the
+ * POST records the question and returns an id, and the answer arrives later as
+ * a database row. So this subscribes to that row rather than awaiting a
+ * response -- which is also why a two-minute answer costs nothing here, where
+ * a blocking request would have died at Vercel's 60-second ceiling.
+ *
+ * Realtime with a polling fallback, not because Realtime is unreliable, but
+ * because the failure is silent: a dropped subscription looks exactly like an
+ * agent still thinking, and the person waiting cannot tell the difference.
+ *
+ * --- why the history is server-rendered -------------------------------------
+ * `hermes_answers` has held every question and answer since the feature
+ * shipped, keyed to the workspace, and the panel used to render exactly one of
+ * them: whichever the current React state was holding. Navigate away and a
+ * conversation that was still in the database was gone from the product. The
+ * turns below arrive as props from the page, so a refresh, a new tab and a
+ * visit next week all show the same thread. The question row is written before
+ * the agent is dispatched, so even a question still being thought about
+ * survives a reload.
+ */
+
+export type Turn = {
+  requestId: string;
   question: string;
   answer: string | null;
   status: string;
   error: string | null;
+  createdAt: string;
 };
-
-/**
- * Asking the agent a question about this workspace.
- *
- * The round trip is deliberately in two halves, because the agent's gateway is
- * fire-and-forget: the POST records the question and returns an id, and the
- * answer arrives later as a database row. So this subscribes to that row rather
- * than awaiting a response -- which is also why a two-minute answer costs
- * nothing here, where a blocking request would have died at Vercel's 60-second
- * ceiling.
- *
- * Realtime with a polling fallback, not because Realtime is unreliable, but
- * because the failure is silent: a dropped subscription looks exactly like an
- * agent still thinking, and the person waiting cannot tell the difference. The
- * poll is slow enough to be nearly free and guarantees the answer lands.
- */
 
 const POLL_MS = 4000;
 const GIVE_UP_MS = 5 * 60 * 1000;
 
-export function AskPanel({ workspaceId }: { workspaceId: string }) {
+/**
+ * Openers, and every one of them is just a question.
+ *
+ * The agent takes free text about this workspace, so a suggestion is not a
+ * feature claim -- it is a sentence the reader would otherwise have to think
+ * of. Nothing here promises an action the product cannot perform: there is no
+ * "build me a dashboard" among them, because there is no dashboard.
+ */
+const SUGGESTIONS = [
+  'What changed in the latest version?',
+  'Summarise this dataset in a few lines.',
+  'Which transactions look unusual?',
+  'What is still waiting for my approval?',
+];
+
+export function AskPanel({
+  workspaceId,
+  initialTurns = [],
+}: {
+  workspaceId: string;
+  initialTurns?: Turn[];
+}) {
+  const [turns, setTurns] = useState<Turn[]>(initialTurns);
   const [question, setQuestion] = useState('');
-  const [pending, setPending] = useState<Answer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const requestRef = useRef<string | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // The turn still being thought about, if any. Derived rather than stored:
+  // two sources of truth for "is it working" is how a spinner outlives the
+  // thing it was spinning for.
+  const waitingFor = turns.find((turn) => turn.status === 'pending') ?? null;
+
+  const settle = useCallback((requestId: string, patch: Partial<Turn>) => {
+    setTurns((current) =>
+      current.map((turn) => (turn.requestId === requestId ? { ...turn, ...patch } : turn)),
+    );
+  }, []);
 
   useEffect(() => {
-    const requestId = pending?.request_id;
-    if (!requestId || pending?.status !== 'pending') return;
+    const requestId = waitingFor?.requestId;
+    if (!requestId) return;
 
     const supabase = createBrowserSupabase();
     let cancelled = false;
-
-    function settle(row: Answer) {
-      if (cancelled || requestRef.current !== row.request_id) return;
-      setPending(row);
-    }
 
     const channel = supabase
       .channel(`hermes_answers:${requestId}`)
@@ -61,7 +108,11 @@ export function AskPanel({ workspaceId }: { workspaceId: string }) {
           table: 'hermes_answers',
           filter: `request_id=eq.${requestId}`,
         },
-        (message) => settle(message.new as Answer),
+        (message) => {
+          if (cancelled) return;
+          const row = message.new as { answer: string | null; status: string; error: string | null };
+          settle(requestId, { answer: row.answer, status: row.status, error: row.error });
+        },
       )
       .subscribe();
 
@@ -70,19 +121,20 @@ export function AskPanel({ workspaceId }: { workspaceId: string }) {
     const poll = setInterval(async () => {
       const { data } = await supabase
         .from('hermes_answers')
-        .select('request_id, question, answer, status, error')
+        .select('request_id, answer, status, error')
         .eq('request_id', requestId)
         .maybeSingle();
-      if (data && data.status !== 'pending') settle(data as Answer);
+      if (!cancelled && data && data.status !== 'pending') {
+        settle(requestId, { answer: data.answer, status: data.status, error: data.error });
+      }
     }, POLL_MS);
 
     const timeout = setTimeout(() => {
       if (cancelled) return;
-      setPending((current) =>
-        current && current.status === 'pending'
-          ? { ...current, status: 'failed', error: 'No answer after five minutes.' }
-          : current,
-      );
+      settle(requestId, {
+        status: 'failed',
+        error: 'No answer after five minutes. The question is saved — try asking again.',
+      });
     }, GIVE_UP_MS);
 
     return () => {
@@ -91,11 +143,11 @@ export function AskPanel({ workspaceId }: { workspaceId: string }) {
       clearTimeout(timeout);
       supabase.removeChannel(channel);
     };
-  }, [pending?.request_id, pending?.status]);
+  }, [waitingFor?.requestId, settle]);
 
-  async function ask() {
-    const text = question.trim();
-    if (!text) return;
+  async function ask(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || busy) return;
 
     setBusy(true);
     setError(null);
@@ -103,19 +155,22 @@ export function AskPanel({ workspaceId }: { workspaceId: string }) {
       const response = await fetch('/api/hermes/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId, question: text }),
+        body: JSON.stringify({ workspaceId, question: trimmed }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? 'Could not reach the agent');
 
-      requestRef.current = body.requestId;
-      setPending({
-        request_id: body.requestId,
-        question: text,
-        answer: null,
-        status: 'pending',
-        error: null,
-      });
+      setTurns((current) => [
+        ...current,
+        {
+          requestId: body.requestId as string,
+          question: trimmed,
+          answer: null,
+          status: 'pending',
+          error: null,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
       setQuestion('');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not reach the agent');
@@ -124,73 +179,396 @@ export function AskPanel({ workspaceId }: { workspaceId: string }) {
     }
   }
 
-  const thinking = pending?.status === 'pending';
-
   return (
-    // Glass, deliberately. The design system reserves it for the surfaces that
-    // float above the page rather than sit in it, and this is the one panel on
-    // the workspace that is a conversation rather than a record. It was a bare
-    // bordered box with a 12px input -- the least considered surface on a
-    // screen whose whole premise is that there is an agent behind it.
-    <section className="glass overflow-hidden rounded-[var(--radius-lg)] shadow-[var(--shadow)]">
-      <div className="p-5">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !busy) ask();
+    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
+      <div className="max-h-[34rem] overflow-y-auto px-5 py-5">
+        {turns.length === 0 ? (
+          <EmptyConversation
+            onPick={(text) => {
+              setQuestion(text);
+              composerRef.current?.focus();
             }}
-            disabled={busy}
-            placeholder="e.g. what changed in the latest version?"
-            aria-label="Ask about this workspace"
-            className={inputClass}
           />
-          <button
-            type="button"
-            onClick={ask}
-            disabled={busy || !question.trim()}
-            className={`${buttonClass()} shrink-0`}
-          >
-            {busy ? 'Sending…' : 'Ask'}
-          </button>
-        </div>
-
-        <p className="mt-2.5 text-xs leading-relaxed text-subtle">
-          Answers come from the Hermes agent, which reads this workspace&rsquo;s data directly.
-          They can take a minute or two — you can leave this page and come back.
-        </p>
-
-        <ErrorText>{error}</ErrorText>
+        ) : (
+          <ol className="space-y-7">
+            {turns.map((turn) => (
+              <li key={turn.requestId}>
+                <ConversationTurn turn={turn} />
+              </li>
+            ))}
+          </ol>
+        )}
       </div>
 
-      {pending ? (
-        <div className="border-t border-border bg-surface-2/40 px-5 py-4">
-          <p className="text-[13px] font-medium text-muted">{pending.question}</p>
+      <Composer
+        ref={composerRef}
+        value={question}
+        onChange={setQuestion}
+        onSubmit={() => ask(question)}
+        busy={busy}
+        thinking={Boolean(waitingFor)}
+        error={error}
+      />
+    </section>
+  );
+}
 
-          {thinking ? (
-            // A skeleton rather than the word "Thinking…". The answer is prose
-            // of unknown length arriving up to two minutes later, and a line of
-            // static text gives no sign that anything is still happening.
-            <div className="mt-3 space-y-2" role="status" aria-label="Waiting for an answer">
-              <div className="flex items-center gap-2 text-xs text-subtle">
-                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent pulse-dot" />
-                Working on it
-              </div>
-              <div className="skeleton h-3.5 w-full" />
-              <div className="skeleton h-3.5 w-11/12" />
-              <div className="skeleton h-3.5 w-2/3" />
-            </div>
-          ) : pending.status === 'failed' ? (
-            <p className="mt-2.5 text-sm text-danger">
-              {pending.error ?? 'The agent could not answer.'}
+/**
+ * Before the first question.
+ *
+ * Four openers rather than a blank box. The blank box is not neutral -- it
+ * asks the reader to invent the product's capabilities from nothing, and the
+ * usual result is one cautious question and no second one.
+ */
+function EmptyConversation({ onPick }: { onPick: (text: string) => void }) {
+  return (
+    <div className="py-4">
+      <div className="flex items-center gap-2.5">
+        <span className="text-accent">
+          <Mark className="h-5 w-5" />
+        </span>
+        <p className="text-[15px] font-medium tracking-tight">
+          What would you like to know about this data?
+        </p>
+      </div>
+
+      <p className="mt-2 max-w-prose text-[13px] leading-relaxed text-muted">
+        DataEngine reads this workspace directly — its datasets, versions and the changes you
+        have approved. Answers can take a minute or two, and you can leave the page while it
+        works.
+      </p>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {SUGGESTIONS.map((suggestion) => (
+          <button
+            key={suggestion}
+            type="button"
+            onClick={() => onPick(suggestion)}
+            className="cursor-pointer rounded-[var(--radius)] border border-border bg-surface-2 px-3 py-1.5 text-[13px] text-muted transition-colors hover:border-border-strong hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)]"
+          >
+            {suggestion}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** One question and what came back for it. */
+function ConversationTurn({ turn }: { turn: Turn }) {
+  return (
+    <div>
+      {/* The question, marked as the reader's own words. Indented and quieter
+          than the answer: it is the thing they already know, kept for context
+          rather than for reading. */}
+      <div className="flex justify-end">
+        <p className="max-w-[85%] rounded-[var(--radius-lg)] rounded-br-[var(--radius-sm)] border border-border bg-surface-2 px-3.5 py-2.5 text-[13px] leading-relaxed text-muted">
+          {turn.question}
+        </p>
+      </div>
+
+      <div className="mt-3.5 flex gap-3">
+        <span
+          aria-hidden
+          className={`mt-0.5 shrink-0 ${turn.status === 'pending' ? 'text-accent pulse-dot' : 'text-subtle'}`}
+        >
+          <Mark className="h-[18px] w-[18px]" />
+        </span>
+
+        <div className="min-w-0 flex-1">
+          {turn.status === 'pending' ? (
+            <Thinking />
+          ) : turn.status === 'failed' ? (
+            <p className="rounded-[var(--radius)] border border-danger/30 bg-danger-soft/40 px-3.5 py-2.5 text-[13px] leading-relaxed text-danger">
+              {turn.error ?? 'The agent could not answer that one.'}
             </p>
           ) : (
-            <p className="mt-2.5 whitespace-pre-wrap text-sm leading-relaxed">{pending.answer}</p>
+            <div className="rise">
+              <AnswerBody text={turn.answer ?? ''} />
+            </div>
           )}
         </div>
-      ) : null}
-    </section>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The processing state, in one honest sentence.
+ *
+ * There is exactly one thing the backend tells us here: `hermes_answers.status`
+ * is pending until it is not. There are no stages behind it, so this shows no
+ * stages -- a checklist of invented steps ticking themselves off would be a
+ * more convincing lie than "Loading", not a better interface. The categorise
+ * flow does show its steps, because the worker genuinely reports them.
+ *
+ * What it does show is that something is still happening: a pulsing mark, a
+ * line of copy, and three shimmer bars sized like the prose that will replace
+ * them. All of it stops when the row settles, and all of it is disabled under
+ * `prefers-reduced-motion` by the global rule in globals.css.
+ */
+function Thinking() {
+  return (
+    <div role="status" aria-live="polite">
+      <p className="flex items-center gap-2 text-[13px] font-medium text-accent">
+        Analysing your data
+        <span aria-hidden className="thinking-dots" />
+      </p>
+      <div className="mt-3 space-y-2" aria-hidden>
+        <div className="skeleton h-3.5 w-full" />
+        <div className="skeleton h-3.5 w-11/12" />
+        <div className="skeleton h-3.5 w-2/3" />
+      </div>
+      <span className="sr-only">Waiting for an answer from the agent.</span>
+    </div>
+  );
+}
+
+/**
+ * The answer, with the structure the model actually wrote.
+ *
+ * A deliberately small renderer: paragraphs, bullet and numbered lists, fenced
+ * code blocks and inline code. No HTML is interpreted and nothing is injected
+ * -- every node below is a React element built from plain text, so an answer
+ * quoting a customer's spreadsheet cannot become markup.
+ *
+ * It stops well short of a markdown library on purpose. The agent writes prose
+ * with the occasional list or table of figures; the parts of markdown it does
+ * not write are parts this does not need to support, and every one of them is
+ * a way for a stray asterisk in an account name to change how the answer
+ * reads.
+ */
+function AnswerBody({ text }: { text: string }) {
+  const blocks = parseBlocks(text);
+
+  return (
+    <div className="space-y-3 text-sm leading-relaxed">
+      {blocks.map((block, index) => {
+        if (block.type === 'code') {
+          return (
+            <pre
+              key={index}
+              className="overflow-x-auto rounded-[var(--radius)] border border-border bg-surface-2 px-3.5 py-3 font-mono text-[12px] leading-relaxed text-muted"
+            >
+              <code>{block.lines.join('\n')}</code>
+            </pre>
+          );
+        }
+
+        if (block.type === 'list') {
+          const List = block.ordered ? 'ol' : 'ul';
+          return (
+            <List
+              key={index}
+              className={`space-y-1.5 pl-5 ${block.ordered ? 'list-decimal' : 'list-disc'} marker:text-subtle`}
+            >
+              {block.items.map((item, itemIndex) => (
+                <li key={itemIndex}>
+                  <Inline text={item} />
+                </li>
+              ))}
+            </List>
+          );
+        }
+
+        return (
+          <p key={index}>
+            <Inline text={block.text} />
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+type Block =
+  | { type: 'paragraph'; text: string }
+  | { type: 'list'; ordered: boolean; items: string[] }
+  | { type: 'code'; lines: string[] };
+
+function parseBlocks(text: string): Block[] {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const blocks: Block[] = [];
+
+  let paragraph: string[] = [];
+  let list: { ordered: boolean; items: string[] } | null = null;
+  let code: string[] | null = null;
+
+  const flushParagraph = () => {
+    if (paragraph.length > 0) {
+      blocks.push({ type: 'paragraph', text: paragraph.join(' ') });
+      paragraph = [];
+    }
+  };
+  const flushList = () => {
+    if (list) {
+      blocks.push({ type: 'list', ordered: list.ordered, items: list.items });
+      list = null;
+    }
+  };
+
+  for (const line of lines) {
+    if (line.trimStart().startsWith('```')) {
+      if (code) {
+        blocks.push({ type: 'code', lines: code });
+        code = null;
+      } else {
+        flushParagraph();
+        flushList();
+        code = [];
+      }
+      continue;
+    }
+
+    if (code) {
+      code.push(line);
+      continue;
+    }
+
+    const trimmed = line.trim();
+
+    if (trimmed === '') {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    const bullet = /^[-*•]\s+(.*)$/.exec(trimmed);
+    const numbered = /^(\d+)[.)]\s+(.*)$/.exec(trimmed);
+
+    if (bullet || numbered) {
+      flushParagraph();
+      const ordered = Boolean(numbered);
+      const item = bullet ? bullet[1] : numbered![2];
+      if (list && list.ordered === ordered) {
+        list.items.push(item);
+      } else {
+        flushList();
+        list = { ordered, items: [item] };
+      }
+      continue;
+    }
+
+    flushList();
+    paragraph.push(trimmed);
+  }
+
+  if (code) blocks.push({ type: 'code', lines: code });
+  flushParagraph();
+  flushList();
+
+  return blocks;
+}
+
+/**
+ * Inline emphasis: `code` and **bold**, and nothing else.
+ *
+ * Figures are what the reader is scanning for, and the agent marks the ones it
+ * considers load-bearing. Rendering those two and leaving every other
+ * character alone is the whole of it.
+ */
+function Inline({ text }: { text: string }) {
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
+
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+          return (
+            <code
+              key={index}
+              className="rounded-[var(--radius-sm)] border border-border bg-surface-2 px-1 py-0.5 font-mono text-[12px] text-foreground"
+            >
+              {part.slice(1, -1)}
+            </code>
+          );
+        }
+        if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+          return (
+            <strong key={index} className="font-semibold text-foreground">
+              {part.slice(2, -2)}
+            </strong>
+          );
+        }
+        return <span key={index}>{part}</span>;
+      })}
+    </>
+  );
+}
+
+/**
+ * The composer.
+ *
+ * A textarea rather than an input, because "what changed between version 3 and
+ * version 4, and which of those touched an account over ten thousand pounds"
+ * is a reasonable question and a single-line box hides all but the last few
+ * words of it. Enter sends and Shift+Enter opens a line, which is the
+ * convention every messaging tool has taught, and the hint under the box says
+ * so rather than leaving it to be discovered.
+ */
+function Composer({
+  ref,
+  value,
+  onChange,
+  onSubmit,
+  busy,
+  thinking,
+  error,
+}: {
+  ref: Ref<HTMLTextAreaElement>;
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  busy: boolean;
+  thinking: boolean;
+  error: string | null;
+}) {
+  const empty = value.trim() === '';
+
+  return (
+    <div className="border-t border-border bg-surface-2/40 px-5 py-4">
+      <div className="flex items-end gap-2.5">
+        <textarea
+          ref={ref}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              onSubmit();
+            }
+          }}
+          rows={1}
+          disabled={busy}
+          placeholder="Ask anything about this dataset…"
+          aria-label="Ask about this workspace"
+          className="max-h-40 min-h-[2.5rem] w-full flex-1 resize-y rounded-[var(--radius)] border border-border bg-surface px-3 py-2.5 text-sm leading-relaxed text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-subtle focus:border-accent focus:ring-2 focus:ring-[var(--accent-ring)] disabled:cursor-not-allowed disabled:opacity-45"
+        />
+
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={busy || empty}
+          className={`${buttonClass()} shrink-0`}
+        >
+          {busy ? 'Sending…' : 'Ask'}
+        </button>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <p className="text-[11px] text-subtle">
+          <kbd className="font-mono">Enter</kbd> to send · <kbd className="font-mono">Shift</kbd>
+          {' + '}
+          <kbd className="font-mono">Enter</kbd> for a new line
+        </p>
+        {thinking && (
+          <p className="text-[11px] text-subtle">
+            Working on your last question — you can leave this page.
+          </p>
+        )}
+      </div>
+
+      <ErrorText>{error}</ErrorText>
+    </div>
   );
 }

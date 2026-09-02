@@ -189,6 +189,39 @@ pre {
 }
 .pulse-dot { animation: de-pulse 2.4s ease-in-out infinite; }
 
+/* The agent thinking.
+
+   One pseudo-element holding three static dots, revealed left to right by
+   animating its width. No markup, so there is nothing for a screen reader to
+   read out and nothing to keep in step; the status text beside it says what is
+   happening, which is why the call site marks this aria-hidden.
+
+   It stops on its own when the answer lands, because the element is unmounted
+   with the pending state -- an animation that outlives the work it describes is
+   the failure this replaces. */
+@keyframes de-thinking {
+  from { width: 0; }
+  to   { width: 1.15em; }
+}
+.thinking-dots::after {
+  content: "\B7\B7\B7";
+  display: inline-block;
+  width: 1.15em;
+  overflow: hidden;
+  vertical-align: bottom;
+  white-space: nowrap;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  /* `width` rather than `content`: content is not reliably animatable, and a
+     keyframe that silently does nothing is worse than no animation. Four steps
+     so the dots appear one at a time and the cycle rests on all three.
+
+     Under prefers-reduced-motion the global rule collapses the duration, which
+     leaves the width at its final value -- three static dots, which is the
+     right still frame for this rather than an empty gap. */
+  animation: de-thinking 1.4s steps(4, end) infinite;
+}
+
 /* Arrival, for a panel that appears in response to something the reader did.
    Small enough to be felt rather than watched. */
 @keyframes de-rise {

@@ -448,7 +448,13 @@ function Working({ status, filename }: { status: Status | null; filename: string
 
   return (
     <div className="rise">
-      <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-accent">
+      {/* The same eyebrow shape the result state uses, with a live dot rather
+          than a static one. It was the only one of the three states whose
+          heading did not say, by itself, that anything was still moving --
+          which on a slow run left a page that had genuinely stalled and a page
+          that was working looking identical. */}
+      <p className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-accent">
+        <StatusDot tone={queued ? 'warning' : 'accent'} live />
         {queued ? 'Queued' : 'Working'}
       </p>
       <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-balance">

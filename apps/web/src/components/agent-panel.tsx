@@ -18,6 +18,7 @@ import {
   isWorkerOnline,
 } from '@/lib/agent';
 import type { Json } from '@/lib/database.types';
+import { isDownloadable } from '@/lib/history';
 
 export type { DownloadableJob };
 import {
@@ -310,18 +311,23 @@ function JobStatus({ job }: { job: Job }) {
   return <StatusBadge status={job.status} />;
 }
 
-/** The kinds that leave a file behind in the exports bucket. */
-const DOWNLOADABLE_KINDS = new Set<AgentJobKind>(['generate_report', 'export_dataset']);
-
 /**
  * The filename a finished job produced, or null if it produced nothing.
  *
  * Only the name is taken from the result. The path is read again server-side
  * off the same row when the URL is signed, so nothing the browser holds decides
  * which object gets handed out.
+ *
+ * Whether there is a file at all is `isDownloadable`'s question, not this
+ * function's. It used to keep its own two-kind list here -- `generate_report`
+ * and `export_dataset` -- which is the same list `/api/exports` carried before
+ * d46e35e taught the route that `categorise_statement` produces a workbook.
+ * The route was fixed and this was not, so the button for the product's main
+ * operation rendered as nothing at all: the file existed, the route would have
+ * signed it, and no control was ever drawn to ask.
  */
 function artefactName(job: DownloadableJob): string | null {
-  if (job.status !== 'succeeded' || !DOWNLOADABLE_KINDS.has(job.kind)) return null;
+  if (!isDownloadable(job)) return null;
 
   const result = (job.result ?? {}) as Record<string, unknown>;
   const path =
