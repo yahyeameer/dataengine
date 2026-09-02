@@ -16,6 +16,15 @@ Recipes — capturing an approved session and replaying it against next month's 
 immutably, and a Recipes section in the app where a person can read one, see which of its steps
 will stop for approval, change what it delivers and inspect every run it has had.
 
+A recipe can also run on a cadence: Settings on the recipe page turns on
+"run this automatically every month", and every worker fires due schedules on
+its idle pass through the same `replay_recipe` job a person's click creates.
+It does not fetch the file — there is no connector to a client's system — so a
+schedule that finds no new data says "waiting for this period's file" rather
+than pretending. [`docs/OPERATIONS.md`](./docs/OPERATIONS.md) covers the
+scheduling flow, how to add workers, what happens when one crashes, and the
+measured limits.
+
 The report that comes out the other end carries the firm's own identity. Settings → Organisation →
 Branding stores the business name, accent colour, footer and logo once; every report resolves them
 itself rather than being told what to say.
@@ -151,11 +160,13 @@ npm run test:agent:e2e      # the agent seam over real HTTP, worker included
 cd services/hermes && .venv/Scripts/python -m pytest    # the agent's own tools
 ```
 
-`supabase/tests/isolation_branding_recipes.sql` is the same kind of check for the branding and
-recipe tables, written as SQL and run against a database with the migrations applied:
+`supabase/tests/isolation_branding_recipes.sql` and
+`supabase/tests/scheduling_and_queue.sql` are the same kind of check for the branding, recipe,
+schedule and queue tables, written as SQL and run against a database with the migrations applied:
 
 ```bash
 psql "$(supabase status -o json | jq -r .DB_URL)" -f supabase/tests/isolation_branding_recipes.sql
+psql "$(supabase status -o json | jq -r .DB_URL)" -f supabase/tests/scheduling_and_queue.sql
 ```
 
 It prints one line per rule — that a member cannot change branding, that one firm can neither read

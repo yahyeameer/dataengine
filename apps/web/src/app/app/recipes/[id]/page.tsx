@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { RecipeActions } from '@/components/recipe-actions';
+import { RecipeSchedulePanel, type ScheduleFiring } from '@/components/recipe-schedule';
 import {
   Badge,
   Card,
@@ -18,6 +19,7 @@ import {
 } from '@/components/ui';
 import { requireCurrentOrg } from '@/lib/authz';
 import { parseReportConfig, parseSteps, safetyOf, safetySummary, stepLabel } from '@/lib/recipes';
+import type { RecipeSchedule } from '@/lib/schedules';
 import { createServerSupabase } from '@/lib/supabase/server';
 
 /**
@@ -86,6 +88,25 @@ export default async function RecipeDetailPage({ params }: PageProps<'/app/recip
         .in('recipe_version_id', versionIds)
         .order('started_at', { ascending: false })
         .limit(30)
+    : { data: [] };
+
+  // The schedule and its firings. Read after the runs because the panel shows
+  // both: what is configured, and what it has actually done.
+  const { data: schedule } = await supabase
+    .from('recipe_schedules')
+    .select(
+      'id, enabled, frequency, day_of_month, day_of_week, hour, minute, timezone, next_run_at, last_run_at, last_status, last_error, consecutive_failures',
+    )
+    .eq('recipe_id', recipe.id)
+    .maybeSingle();
+
+  const { data: firings } = schedule
+    ? await supabase
+        .from('recipe_schedule_runs')
+        .select('id, scheduled_for, fired_at, status, detail, job_id')
+        .eq('schedule_id', schedule.id)
+        .order('scheduled_for', { ascending: false })
+        .limit(12)
     : { data: [] };
 
   const reportIds = (runs ?? [])
@@ -248,6 +269,14 @@ export default async function RecipeDetailPage({ params }: PageProps<'/app/recip
               </div>
             </Card>
           </section>
+
+          <RecipeSchedulePanel
+            workspaceId={recipe.workspace_id}
+            recipeId={recipe.id}
+            schedule={(schedule ?? null) as RecipeSchedule | null}
+            firings={(firings ?? []) as ScheduleFiring[]}
+            canEdit={isAdmin}
+          />
 
           <section>
             <SectionHeading description="What actually happened, newest first.">

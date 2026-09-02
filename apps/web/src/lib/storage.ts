@@ -34,8 +34,24 @@ export const EXPORT_CONTENT_TYPES: Record<ExportFormat, string> = {
   csv: 'text/csv',
 };
 
-/** 50 MB, matching the bucket's own limit. */
-export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+/**
+ * 25 MB, and the number is measured rather than chosen.
+ *
+ * The `raw` bucket still accepts 50 MB — a stored file is cheap and the limit
+ * there is about storage. This is the limit on what the agent can *process*,
+ * and it is lower because parsing holds the whole table in memory: on the
+ * current build a CSV costs roughly 21 MB of RSS and 2.8 seconds of CPU per MB
+ * of file, against a worker container capped at 768 MB and 0.35 of a core.
+ * A 50 MB upload is two incidents at once — it exhausts the container's memory,
+ * and its work outlasts the 300-second lease, so a second worker starts parsing
+ * the same file while the first is still on it.
+ *
+ * Refusing here means a person is told before they wait for the upload rather
+ * than after. The worker refuses the same size independently
+ * (HERMES_MAX_PROCESS_BYTES), because this check is a courtesy and that one is
+ * the guarantee.
+ */
+export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 export const ACCEPTED_EXTENSIONS = ['.xlsx', '.xls', '.csv'] as const;
 

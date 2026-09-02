@@ -334,6 +334,67 @@ class Worker:
             stopped, len(run["task_ids"]), run.get("job_id"),
         )
 
+    def run_scheduler(self) -> int:
+        """
+        Fire the recipe schedules that have come due.
+
+        The whole scheduler, and deliberately so. There is no scheduler process,
+        no cron container and no second queue: `claim_due_recipe_schedules` is
+        one transaction that locks a due schedule, records the firing, enqueues
+        the same `replay_recipe` job a person's click enqueues, and advances
+        `next_run_at`. Every worker calls it and they cooperate the same way
+        they cooperate over jobs -- `for update skip locked` on the schedule row,
+        and a unique key on (schedule_id, scheduled_for) underneath that.
+
+        Which means running two workers doubles the job throughput and changes
+        nothing about scheduling, which is the property that makes the worker
+        count a dial rather than a decision.
+
+        Never raises. A scheduler that takes the loop down with it stops the
+        queue as well, and the queue is what the customer is waiting on.
+        """
+        if not self.config.scheduler_enabled:
+            return 0
+
+        try:
+            fired = self.supabase.rpc("claim_due_recipe_schedules", {"p_limit": 10})
+        except SupabaseError as error:
+            log.warning("scheduler pass failed: %s %s", error.status, error.body)
+            return 0
+
+        rows = fired if isinstance(fired, list) else []
+        for row in rows:
+            # One line per firing, carrying the ids that let an operator follow
+            # it into the job, the recipe run and the report.
+            log.info(
+                "schedule %s fired for %s: %s%s",
+                row.get("fired_schedule_id"),
+                row.get("fired_scheduled_for"),
+                row.get("fired_status"),
+                f" (job {row.get('fired_job_id')})" if row.get("fired_job_id") else "",
+            )
+        return len(rows)
+
+    def sweep_stuck_jobs(self) -> int:
+        """
+        End jobs whose worker died on their last attempt.
+
+        A job that reaches its attempt ceiling while `running` is invisible to
+        `claim_agent_job` -- the attempts predicate excludes it -- so without
+        this it stays `running` with an expired lease forever, and reads on
+        screen as work in progress. This is the only thing that ends it.
+        """
+        try:
+            swept = self.supabase.rpc("sweep_stuck_agent_jobs", {"p_limit": 20})
+        except SupabaseError as error:
+            log.warning("stuck-job sweep failed: %s %s", error.status, error.body)
+            return 0
+
+        count = int(swept or 0) if not isinstance(swept, list) else len(swept)
+        if count:
+            log.warning("swept %s abandoned job(s) into a failed state", count)
+        return count
+
     def finish(
         self,
         job_id: str,
@@ -361,9 +422,21 @@ class Worker:
         job_id = job["id"]
         handler = HANDLERS.get(kind)
 
+        # The correlation line. Every id an operator needs to follow this job
+        # from the upload that caused it to the report it produces is on one
+        # line, so `grep <job id>` in journalctl returns the whole story --
+        # including which schedule fired it, when the job was created by one.
         log.info(
-            "job %s: %s for workspace %s (attempt %s)",
-            job_id, kind, job["workspace_id"], job.get("attempts"),
+            "job %s: %s org=%s workspace=%s dataset_version=%s attempt=%s%s",
+            job_id,
+            kind,
+            job.get("org_id"),
+            job["workspace_id"],
+            job.get("dataset_version_id"),
+            job.get("attempts"),
+            f" schedule={(job.get('payload') or {}).get('schedule_id')}"
+            if (job.get("payload") or {}).get("scheduled")
+            else "",
         )
 
         if handler is None:
@@ -458,6 +531,11 @@ class Worker:
         self._last_announce = time.monotonic()
         last_health = time.monotonic()
         last_sweep = time.monotonic()
+        # Both start one interval in the past so a worker that has just come up
+        # after a restart fires anything already due immediately, rather than
+        # after a full interval of a schedule that was overdue while it was down.
+        last_schedule = time.monotonic() - self.config.scheduler_seconds
+        last_stuck = time.monotonic() - self.config.stuck_sweep_seconds
         backoff = self.config.poll_seconds
 
         while not self._stopping.is_set():
@@ -475,6 +553,17 @@ class Worker:
                     # Housekeeping belongs on the idle pass and nowhere else. A
                     # queue with work in it should be spending the host's one
                     # core on that work, not on tidying.
+                    #
+                    # The scheduler is here rather than in a process of its own.
+                    # It enqueues work; the loop below it does the work; and a
+                    # busy worker skipping a scheduler pass costs at most one
+                    # interval of latency on a monthly report.
+                    if now - last_schedule >= self.config.scheduler_seconds:
+                        self.run_scheduler()
+                        last_schedule = now
+                    if now - last_stuck >= self.config.stuck_sweep_seconds:
+                        self.sweep_stuck_jobs()
+                        last_stuck = now
                     if now - last_sweep >= self.config.kanban.sweep_seconds:
                         self.sweep_cancelled_kanban_runs()
                         last_sweep = now

@@ -872,6 +872,199 @@ export type Database = {
           },
         ]
       }
+      recipe_schedules: {
+        Row: {
+          consecutive_failures: number
+          created_at: string
+          created_by: string | null
+          day_of_month: number | null
+          day_of_week: number | null
+          enabled: boolean
+          frequency: Database["public"]["Enums"]["recipe_schedule_frequency"]
+          hour: number
+          id: string
+          last_error: string | null
+          last_job_id: string | null
+          last_recipe_run_id: string | null
+          last_run_at: string | null
+          last_status:
+            | Database["public"]["Enums"]["recipe_schedule_run_status"]
+            | null
+          minute: number
+          next_run_at: string | null
+          organization_id: string
+          recipe_id: string
+          source_kind: string
+          timezone: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          consecutive_failures?: number
+          created_at?: string
+          created_by?: string | null
+          day_of_month?: number | null
+          day_of_week?: number | null
+          enabled?: boolean
+          frequency?: Database["public"]["Enums"]["recipe_schedule_frequency"]
+          hour?: number
+          id?: string
+          last_error?: string | null
+          last_job_id?: string | null
+          last_recipe_run_id?: string | null
+          last_run_at?: string | null
+          last_status?:
+            | Database["public"]["Enums"]["recipe_schedule_run_status"]
+            | null
+          minute?: number
+          next_run_at?: string | null
+          organization_id: string
+          recipe_id: string
+          source_kind?: string
+          timezone?: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          consecutive_failures?: number
+          created_at?: string
+          created_by?: string | null
+          day_of_month?: number | null
+          day_of_week?: number | null
+          enabled?: boolean
+          frequency?: Database["public"]["Enums"]["recipe_schedule_frequency"]
+          hour?: number
+          id?: string
+          last_error?: string | null
+          last_job_id?: string | null
+          last_recipe_run_id?: string | null
+          last_run_at?: string | null
+          last_status?:
+            | Database["public"]["Enums"]["recipe_schedule_run_status"]
+            | null
+          minute?: number
+          next_run_at?: string | null
+          organization_id?: string
+          recipe_id?: string
+          source_kind?: string
+          timezone?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recipe_schedules_recipe_id_fkey"
+            columns: ["recipe_id"]
+            isOneToOne: true
+            referencedRelation: "cleaning_recipes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recipe_schedules_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      recipe_schedule_runs: {
+        Row: {
+          dataset_version_id: string | null
+          detail: string | null
+          fired_at: string
+          id: string
+          job_id: string | null
+          organization_id: string
+          recipe_run_id: string | null
+          recipe_version_id: string | null
+          schedule_id: string
+          scheduled_for: string
+          status: Database["public"]["Enums"]["recipe_schedule_run_status"]
+          workspace_id: string
+        }
+        Insert: {
+          dataset_version_id?: string | null
+          detail?: string | null
+          fired_at?: string
+          id?: string
+          job_id?: string | null
+          organization_id: string
+          recipe_run_id?: string | null
+          recipe_version_id?: string | null
+          schedule_id: string
+          scheduled_for: string
+          status: Database["public"]["Enums"]["recipe_schedule_run_status"]
+          workspace_id: string
+        }
+        Update: {
+          dataset_version_id?: string | null
+          detail?: string | null
+          fired_at?: string
+          id?: string
+          job_id?: string | null
+          organization_id?: string
+          recipe_run_id?: string | null
+          recipe_version_id?: string | null
+          schedule_id?: string
+          scheduled_for?: string
+          status?: Database["public"]["Enums"]["recipe_schedule_run_status"]
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recipe_schedule_runs_schedule_id_fkey"
+            columns: ["schedule_id"]
+            isOneToOne: false
+            referencedRelation: "recipe_schedules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organization_limits: {
+        Row: {
+          created_at: string
+          max_concurrent_jobs: number | null
+          max_jobs_per_month: number | null
+          max_schedules: number | null
+          max_storage_bytes: number | null
+          max_upload_bytes: number | null
+          note: string | null
+          organization_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          max_concurrent_jobs?: number | null
+          max_jobs_per_month?: number | null
+          max_schedules?: number | null
+          max_storage_bytes?: number | null
+          max_upload_bytes?: number | null
+          note?: string | null
+          organization_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          max_concurrent_jobs?: number | null
+          max_jobs_per_month?: number | null
+          max_schedules?: number | null
+          max_storage_bytes?: number | null
+          max_upload_bytes?: number | null
+          note?: string | null
+          organization_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_limits_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_branding: {
         Row: {
           accent_color: string | null
@@ -1375,6 +1568,18 @@ export type Database = {
       }
     }
     Views: {
+      agent_queue_depth: {
+        Row: {
+          expired: number | null
+          failed_last_hour: number | null
+          oldest_wait_seconds: number | null
+          runnable: number | null
+          running: number | null
+          succeeded_last_hour: number | null
+          waiting: number | null
+        }
+        Relationships: []
+      }
       agent_job_telemetry: {
         Row: {
           attempts: number | null
@@ -2255,6 +2460,60 @@ export type Database = {
           updated_by: string | null
         }
       }
+      upsert_recipe_schedule: {
+        Args: {
+          p_day_of_month?: number
+          p_day_of_week?: number
+          p_enabled?: boolean
+          p_frequency?: Database["public"]["Enums"]["recipe_schedule_frequency"]
+          p_hour?: number
+          p_minute?: number
+          p_recipe_id: string
+          p_timezone?: string
+        }
+        Returns: {
+          consecutive_failures: number
+          created_at: string
+          created_by: string | null
+          day_of_month: number | null
+          day_of_week: number | null
+          enabled: boolean
+          frequency: Database["public"]["Enums"]["recipe_schedule_frequency"]
+          hour: number
+          id: string
+          last_error: string | null
+          last_job_id: string | null
+          last_recipe_run_id: string | null
+          last_run_at: string | null
+          last_status:
+            | Database["public"]["Enums"]["recipe_schedule_run_status"]
+            | null
+          minute: number
+          next_run_at: string | null
+          organization_id: string
+          recipe_id: string
+          source_kind: string
+          timezone: string
+          updated_at: string
+          workspace_id: string
+        }
+      }
+      delete_recipe_schedule: {
+        Args: { p_recipe_id: string }
+        Returns: boolean
+      }
+      sweep_stuck_agent_jobs: {
+        Args: { p_limit?: number }
+        Returns: number
+      }
+      org_concurrency_limit: {
+        Args: { p_org_id: string }
+        Returns: number
+      }
+      is_known_timezone: {
+        Args: { p_name: string }
+        Returns: boolean
+      }
       update_recipe_steps: {
         Args: { p_change_note?: string; p_recipe_id: string; p_steps: Json }
         Returns: {
@@ -2347,6 +2606,17 @@ export type Database = {
         | "applied"
         | "superseded"
       report_artifact_status: "succeeded" | "partial" | "failed"
+      recipe_schedule_frequency:
+        | "daily"
+        | "weekly"
+        | "monthly"
+        | "quarterly"
+        | "yearly"
+      recipe_schedule_run_status:
+        | "enqueued"
+        | "skipped_no_source"
+        | "skipped_disabled"
+        | "failed"
       recipe_run_status:
         | "running"
         | "succeeded"

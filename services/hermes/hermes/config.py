@@ -296,7 +296,60 @@ class Config:
     # without any reconnection logic.
     poll_seconds: int = 3
 
+    # --- housekeeping the worker does when the queue is empty ---------------
+    #
+    # Both of these run on the idle pass and nowhere else, for the reason the
+    # Kanban sweep already gives: a queue with work in it should be spending the
+    # host's one core on that work.
+    #
+    # The scheduler is not a separate process. It is one call to
+    # `claim_due_recipe_schedules`, which is safe to run from every worker at
+    # once -- the row lock and the unique key on (schedule_id, scheduled_for)
+    # are what make it safe, not the fact that only one process does it. A
+    # dedicated scheduler container would be a second thing to deploy, a second
+    # thing to monitor and a single point of failure for automation.
+    #
+    # Sixty seconds is the resolution of the whole feature: a schedule set for
+    # 09:00 fires between 09:00 and 09:01. Nobody asks for a monthly report to
+    # the second, and a tighter interval is a query per worker per interval
+    # forever.
+    scheduler_seconds: int = 60
+
+    # Set HERMES_SCHEDULER_ENABLED=false on a worker that should only process
+    # jobs. Off on none of them means schedules never fire; off on some is
+    # perfectly fine, and is how a dedicated "web-facing" worker would be
+    # configured later.
+    scheduler_enabled: bool = True
+
+    # How often to end jobs whose worker died on the last attempt. Slower than
+    # the scheduler because the condition it fixes is rare and the lease has
+    # already had to expire for a job to qualify.
+    stuck_sweep_seconds: int = 300
+
     max_download_bytes: int = 50 * 1024 * 1024
+
+    # The largest file this worker will attempt to parse, as opposed to the
+    # largest it will download.
+    #
+    # Measured rather than chosen. `parse.py` reads a CSV row by row in Python
+    # and holds the whole table in memory, so cost scales with rows, and on this
+    # build it comes out at roughly 21 MB of RSS and 2.8 seconds of CPU per MB of
+    # CSV:
+    #
+    #     8.7 MB / 150k rows -> 194 MB RSS, 24s CPU
+    #    14.6 MB / 250k rows -> 307 MB RSS, 41s CPU
+    #    20.4 MB / 350k rows -> 438 MB RSS, 57s CPU
+    #
+    # The production container is capped at 768 MB and 0.35 of a core
+    # (services/hermes/docker-compose.yml), which makes a 50 MB upload two
+    # separate incidents: it exceeds the memory cap, and at 0.35 CPU its ~140s
+    # of work becomes ~400s of wall clock -- past the 300s lease, so a second
+    # worker claims and parses the same file while the first is still on it.
+    #
+    # 25 MB leaves headroom on both. Raise it only alongside a bigger container,
+    # a higher CPU share and a longer lease, and re-measure rather than
+    # estimating.
+    max_process_bytes: int = 25 * 1024 * 1024
     work_dir: Path = field(default_factory=lambda: Path("/tmp/hermes"))
 
     llm: LLMConfig = field(default_factory=LLMConfig)
@@ -398,7 +451,11 @@ def load_config() -> Config:
         alert_webhook_url=os.environ.get("HERMES_ALERT_WEBHOOK_URL", "").strip(),
         alert_webhook_secret=os.environ.get("HERMES_ALERT_WEBHOOK_SECRET", "").strip(),
         poll_seconds=_int("HERMES_POLL_SECONDS", 3),
+        scheduler_seconds=_int("HERMES_SCHEDULER_SECONDS", 60),
+        scheduler_enabled=_bool("HERMES_SCHEDULER_ENABLED", True),
+        stuck_sweep_seconds=_int("HERMES_STUCK_SWEEP_SECONDS", 300),
         max_download_bytes=_int("HERMES_MAX_DOWNLOAD_BYTES", 50 * 1024 * 1024),
+        max_process_bytes=_int("HERMES_MAX_PROCESS_BYTES", 25 * 1024 * 1024),
         work_dir=work_dir,
         llm=llm,
         kanban=kanban,

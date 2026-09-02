@@ -479,6 +479,24 @@ def handle_parse_workbook(context: JobContext) -> dict[str, Any]:
     if not upload.get("dataset_id"):
         raise JobError("this upload is not attached to a dataset")
 
+    # Refused before the download, not after the parser has already allocated
+    # for it. A file past this size does not fail slowly -- it exhausts the
+    # container's memory, and the kernel kills the worker rather than the job,
+    # taking whatever else that worker was doing with it.
+    #
+    # Non-retryable on purpose: the file will be the same size on the second
+    # attempt and on the third, and three OOM kills is three outages for
+    # everybody sharing the box. See Config.max_process_bytes for the
+    # measurements behind the number.
+    size = upload.get("byte_size") or 0
+    if size > context.config.max_process_bytes:
+        limit_mb = context.config.max_process_bytes / (1024 * 1024)
+        raise JobError(
+            f"This file is {size / (1024 * 1024):.0f} MB, and this agent processes files up "
+            f"to {limit_mb:.0f} MB. Split it by period or by entity and upload the parts.",
+            retryable=False,
+        )
+
     context.heartbeat({"stage": "downloading", "file": upload["original_filename"]})
     data = context.supabase.download(
         RAW_BUCKET, upload["storage_path"], context.config.max_download_bytes
@@ -1192,6 +1210,24 @@ def handle_replay_recipe(context: JobContext) -> dict[str, Any]:
             "p_job_id": context.job_id,
         },
     )
+
+    # A scheduled firing recorded which job it created; this is the other half
+    # of that link, written now rather than at the end so a run that fails still
+    # traces back to the schedule that started it. The schedule screen's "last
+    # run" reads through it.
+    #
+    # Nothing about the execution below changes because a schedule started it.
+    # That is the point: the scheduled path and the manual path are the same
+    # path, and this is the only line that knows the difference.
+    if context.payload.get("scheduled"):
+        try:
+            context.supabase.rpc(
+                "attach_schedule_run",
+                {"p_job_id": context.job_id, "p_recipe_run_id": run["id"]},
+            )
+        except SupabaseError as error:
+            # A broken link is a worse audit trail, not a worse run.
+            log.warning("could not link run %s to its schedule: %s", run["id"], error)
 
     summary_report: dict[str, Any] | None = None
 
