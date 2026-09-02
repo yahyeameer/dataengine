@@ -1,4 +1,9 @@
-import { CategorizeButton, DownloadButton, ExportButton } from '@/components/agent-panel';
+import {
+  CategorizeButton,
+  DownloadButton,
+  ExportButton,
+  ReportButton,
+} from '@/components/agent-panel';
 import { Card, SectionHeading } from '@/components/ui';
 import type { DownloadableJob } from '@/lib/agent';
 
@@ -77,6 +82,28 @@ export function CleanedDataCard({
             </p>
           </div>
         ) : null}
+
+        {/* The document, as opposed to the data. Below the warning above on
+            purpose: a report is a snapshot of one version in exactly the way an
+            export is, and a month-end pack built between approving a change and
+            applying it has the same gap in it. */}
+        <div className="border-t border-border px-5 py-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Client report</p>
+              <p className="mt-1 max-w-prose text-sm leading-relaxed text-muted">
+                Headline figures, what moved since last month, what did not reconcile, and where
+                every number came from — laid out as a document you can send. The export above is
+                the data; this is the covering report.
+              </p>
+            </div>
+            <ReportButton
+              workspaceId={workspaceId}
+              datasetVersionId={version.id}
+              versionNo={version.version_no}
+            />
+          </div>
+        </div>
 
         {currentDownloads.length > 0 ? (
           <div className="border-t border-border bg-surface-2/40 px-5 py-4">

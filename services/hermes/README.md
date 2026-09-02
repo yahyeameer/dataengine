@@ -43,10 +43,32 @@ solving later:
 | `apply_cleaning` | Applies what a human approved, into a **new** version — nothing is ever overwritten |
 | `query_dataset` | A question in English or a structured query → validated SQL → an answer with the source rows behind it |
 | `reconcile_sources` | Two versions matched on a key: matched, matched-with-a-difference, unmatched either side |
-| `generate_report` | A month-end report in the `exports` bucket |
+| `generate_report` | A month-end report in the `exports` bucket, as Markdown, PDF, Word or Excel |
 
 `parse_workbook` chains the next two itself, so "Analyse" in the dashboard is
 one click and three visible stages.
+
+### Report formats
+
+`generate_report` takes `format` on the payload — `md` (the default), `pdf`,
+`docx` or `xlsx` — and `branding`, which is `{name, accent, footer}`. The accent
+is one hex colour; the deep tone, the tint behind a figure card and whether the
+band carries white or near-black text are derived from it, so a client's
+document takes one setting rather than a palette. An unusable value falls back
+to the product's own blue rather than failing the job.
+
+What the report *says* is built once, as typed blocks, in `tools/report.py`.
+The four renderings live beside it: Markdown there, and PDF, Word and Excel in
+`tools/documents.py`. Adding a figure to the report means adding it in one
+place, and the reconciliation warning cannot go missing from one format and not
+another.
+
+Markdown stays the default because it is the copy that goes into the working
+papers, where editable and diffable beat beautiful. The other three are the
+copy that goes to the client: PDF to email, Word for the partner who edits a
+sentence before it goes, Excel for the client's own finance person — which is
+why every figure that can be a number in that workbook is written as a number
+and not as formatted text.
 
 ## Where the AI is, and where it is not
 

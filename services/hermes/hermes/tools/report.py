@@ -1,15 +1,23 @@
 """
 Report generation.
 
-The output is Markdown rather than PDF. An accountant's month-end pack goes
-into an email, a working paper or a client portal, and Markdown survives all
-three; PDF generation would add a rendering dependency to a VPS in exchange for
-a format nobody can edit.
+What a report *says* is decided here, once, as a `ReportDocument` of typed
+blocks. How it looks is decided four times: `render_markdown` below, and PDF,
+Word and Excel in `documents.py`.
+
+Markdown remains the default, and the reasoning that made it the only format
+still holds for the copy that goes into the working papers: it survives an
+email, a client portal and a `git diff`, and anybody can edit it. What that
+reasoning missed is the other reader. A month-end pack sent *to the client* is
+a document with the firm's name on it, and handing that reader a .md file asks
+them to care about our tooling. The three binary renderings exist for them, and
+for the sales case that turns on producing a client-facing report in seconds
+that a firm currently builds by hand.
 
 Every figure in a report comes from `analyze`, and every one of them carries
 the row count behind it. Section 7's promise is that any displayed number can
 be traced, so a report that states a total without saying how many rows it
-covers is already outside the design.
+covers is already outside the design -- in any of the four formats.
 """
 
 from __future__ import annotations
@@ -18,6 +26,7 @@ import csv
 import datetime as dt
 import io
 import re
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -88,7 +97,115 @@ def _bar_chart(rows: list[tuple[str, float]], width: int = 32) -> str:
     return "\n".join(lines) + "\n"
 
 
-def build_markdown_report(
+# ---------------------------------------------------------------------------
+# The document model
+#
+# One report, four renderings. The assembly below decides *what* a month-end
+# report says -- which figures, in which order, with which caveats -- and says
+# it once, in blocks that carry meaning rather than formatting. Markdown,
+# PDF, Word and Excel are then four functions that each know how to draw a
+# heading, a table and a bar, and nothing at all about which tables a report
+# contains.
+#
+# The alternative -- a build_pdf_report() beside build_markdown_report() --
+# was rejected on sight. The reconciliation warning at the top is the clearest
+# reason: it is a compliance behaviour, not a decoration, and a second copy of
+# the assembly is a second place for it to be forgotten.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Figure:
+    """
+    One headline number.
+
+    `note` is the qualifier that belongs *under* the value rather than beside
+    it -- "8 credit rows" under a total. Markdown has nowhere to put that, so
+    it renders as its own row; the three visual formats set it in small type
+    inside the card.
+    """
+
+    label: str
+    value: str
+    note: tuple[str, str] | None = None
+
+
+@dataclass(frozen=True)
+class Heading:
+    text: str
+
+
+@dataclass(frozen=True)
+class Prose:
+    text: str
+
+
+@dataclass(frozen=True)
+class Callout:
+    """
+    Something the reader must see before the figures, not after them.
+
+    `tone` is one of `danger`, `warning`, `info` -- the same three words the
+    dashboard uses, so a report and the screen it came from never disagree
+    about how serious something is.
+    """
+
+    title: str
+    lines: list[str]
+    tone: str = "danger"
+
+
+@dataclass(frozen=True)
+class KeyFigures:
+    figures: list[Figure]
+
+
+@dataclass(frozen=True)
+class Table:
+    """
+    `numeric` names the columns that hold money or counts, by index.
+
+    Rendering does not care what a column means, but it does care whether the
+    digits line up: a total right-aligned under a total is readable, and the
+    same column left-aligned is not. The builder knows which is which, so it
+    says so here rather than leaving each renderer to guess from the content.
+    """
+
+    headers: list[str]
+    rows: list[list[str]]
+    numeric: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class Bars:
+    """
+    A ranked comparison. `labels` holds the already-formatted value beside each
+    bar, parallel to `items`, because the formatting rules for money live in
+    one place and it is not the renderer.
+    """
+
+    items: list[tuple[str, float]]
+    labels: list[str]
+
+
+@dataclass(frozen=True)
+class Footnote:
+    text: str
+
+
+Block = Heading | Prose | Callout | KeyFigures | Table | Bars | Footnote
+
+
+@dataclass(frozen=True)
+class ReportDocument:
+    title: str
+    workspace_name: str
+    version_no: int
+    generated_at: dt.datetime
+    blocks: list[Block]
+
+
+def build_report_document(
     *,
     workspace_name: str,
     dataset_name: str,
@@ -100,85 +217,100 @@ def build_markdown_report(
     provenance: dict[str, Any] | None = None,
     narrative: str | None = None,
     generated_at: dt.datetime | None = None,
-) -> str:
+) -> ReportDocument:
+    """
+    Everything a month-end report says, in the order it says it.
+    """
     generated = generated_at or dt.datetime.now(dt.timezone.utc)
-    parts: list[str] = []
-
-    parts.append(f"# {dataset_name}\n")
-    parts.append(
-        f"**{workspace_name}** · dataset version {version_no} · "
-        f"generated {generated.strftime('%d %B %Y %H:%M UTC')}\n"
-    )
+    blocks: list[Block] = []
 
     # The caveat goes at the top, not in a footnote. A report whose totals do
     # not reconcile against the source file must say so before anyone reads the
     # totals -- section 5.3's blocking behaviour, carried into the document.
     totals = profile_signals.get("declared_totals", {})
     if totals.get("checked") and totals.get("all_reconcile") is False:
-        failing = [check for check in totals.get("checks", []) if not check["reconciles"]]
-        parts.append("\n> **These figures do not reconcile to the source file.**\n>")
-        for check in failing:
-            parts.append(
-                f"> {check['column']}: computed {_money(check['computed'])} against a declared "
-                f"{_money(check['declared'])} — a difference of {_money(check['difference'])}.\n>"
-            )
-        parts.append("> Resolve this before the figures are relied on.\n")
+        lines = [
+            f"{check['column']}: computed {_money(check['computed'])} against a declared "
+            f"{_money(check['declared'])} — a difference of {_money(check['difference'])}."
+            for check in totals.get("checks", [])
+            if not check["reconciles"]
+        ]
+        lines.append("Resolve this before the figures are relied on.")
+        blocks.append(
+            Callout("These figures do not reconcile to the source file.", lines, tone="danger")
+        )
 
     if narrative:
-        parts.append(f"\n## Summary\n\n{narrative}\n")
+        blocks.append(Heading("Summary"))
+        blocks.append(Prose(narrative))
 
-    parts.append("\n## Headline figures\n")
-    rows: list[list[str]] = [["Rows", f"{kpis.get('row_count', 0):,}"]]
+    blocks.append(Heading("Headline figures"))
+    figures: list[Figure] = [Figure("Rows", f"{kpis.get('row_count', 0):,}")]
 
     period = kpis.get("period") or {}
     if period.get("earliest"):
-        rows.append(["Period", f"{period['earliest']} to {period['latest']}"])
+        figures.append(Figure("Period", f"{period['earliest']} to {period['latest']}"))
 
     for key, value in kpis.items():
         if not isinstance(value, dict) or "total" not in value:
             continue
-        rows.append([_label(key), _money(value["total"])])
-        if value.get("negative_rows"):
-            rows.append(["— of which credits", f"{value['negative_rows']} row(s)"])
+        note = (
+            ("— of which credits", f"{value['negative_rows']} row(s)")
+            if value.get("negative_rows")
+            else None
+        )
+        figures.append(Figure(_label(key), _money(value["total"]), note))
 
-    parts.append(_table(["Measure", "Value"], rows))
+    blocks.append(KeyFigures(figures))
 
     monthly = kpis.get("monthly") or {}
     series = monthly.get("series") or []
     if len(series) > 1:
-        parts.append(f"\n## {_label(monthly['metric'])} by month\n")
-        parts.append(_bar_chart([(item["month"], item["total"]) for item in series]))
+        blocks.append(Heading(f"{_label(monthly['metric'])} by month"))
+        blocks.append(
+            Bars(
+                [(item["month"], item["total"]) for item in series],
+                [_money(item["total"]) for item in series],
+            )
+        )
 
     for key, value in kpis.items():
         if not key.startswith("top_by_") or not isinstance(value, list):
             continue
         dimension = key.removeprefix("top_by_").replace("_", " ")
-        parts.append(f"\n## By {dimension}\n")
-        parts.append(
-            _table(
+        blocks.append(Heading(f"By {dimension}"))
+        blocks.append(
+            Table(
                 [_label(dimension), "Total", "Rows"],
                 [
                     [str(item["label"]), _money(item["total"]), str(item["rows"])]
                     for item in value
                 ],
+                numeric=(1, 2),
             )
         )
-        parts.append("\n")
-        parts.append(_bar_chart([(str(item["label"])[:28], item["total"]) for item in value[:8]]))
+        blocks.append(
+            Bars(
+                [(str(item["label"])[:28], item["total"]) for item in value[:8]],
+                [_money(item["total"]) for item in value[:8]],
+            )
+        )
 
     if comparison:
-        parts.append("\n## Period comparison\n")
+        blocks.append(Heading("Period comparison"))
         change = comparison.get("percent_change")
         change_text = f"{change:+.1f}%" if change is not None else "n/a"
-        parts.append(
-            f"{comparison['metric']}: {_money(comparison['total_a'])} → "
-            f"{_money(comparison['total_b'])} "
-            f"({_money(comparison['difference'])}, {change_text})\n"
+        blocks.append(
+            Prose(
+                f"{comparison['metric']}: {_money(comparison['total_a'])} → "
+                f"{_money(comparison['total_b'])} "
+                f"({_money(comparison['difference'])}, {change_text})"
+            )
         )
         if comparison.get("drivers"):
-            parts.append("\nLargest movements:\n")
-            parts.append(
-                _table(
+            blocks.append(Prose("Largest movements:"))
+            blocks.append(
+                Table(
                     ["", "Previous", "Current", "Change"],
                     [
                         [
@@ -189,16 +321,15 @@ def build_markdown_report(
                         ]
                         for driver in comparison["drivers"]
                     ],
+                    numeric=(1, 2, 3),
                 )
             )
 
-    parts.append("\n## Data quality\n")
+    blocks.append(Heading("Data quality"))
     quality_rows: list[list[str]] = []
 
     duplicates = profile_signals.get("exact_duplicates", {})
-    quality_rows.append(
-        ["Exact duplicate rows", str(duplicates.get("duplicate_rows", 0))]
-    )
+    quality_rows.append(["Exact duplicate rows", str(duplicates.get("duplicate_rows", 0))])
 
     variants = profile_signals.get("entity_variants", {}).get("columns", [])
     quality_rows.append(
@@ -221,22 +352,14 @@ def build_markdown_report(
 
     if proposals_summary:
         quality_rows.append(
-            [
-                "Changes applied automatically",
-                str(proposals_summary.get("auto", 0)),
-            ]
+            ["Changes applied automatically", str(proposals_summary.get("auto", 0))]
         )
+        quality_rows.append(["Changes needing review", str(proposals_summary.get("review", 0))])
         quality_rows.append(
-            ["Changes needing review", str(proposals_summary.get("review", 0))]
-        )
-        quality_rows.append(
-            [
-                "Value under review",
-                _money(proposals_summary.get("review_materiality_gbp")),
-            ]
+            ["Value under review", _money(proposals_summary.get("review_materiality_gbp"))]
         )
 
-    parts.append(_table(["Check", "Result"], quality_rows))
+    blocks.append(Table(["Check", "Result"], quality_rows, numeric=(1,)))
 
     # Where these figures came from and what was done to them on the way.
     #
@@ -246,7 +369,7 @@ def build_markdown_report(
     # workbook, the version chain, the changes a person approved -- and the
     # report simply never asked for any of it.
     if provenance:
-        parts.append("\n## Provenance\n")
+        blocks.append(Heading("Provenance"))
         trail: list[list[str]] = []
 
         if provenance.get("source_filename"):
@@ -261,16 +384,18 @@ def build_markdown_report(
         if provenance.get("row_count") is not None:
             trail.append(["Rows in this version", f"{provenance['row_count']:,}"])
 
-        parts.append(_table(["", ""], trail))
+        blocks.append(Table(["", ""], trail))
 
         applied = provenance.get("applied_changes") or []
         if applied:
-            parts.append(
-                f"\n{len(applied)} change(s) were approved by a person and applied to produce "
-                f"this version:\n"
+            blocks.append(
+                Prose(
+                    f"{len(applied)} change(s) were approved by a person and applied to produce "
+                    f"this version:"
+                )
             )
-            parts.append(
-                _table(
+            blocks.append(
+                Table(
                     ["Change", "Rows", "Decided"],
                     [
                         [
@@ -280,10 +405,11 @@ def build_markdown_report(
                         ]
                         for change in applied
                     ],
+                    numeric=(1,),
                 )
             )
         elif provenance.get("parent_version_no") is not None:
-            parts.append("\nNo changes were applied to produce this version.\n")
+            blocks.append(Prose("No changes were applied to produce this version."))
 
     # The claim is deliberately narrower than it was. It used to read "every
     # figure above is computed from the stored dataset" -- which is true of the
@@ -294,15 +420,107 @@ def build_markdown_report(
     # goes wrong.
     claim = "Every figure in the tables above is computed from the stored dataset, not estimated."
     if narrative:
-        claim += " The summary is written by a language model from those same figures and is not independently checked."
+        claim += (
+            " The summary is written by a language model from those same figures and is not "
+            "independently checked."
+        )
 
-    parts.append(
-        "\n---\n\n_Produced by the Hermes agent from dataset version "
-        f"{version_no}. {claim} "
-        "A copilot, not an autonomous accountant — review before use._\n"
+    blocks.append(
+        Footnote(
+            f"Produced by the Hermes agent from dataset version {version_no}. {claim} "
+            "A copilot, not an autonomous accountant — review before use."
+        )
     )
 
+    return ReportDocument(
+        title=dataset_name,
+        workspace_name=workspace_name,
+        version_no=version_no,
+        generated_at=generated,
+        blocks=blocks,
+    )
+
+
+def render_markdown(document: ReportDocument) -> str:
+    """
+    The plain-text rendering, and still the default one.
+
+    An accountant's month-end pack goes into an email, a working paper or a
+    client portal, and Markdown survives all three. The three binary formats in
+    `documents.py` exist for the copy that goes *to the client*, where the
+    layout is part of the product; this one is for the copy that goes into the
+    file, where being editable and diffable matters more than being beautiful.
+    """
+    parts: list[str] = [f"# {document.title}\n"]
+    parts.append(
+        f"**{document.workspace_name}** · dataset version {document.version_no} · "
+        f"generated {document.generated_at.strftime('%d %B %Y %H:%M UTC')}\n"
+    )
+
+    for block in document.blocks:
+        if isinstance(block, Heading):
+            parts.append(f"\n## {block.text}\n")
+
+        elif isinstance(block, Prose):
+            parts.append(f"{block.text}\n")
+
+        elif isinstance(block, Callout):
+            # One blockquote, joined here rather than appended line by line: a
+            # trailing `>` after the last line renders as an empty quoted
+            # paragraph in every viewer that takes Markdown seriously.
+            quoted = [f"> **{block.title}**", ">"]
+            for line in block.lines:
+                quoted.extend([f"> {line}", ">"])
+            parts.append("\n" + "\n".join(quoted[:-1]) + "\n")
+
+        elif isinstance(block, KeyFigures):
+            rows: list[list[str]] = []
+            for figure in block.figures:
+                rows.append([figure.label, figure.value])
+                if figure.note:
+                    rows.append([figure.note[0], figure.note[1]])
+            parts.append(_table(["Measure", "Value"], rows))
+
+        elif isinstance(block, Table):
+            parts.append(_table(block.headers, block.rows))
+
+        elif isinstance(block, Bars):
+            parts.append(_bar_chart(block.items))
+
+        elif isinstance(block, Footnote):
+            parts.append(f"\n---\n\n_{block.text}_\n")
+
     return "\n".join(parts)
+
+
+def build_markdown_report(
+    *,
+    workspace_name: str,
+    dataset_name: str,
+    version_no: int,
+    kpis: dict[str, Any],
+    profile_signals: dict[str, Any],
+    proposals_summary: dict[str, Any] | None = None,
+    comparison: dict[str, Any] | None = None,
+    provenance: dict[str, Any] | None = None,
+    narrative: str | None = None,
+    generated_at: dt.datetime | None = None,
+) -> str:
+    """Kept as the one-call entry point every caller already uses."""
+    return render_markdown(
+        build_report_document(
+            workspace_name=workspace_name,
+            dataset_name=dataset_name,
+            version_no=version_no,
+            kpis=kpis,
+            profile_signals=profile_signals,
+            proposals_summary=proposals_summary,
+            comparison=comparison,
+            provenance=provenance,
+            narrative=narrative,
+            generated_at=generated_at,
+        )
+    )
 
 
 def rows_to_csv(rows: list[dict[str, Any]]) -> bytes:
@@ -378,4 +596,20 @@ def rows_to_xlsx(rows: list[dict[str, Any]], sheet_name: str = "Data") -> bytes:
     return buffer.getvalue()
 
 
-__all__ = ["build_markdown_report", "rows_to_csv", "rows_to_xlsx"]
+__all__ = [
+    "Bars",
+    "Block",
+    "Callout",
+    "Figure",
+    "Footnote",
+    "Heading",
+    "KeyFigures",
+    "Prose",
+    "ReportDocument",
+    "Table",
+    "build_markdown_report",
+    "build_report_document",
+    "render_markdown",
+    "rows_to_csv",
+    "rows_to_xlsx",
+]

@@ -347,12 +347,22 @@ function artefactName(job: DownloadableJob): string | null {
  * A workspace that has exported both formats renders two identical buttons
  * otherwise, and the only way to tell them apart is to hover for the tooltip.
  */
-function formatLabel(filename: string): string {
+const FORMAT_NAMES: Record<string, string> = {
+  xlsx: 'Excel',
+  csv: 'CSV',
+  pdf: 'PDF',
+  docx: 'Word',
+  md: 'Markdown',
+};
+
+function formatLabel(filename: string, kind: string): string {
   const extension = filename.slice(filename.lastIndexOf('.') + 1).toLowerCase();
-  if (extension === 'xlsx') return 'Excel';
-  if (extension === 'csv') return 'CSV';
-  if (extension === 'md') return 'report';
-  return extension.toUpperCase();
+  const name = FORMAT_NAMES[extension] ?? extension.toUpperCase();
+  // The kind is part of the label because a report and a data export can now
+  // arrive in the same format. Two buttons reading "Download Excel", one
+  // holding a cleaned ledger and the other a month-end pack, is the same
+  // failure the version suffix below was added to fix.
+  return kind === 'generate_report' ? `${name} report` : name;
 }
 
 export function DownloadButton({
@@ -390,7 +400,7 @@ export function DownloadButton({
           : // The version is part of the label, not a tooltip. Two buttons
             // reading "Download Excel" are indistinguishable at the moment
             // somebody clicks one, which is the only moment that matters.
-            `Download ${formatLabel(name)}${versionNo !== null ? ` · v${versionNo}` : ''}`}
+            `Download ${formatLabel(name, job.kind)}${versionNo !== null ? ` · v${versionNo}` : ''}`}
       </button>
       {error ? <span className="text-xs text-danger">{error}</span> : null}
     </>
@@ -459,6 +469,85 @@ export function ExportButton({
           className={secondaryButtonClass('sm')}
         >
           {busy === format ? 'Starting…' : format === 'xlsx' ? 'Excel' : 'CSV'}
+        </button>
+      ))}
+      {error ? <span className="text-xs text-danger">{error}</span> : null}
+    </span>
+  );
+}
+
+/**
+ * Ask the agent to write the month-end report.
+ *
+ * Separate control from `ExportButton` and separate wording, because they
+ * answer different questions. An export is the data: the cleaned ledger, for
+ * somebody who is going to work on it. A report is the document about the
+ * data -- headline figures, what moved, what did not reconcile, and where the
+ * numbers came from -- for somebody who is going to read it and then file it.
+ *
+ * Four formats because the reader differs again. PDF is what gets emailed.
+ * Word is what a partner edits before sending. Excel is what the client's own
+ * finance person checks a figure in. Markdown is the working-paper copy, and
+ * is still the default anywhere no format is named.
+ */
+export function ReportButton({
+  workspaceId,
+  datasetVersionId,
+  versionNo = null,
+}: {
+  workspaceId: string;
+  datasetVersionId: string;
+  versionNo?: number | null;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function requestReport(format: 'pdf' | 'docx' | 'xlsx' | 'md') {
+    setBusy(format);
+    setError(null);
+    try {
+      const response = await fetch('/api/agent/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId,
+          kind: 'generate_report',
+          datasetVersionId,
+          payload: { format },
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? 'Could not start the report');
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not start the report');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <span className="text-[13px] font-medium text-muted">
+        Report on {versionNo !== null ? `v${versionNo}` : 'this version'} as
+      </span>
+      {(
+        [
+          ['pdf', 'PDF'],
+          ['docx', 'Word'],
+          ['xlsx', 'Excel'],
+          ['md', 'Markdown'],
+        ] as const
+      ).map(([format, label]) => (
+        <button
+          key={format}
+          type="button"
+          onClick={() => requestReport(format)}
+          disabled={busy !== null}
+          className={secondaryButtonClass('sm')}
+        >
+          {busy === format ? 'Starting…' : label}
         </button>
       ))}
       {error ? <span className="text-xs text-danger">{error}</span> : null}

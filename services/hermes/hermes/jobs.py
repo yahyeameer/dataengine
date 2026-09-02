@@ -33,7 +33,7 @@ from typing import Any, Callable
 from .job_types import JobContext, JobDeferred, JobError
 from .llm.redact import build_context
 from .supabase import SupabaseError
-from .tools import analyze, autopilot, govuk, hmrc, report
+from .tools import analyze, autopilot, documents, govuk, hmrc, report
 from .tools.clean import ADVISORY_OPERATIONS, apply_operations, column_hash, to_parquet
 from .tools.parse import ParsedTable, SheetInterpretation, SkippedRow, parse_workbook
 from .tools.profile import Profile, profile_table
@@ -1572,6 +1572,40 @@ def _report_provenance(context: JobContext, version: dict[str, Any]) -> dict[str
     return provenance
 
 
+def _brand_for(context: JobContext, branding: Any) -> documents.Brand:
+    """
+    Whose name goes on the document.
+
+    The organisation's own name is the default, because the ordinary case is a
+    practice sending a report to its own client and the alternative -- "Report"
+    in the corner of a document a firm is charging for -- looks like a draft.
+
+    An override arrives on the job payload rather than from a settings table,
+    and that is a deliberate first cut: there is no branding screen yet, and a
+    column added before the screen that fills it is a guess at its shape. The
+    payload path is enough for the report to carry a client's colour today, and
+    when the screen exists it writes into the same three fields.
+    """
+    override = branding if isinstance(branding, dict) else {}
+
+    name = override.get("name")
+    if not isinstance(name, str) or not name.strip():
+        rows = context.supabase.select(
+            "organizations",
+            columns="id,name",
+            filters={"id": f"eq.{context.job['org_id']}"},
+            limit=1,
+        )
+        name = rows[0]["name"] if rows else None
+
+    footer = override.get("footer")
+    return documents.Brand.for_client(
+        name=name,
+        accent=override.get("accent"),
+        footer=footer if isinstance(footer, str) else None,
+    )
+
+
 def handle_generate_report(context: JobContext) -> dict[str, Any]:
     version_id = context.job.get("dataset_version_id")
     if not version_id:
@@ -1686,7 +1720,7 @@ def handle_generate_report(context: JobContext) -> dict[str, Any]:
 
     provenance = _report_provenance(context, version)
 
-    markdown = report.build_markdown_report(
+    document = report.build_report_document(
         workspace_name=workspace_rows[0]["name"] if workspace_rows else "Workspace",
         dataset_name=dataset_rows[0]["name"] if dataset_rows else "Dataset",
         version_no=version["version_no"],
@@ -1697,18 +1731,36 @@ def handle_generate_report(context: JobContext) -> dict[str, Any]:
         narrative=narrative,
     )
 
+    # Markdown is still what goes back on the job row: the assistant renders it
+    # in the thread, and it costs nothing to produce. The chosen format is what
+    # goes into the bucket for the client.
+    markdown = report.render_markdown(document)
+
+    requested = context.payload.get("format")
+    fmt = requested if isinstance(requested, str) else "md"
+    if fmt != "md":
+        context.heartbeat({"stage": "rendering"})
+    payload, content_type, extension = documents.render_document(
+        document,
+        fmt,
+        # Only the client-facing formats have a cover band to put a name on, and
+        # finding the name costs a query.
+        _brand_for(context, context.payload.get("branding")) if fmt != "md" else None,
+    )
+
     period = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m")
     path = (
         f"{context.job['org_id']}/{context.workspace_id}/{period}/"
-        f"{version['dataset_id']}__v{version['version_no']}__report.md"
+        f"{version['dataset_id']}__v{version['version_no']}__report.{extension}"
     )
     stored = context.supabase.upload(
-        EXPORTS_BUCKET, path, markdown.encode("utf-8"), content_type="text/markdown", upsert=True
+        EXPORTS_BUCKET, path, payload, content_type=content_type, upsert=True
     )
 
     return {
         "report_path": stored.path,
         "bucket": EXPORTS_BUCKET,
+        "format": extension,
         # Carried so the download route can name the saved file after the
         # dataset rather than after its uuid. See downloadName() in
         # apps/web/src/app/api/exports/route.ts.
