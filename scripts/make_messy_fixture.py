@@ -33,6 +33,17 @@ from openpyxl.styles import Alignment, Font
 OUT_AUGUST = Path("fixtures/messy/acme-sales-2026-08.xlsx")
 OUT_SEPTEMBER = Path("fixtures/messy/acme-sales-2026-09.xlsx")
 
+# The same August ledger in the legacy binary format, for the reader that has to
+# handle it. A customer exporting from an older system sends this, and until it
+# parsed, the first thing they saw was a refusal.
+#
+# Written with xlwt, which is a *development* dependency and not in
+# requirements.txt: the agent only ever reads .xls, and adding a writer to the
+# production image to build a test file would be paying for it in every
+# deployment. The fixture it produces is committed, so the test suite needs
+# neither xlwt nor this script.
+OUT_AUGUST_XLS = Path("fixtures/messy/acme-sales-2026-08.xls")
+
 
 def build() -> Workbook:
     wb = Workbook()
@@ -181,9 +192,77 @@ def build_september() -> Workbook:
     return wb
 
 
+def build_august_xls(path: Path) -> None:
+    """
+    August again, as a .xls.
+
+    Deliberately not a byte-for-byte twin of the .xlsx. It carries the traits
+    the *reader* has to get right, which are not the same traits the structure
+    detector is tested on: real date cells (which xlrd hands back as floats plus
+    an epoch), a boolean, a formula error cell, a hidden sheet that must not be
+    parsed as the main table, and a TOTAL row that must not become a
+    transaction.
+    """
+    import datetime as dt
+
+    import xlwt
+
+    book = xlwt.Workbook()
+    sheet = book.add_sheet("August")
+
+    # A title block above the header, as every real export has.
+    sheet.write(0, 0, "ACME TRADING LTD")
+    sheet.write(1, 0, "Sales ledger — August 2026")
+
+    for column, name in enumerate(["Date", "Invoice", "Supplier", "Net Sales", "VAT", "Paid"]):
+        sheet.write(3, column, name)
+
+    dates = xlwt.XFStyle()
+    dates.num_format_str = "DD/MM/YYYY"
+
+    rows = [
+        (dt.datetime(2026, 8, 3), "INV-1001", "Contoso Ltd", 1240.50, 248.10, True),
+        (dt.datetime(2026, 8, 7), "INV-1002", "CONTOSO LIMITED", 980.00, 196.00, True),
+        (dt.datetime(2026, 8, 11), "INV-1003", "Fabrikam", 2015.75, 403.15, False),
+        (dt.datetime(2026, 8, 19), "INV-1004", "Northwind Supplies", 610.25, 122.05, True),
+    ]
+    for index, (date, invoice, supplier, net, vat, paid) in enumerate(rows, start=4):
+        sheet.write(index, 0, date, dates)
+        sheet.write(index, 1, invoice)
+        sheet.write(index, 2, supplier)
+        sheet.write(index, 3, net)
+        sheet.write(index, 4, vat)
+        sheet.write(index, 5, paid)
+
+    # A formula that evaluates to an error. xlrd reports it as an error cell,
+    # and the reader must return None rather than the error's numeric code --
+    # which would otherwise be inferred as a number in a boolean column.
+    sheet.write(8, 5, xlwt.Formula("1/0"))
+
+    # The trailing total, which must never be read as a transaction.
+    sheet.write(9, 2, "TOTAL")
+    sheet.write(9, 3, 4846.50)
+    sheet.write(9, 4, 969.30)
+
+    # A hidden lookup sheet. Parsing this as the main table is a classic wrong
+    # answer, so the reader skips it.
+    lookup = book.add_sheet("Lookup")
+    lookup.write(0, 0, "supplier")
+    lookup.write(1, 0, "do not parse me")
+    lookup.visibility = 1
+
+    book.save(str(path))
+
+
 if __name__ == "__main__":
     OUT_AUGUST.parent.mkdir(parents=True, exist_ok=True)
 
     for path, workbook in ((OUT_AUGUST, build()), (OUT_SEPTEMBER, build_september())):
         workbook.save(path)
         print(f"wrote {path} ({path.stat().st_size} bytes)")
+
+    try:
+        build_august_xls(OUT_AUGUST_XLS)
+        print(f"wrote {OUT_AUGUST_XLS} ({OUT_AUGUST_XLS.stat().st_size} bytes)")
+    except ImportError:
+        print("skipped the .xls fixture: pip install xlwt to rebuild it")

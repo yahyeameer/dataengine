@@ -10,3 +10,6 @@
 *.jpg binary
 *.parquet binary
 *.xlsx binary
+
+# The legacy binary spreadsheet fixture. Same reason as .xlsx above.
+*.xls binary

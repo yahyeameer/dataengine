@@ -472,9 +472,12 @@ single worker is otherwise ample.
 expired key — the worker logs the exact HTTP status it got back. Jobs queued in
 the meantime are not lost; they run when it reconnects.
 
-**A job says "Legacy .xls files are not supported".**
-Correct, and deliberate. The binary format needs a different reader, and
-mis-parsing an accounting file is worse than declining it. Re-save as `.xlsx`.
+**A job says a .xls file could not be read.**
+`.xls` is supported (xlrd reads the legacy binary format). This message means
+that *particular* file could not be opened -- almost always because it is
+password-protected, or because it is really an .xlsx or an HTML table that was
+given an .xls extension by whatever exported it. Opening and re-saving it as
+`.xlsx` resolves both.
 
 **A job keeps retrying.**
 Only transient failures retry. Something that fails three times is usually

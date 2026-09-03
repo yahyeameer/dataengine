@@ -186,9 +186,9 @@ on screen as work in progress.
 
 **A job fails for a transient reason.** It returns to the queue with a backoff —
 30 s, then 120 s, then 480 s — rather than being retried on the next poll.
-Failures the worker knows are permanent (`JobError` with `retryable=False`: a
-legacy .xls, an unresolved blocking issue, a file over the processing limit) are
-not retried at all.
+Failures the worker knows are permanent (`JobError` with `retryable=False`: an
+unreadable or password-protected workbook, an unresolved blocking issue, a file
+over the processing limit) are not retried at all.
 
 **The scheduler cannot reach the database.** `run_scheduler` logs and returns
 zero. It never raises, because the loop that calls it is the loop that claims

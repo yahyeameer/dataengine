@@ -197,6 +197,123 @@ def _fill_merged_cells(worksheet: Any, grid: list[list[Any]]) -> None:
                     grid[r][c] = value
 
 
+def _read_xls(data: bytes) -> list[tuple[str, list[list[Any]]]]:
+    """
+    The legacy binary format, read with xlrd.
+
+    Why xlrd and not a conversion step: it is a pure-Python wheel, like
+    reportlab and python-docx, so the agent image gains one pip package and no
+    apt packages. The alternative -- shelling out to LibreOffice to convert the
+    file first -- is a hundred megabytes of system libraries and a second
+    process competing for the box's one core, to read a file format that is
+    twenty years old.
+
+    Three conversions matter, and all three exist to make an .xls grid
+    indistinguishable from the .xlsx grid the rest of the parser already
+    handles. Anything that differs here becomes a type-inference bug later,
+    reported against a column rather than against this function.
+    """
+    import datetime as dt
+
+    import xlrd
+
+    try:
+        workbook = xlrd.open_workbook(file_contents=data, formatting_info=False)
+    except Exception as error:  # noqa: BLE001 - xlrd raises several unrelated types
+        # Deliberately the same shape of message the format refusal used to
+        # carry: a sentence an accountant can act on, not a stack trace.
+        raise ValueError(
+            "This .xls file could not be read. It may be password-protected or "
+            "damaged; re-saving it as .xlsx usually fixes it."
+        ) from error
+
+    sheets: list[tuple[str, list[list[Any]]]] = []
+
+    for worksheet in workbook.sheets():
+        # 0 = visible, 1 = hidden, 2 = "very hidden". Same reasoning as the
+        # .xlsx reader: a hidden sheet is usually a lookup table or last month's
+        # numbers, and parsing it as the main table is a classic wrong answer.
+        if getattr(worksheet, "visibility", 0) != 0:
+            continue
+
+        grid: list[list[Any]] = []
+        for row_index in range(worksheet.nrows):
+            row: list[Any] = []
+            for column_index in range(worksheet.ncols):
+                cell = worksheet.cell(row_index, column_index)
+                row.append(_xls_value(cell, workbook.datemode, dt))
+            grid.append(row)
+
+        _fill_merged_xls_cells(worksheet, grid)
+        sheets.append((worksheet.name, grid))
+
+    workbook.release_resources()
+    return sheets
+
+
+def _xls_value(cell: Any, datemode: int, dt: Any) -> Any:
+    """
+    One cell, as the .xlsx reader would have produced it.
+
+    xlrd hands back a typed cell where openpyxl hands back a Python value, so
+    the mapping is explicit:
+
+      * a date is a float plus a workbook epoch -- returned as a real datetime,
+        because `values.py` reads dates off the type and a float would be
+        inferred as money;
+      * an empty or blank cell is None, not "";
+      * an error cell (`#REF!`, `#DIV/0!`) is None, which `is_null_token`
+        already treats as absent -- the alternative is the string "42" for
+        error code 42, which would parse as a number.
+    """
+    import xlrd
+
+    if cell.ctype == xlrd.XL_CELL_DATE:
+        try:
+            parts = xlrd.xldate_as_tuple(cell.value, datemode)
+        except Exception:  # noqa: BLE001 - an out-of-range serial is not a date
+            return None
+        if parts[:3] == (0, 0, 0):
+            # A time with no date component. Kept as a time rather than
+            # promoted to 1899-12-31, which would read as a real transaction
+            # date and land the row in the wrong period.
+            return dt.time(*parts[3:])
+        return dt.datetime(*parts)
+
+    if cell.ctype == xlrd.XL_CELL_BOOLEAN:
+        return bool(cell.value)
+
+    if cell.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK, xlrd.XL_CELL_ERROR):
+        return None
+
+    return cell.value
+
+
+def _fill_merged_xls_cells(worksheet: Any, grid: list[list[Any]]) -> None:
+    """
+    The .xls equivalent of `_fill_merged_cells`, and it is needed for the same
+    reason: a merged title block that reads as one populated cell followed by
+    blanks is exactly what the header scorer must not be fooled by.
+
+    `merged_cells` is only populated when the workbook was opened with
+    `formatting_info=True`, which xlrd 2.x does not support for .xls written by
+    some producers. So this is best-effort: an empty list means the grid is left
+    as it is, which is the behaviour that existed before .xls was readable at
+    all.
+    """
+    for row_low, row_high, column_low, column_high in getattr(worksheet, "merged_cells", []):
+        if row_low >= len(grid) or column_low >= len(grid[row_low]):
+            continue
+
+        value = grid[row_low][column_low]
+        if value is None:
+            continue
+
+        for r in range(row_low, min(row_high, len(grid))):
+            for c in range(column_low, min(column_high, len(grid[r]))):
+                grid[r][c] = value
+
+
 def _read_csv(data: bytes) -> list[tuple[str, list[list[Any]]]]:
     for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
         try:
@@ -228,14 +345,8 @@ def read_grids(data: bytes, filename: str) -> list[tuple[str, list[list[Any]]]]:
     if lower.endswith(".csv") or lower.endswith(".txt"):
         return _read_csv(data)
     if lower.endswith(".xls"):
-        # The legacy binary format needs a different reader entirely. Refusing
-        # clearly beats mis-parsing: the upload path already accepts .xls, so an
-        # accountant will hit this, and "convert to .xlsx" is an instruction
-        # they can act on in ten seconds.
-        raise ValueError(
-            "Legacy .xls files are not supported yet. Re-save the workbook as .xlsx and upload again."
-        )
-    raise ValueError(f"Cannot parse {filename!r}: expected .xlsx, .xlsm or .csv")
+        return _read_xls(data)
+    raise ValueError(f"Cannot parse {filename!r}: expected .xlsx, .xlsm, .xls or .csv")
 
 
 # -----------------------------------------------------------------------------

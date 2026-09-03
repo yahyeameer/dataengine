@@ -4,6 +4,13 @@
 httpx>=0.27,<0.29
 openpyxl>=3.1,<4
 
+# The legacy .xls format, which customers still export from older systems and
+# which openpyxl cannot read at all. xlrd 2.x reads .xls and *only* .xls -- it
+# dropped .xlsx deliberately -- so the two libraries do not overlap. Pure
+# Python, like everything else here: the image gains a pip package and no apt
+# packages, and no LibreOffice process competing for the box's one core.
+xlrd>=2.0,<3
+
 # The client-facing report formats. Both are pure-Python wheels, which is why
 # they are these two and not a browser or a Cairo/Pango stack: the image gains
 # no apt packages and the box gains no rendering process competing for its one
