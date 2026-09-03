@@ -228,7 +228,7 @@ hostnames, no per-tenant counts, no identifiers.
 ## Tests
 
 ```bash
-cd services/hermes && python -m pytest        # 467 tests, no database
+cd services/hermes && python -m pytest        # 478 tests, no database
 psql "$DSN" -f supabase/tests/isolation_branding_recipes.sql
 psql "$DSN" -f supabase/tests/scheduling_and_queue.sql
 python scripts/queue_load_test.py --dsn "$DSN" --orgs 50 --jobs 4 --workers 4
