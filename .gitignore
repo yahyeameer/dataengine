@@ -18,3 +18,8 @@ supabase/.env
 __pycache__/
 *.py[cod]
 .venv/
+
+# Generated deliverables, not source. Regenerate the Markdown by hand and the
+# PDF from it; neither is an input to a build.
+DATAENGINE_COMPLETE_BUSINESS_ANALYSIS.md
+DATAENGINE_COMPLETE_BUSINESS_ANALYSIS.pdf
