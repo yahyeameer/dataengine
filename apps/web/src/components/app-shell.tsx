@@ -5,6 +5,7 @@ import {
   AssistantIcon,
   CategoriseIcon,
   NavLink,
+  StoreIcon,
   WorkspacesIcon,
 } from '@/components/nav-link';
 import { Mark } from '@/components/product-story';
@@ -31,6 +32,11 @@ const NAV = [
   // looking for -- and it now carries the whole conversation history, which
   // used to be buried in a section of a client page.
   { href: '/app/assistant', label: 'Assistant', icon: <AssistantIcon /> },
+  // Its own entry rather than a tab inside a workspace. A shopkeeper opening
+  // this product has one question -- did I make money -- and asking them to
+  // find it three levels inside a screen built for an accountant's month-end
+  // is asking them to learn somebody else's job first.
+  { href: '/app/stores', label: 'Stores', icon: <StoreIcon /> },
   { href: '/app/audit', label: 'Activity Log', icon: <ActivityIcon /> },
 ];
 

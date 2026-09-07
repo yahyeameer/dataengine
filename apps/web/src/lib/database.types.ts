@@ -1108,6 +1108,180 @@ export type Database = {
           },
         ]
       }
+      store_connections: {
+        Row: {
+          balances: Json
+          base_currency: string
+          config: Json
+          created_at: string
+          created_by: string
+          dataset_id: string
+          id: string
+          language: string
+          last_sync_at: string | null
+          last_sync_error: string | null
+          last_sync_status:
+            | Database["public"]["Enums"]["store_sync_status"]
+            | null
+          name: string
+          org_id: string
+          rate_as_of: string | null
+          secondary_currency: string | null
+          secondary_rate: number | null
+          source: Database["public"]["Enums"]["store_source"]
+          status: string
+          updated_at: string
+          week_start: number
+          workspace_id: string
+        }
+        Insert: {
+          balances?: Json
+          base_currency?: string
+          config?: Json
+          created_at?: string
+          created_by: string
+          dataset_id: string
+          id?: string
+          language?: string
+          last_sync_at?: string | null
+          last_sync_error?: string | null
+          last_sync_status?:
+            | Database["public"]["Enums"]["store_sync_status"]
+            | null
+          name: string
+          org_id: string
+          rate_as_of?: string | null
+          secondary_currency?: string | null
+          secondary_rate?: number | null
+          source: Database["public"]["Enums"]["store_source"]
+          status?: string
+          updated_at?: string
+          week_start?: number
+          workspace_id: string
+        }
+        Update: {
+          balances?: Json
+          base_currency?: string
+          config?: Json
+          created_at?: string
+          created_by?: string
+          dataset_id?: string
+          id?: string
+          language?: string
+          last_sync_at?: string | null
+          last_sync_error?: string | null
+          last_sync_status?:
+            | Database["public"]["Enums"]["store_sync_status"]
+            | null
+          name?: string
+          org_id?: string
+          rate_as_of?: string | null
+          secondary_currency?: string | null
+          secondary_rate?: number | null
+          source?: Database["public"]["Enums"]["store_source"]
+          status?: string
+          updated_at?: string
+          week_start?: number
+          workspace_id?: string
+        }
+        Relationships: []
+      }
+      store_report_schedules: {
+        Row: {
+          cadence: Database["public"]["Enums"]["store_report_cadence"]
+          connection_id: string
+          created_at: string
+          created_by: string | null
+          enabled: boolean
+          format: string
+          granularity: Database["public"]["Enums"]["store_report_cadence"]
+          id: string
+          language: string
+          last_job_id: string | null
+          last_run_at: string | null
+          next_run_at: string
+          workspace_id: string
+        }
+        Insert: {
+          cadence: Database["public"]["Enums"]["store_report_cadence"]
+          connection_id: string
+          created_at?: string
+          created_by?: string | null
+          enabled?: boolean
+          format?: string
+          granularity?: Database["public"]["Enums"]["store_report_cadence"]
+          id?: string
+          language?: string
+          last_job_id?: string | null
+          last_run_at?: string | null
+          next_run_at?: string
+          workspace_id: string
+        }
+        Update: {
+          cadence?: Database["public"]["Enums"]["store_report_cadence"]
+          connection_id?: string
+          created_at?: string
+          created_by?: string | null
+          enabled?: boolean
+          format?: string
+          granularity?: Database["public"]["Enums"]["store_report_cadence"]
+          id?: string
+          language?: string
+          last_job_id?: string | null
+          last_run_at?: string | null
+          next_run_at?: string
+          workspace_id?: string
+        }
+        Relationships: []
+      }
+      store_sync_runs: {
+        Row: {
+          connection_id: string
+          dataset_version_id: string | null
+          entries_written: number | null
+          error: string | null
+          finished_at: string | null
+          id: string
+          job_id: string | null
+          started_at: string
+          status: Database["public"]["Enums"]["store_sync_status"]
+          summary: Json
+          window_end: string | null
+          window_start: string | null
+          workspace_id: string
+        }
+        Insert: {
+          connection_id: string
+          dataset_version_id?: string | null
+          entries_written?: number | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          job_id?: string | null
+          started_at?: string
+          status?: Database["public"]["Enums"]["store_sync_status"]
+          summary?: Json
+          window_end?: string | null
+          window_start?: string | null
+          workspace_id: string
+        }
+        Update: {
+          connection_id?: string
+          dataset_version_id?: string | null
+          entries_written?: number | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          job_id?: string | null
+          started_at?: string
+          status?: Database["public"]["Enums"]["store_sync_status"]
+          summary?: Json
+          window_end?: string | null
+          window_start?: string | null
+          workspace_id?: string
+        }
+        Relationships: []
+      }
       workspaces: {
         Row: {
           client_name: string | null
@@ -1894,6 +2068,49 @@ export type Database = {
         Returns: number
       }
       workspace_of_dataset: { Args: { p_dataset_id: string }; Returns: string }
+      create_store_connection: {
+        Args: {
+          p_base_currency?: string
+          p_config?: Json
+          p_language?: string
+          p_name: string
+          p_secondary_currency?: string
+          p_secondary_rate?: number
+          p_source: Database["public"]["Enums"]["store_source"]
+          p_week_start?: number
+          p_workspace_id: string
+        }
+        Returns: Database["public"]["Tables"]["store_connections"]["Row"]
+      }
+      set_store_connection_secret: {
+        Args: { p_connection_id: string; p_secret: string }
+        Returns: undefined
+      }
+      set_store_report_schedule: {
+        Args: {
+          p_cadence: Database["public"]["Enums"]["store_report_cadence"]
+          p_connection_id: string
+          p_enabled?: boolean
+          p_format?: string
+          p_granularity?: Database["public"]["Enums"]["store_report_cadence"]
+          p_language?: string
+        }
+        Returns: Database["public"]["Tables"]["store_report_schedules"]["Row"]
+      }
+      update_store_connection: {
+        Args: {
+          p_balances?: Json
+          p_config?: Json
+          p_connection_id: string
+          p_language?: string
+          p_name?: string
+          p_secondary_currency?: string
+          p_secondary_rate?: number
+          p_status?: string
+          p_week_start?: number
+        }
+        Returns: Database["public"]["Tables"]["store_connections"]["Row"]
+      }
       write_audit: {
         Args: {
           p_action: string
@@ -1921,6 +2138,8 @@ export type Database = {
         | "categorise_statement"
         | "hmrc_knowledge_check"
         | "kanban_report"
+        | "sync_store"
+        | "store_financials"
       agent_job_status:
         | "queued"
         | "running"
@@ -1957,6 +2176,9 @@ export type Database = {
         | "needs_review"
         | "blocked"
         | "failed"
+      store_report_cadence: "daily" | "weekly" | "monthly" | "yearly"
+      store_source: "excel" | "quickbooks" | "odoo"
+      store_sync_status: "running" | "succeeded" | "failed"
       upload_status: "pending" | "stored" | "failed"
       workspace_status: "active" | "archived"
     }
@@ -2103,6 +2325,8 @@ export const Constants = {
         "categorise_statement",
         "hmrc_knowledge_check",
         "kanban_report",
+        "sync_store",
+        "store_financials",
       ],
       agent_job_status: [
         "queued",
@@ -2145,6 +2369,9 @@ export const Constants = {
         "blocked",
         "failed",
       ],
+      store_report_cadence: ["daily", "weekly", "monthly", "yearly"],
+      store_source: ["excel", "quickbooks", "odoo"],
+      store_sync_status: ["running", "succeeded", "failed"],
       upload_status: ["pending", "stored", "failed"],
       workspace_status: ["active", "archived"],
     },

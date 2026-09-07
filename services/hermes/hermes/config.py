@@ -250,6 +250,46 @@ class GovUKConfig:
 
 
 @dataclass(frozen=True)
+class StoreConfig:
+    """
+    Connected stores: the retail and warehouse reporting path.
+
+    Off by default, and off is a real state. With `enabled` false the worker
+    does not announce `sync_store` or `store_financials`, so a job of either
+    kind sits `queued` and visible rather than being claimed and failed once a
+    second -- the same treatment the Kanban bridge gets, for the same reason.
+
+    It is gated at all because this is the first thing in the agent that dials
+    out to a *customer's* system holding a *customer's* credential. Enabling
+    that is a decision an operator should make on purpose, not a capability that
+    arrives with a deploy.
+
+    `allow_plain_http` exists for the one real case -- a locally hosted Odoo on
+    a trusted network -- and defaults to false because the alternative is
+    sending an API key in clear text.
+    """
+
+    enabled: bool = False
+    timeout_seconds: int = 60
+    # Ledger lines in one sync window. A shop does hundreds a month and a
+    # warehouse thousands; six figures means the window is wrong, and the
+    # connector says so rather than spending the job lease finding out.
+    max_lines: int = 200_000
+    allow_plain_http: bool = False
+    # How often the due-schedule sweep runs, on idle passes only.
+    sweep_seconds: int = 300
+    # How far back a first sync reaches when nothing says otherwise. Three
+    # months is enough for the first report to have something to compare
+    # against, which is what makes it useful on day one rather than in October.
+    backfill_days: int = 90
+    # How far back a *subsequent* sync re-reads. Source systems let people edit
+    # last week's invoice, and a window that starts where the last one ended
+    # would never see the correction. Re-reading is free because every entry
+    # carries the source's own reference and repeats are dropped.
+    overlap_days: int = 7
+
+
+@dataclass(frozen=True)
 class Config:
     supabase_url: str
     service_key: str
@@ -304,6 +344,8 @@ class Config:
     kanban: KanbanConfig = field(default_factory=KanbanConfig)
 
     govuk: GovUKConfig = field(default_factory=GovUKConfig)
+
+    store: StoreConfig = field(default_factory=StoreConfig)
 
     # Section 8's context discipline, enforced as a setting so it is auditable
     # rather than merely intended. Raising it is a deliberate, visible act.
@@ -380,6 +422,16 @@ def load_config() -> Config:
         refresh_days=_int("HERMES_GOVUK_REFRESH_DAYS", 30),
     )
 
+    store = StoreConfig(
+        enabled=_bool("HERMES_STORE_ENABLED", False),
+        timeout_seconds=_int("HERMES_STORE_TIMEOUT_SECONDS", 60),
+        max_lines=_int("HERMES_STORE_MAX_LINES", 200_000),
+        allow_plain_http=_bool("HERMES_STORE_ALLOW_PLAIN_HTTP", False),
+        sweep_seconds=_int("HERMES_STORE_SWEEP_SECONDS", 300),
+        backfill_days=_int("HERMES_STORE_BACKFILL_DAYS", 90),
+        overlap_days=_int("HERMES_STORE_OVERLAP_DAYS", 7),
+    )
+
     return Config(
         supabase_url=url,
         service_key=key,
@@ -403,6 +455,7 @@ def load_config() -> Config:
         llm=llm,
         kanban=kanban,
         govuk=govuk,
+        store=store,
         max_sample_values=_int("HERMES_MAX_SAMPLE_VALUES", 5),
         redact_samples=_bool("HERMES_REDACT_SAMPLES", True),
     )

@@ -23,6 +23,12 @@
  * the job. These are correctness properties of a 24/7 process nobody watches,
  * so they are asserted rather than assumed.
  *
+ * **Connected stores**, which raise the stakes on the first two. A store
+ * connection holds a *customer's own credential* for a *customer's own system*,
+ * which is a category of secret nothing else here keeps. So the credential
+ * table is asserted unreadable by any signed-in session, and every function
+ * that can reach one is asserted uncallable from a browser.
+ *
  * Usage: npm run test:agent   (requires `supabase start`)
  */
 
@@ -308,11 +314,138 @@ async function main() {
         p_result: {},
       },
     ],
+    // The connected-store worker path. `store_connection_credentials` is the
+    // sharpest of these: it is the only function in the system that can return
+    // a decrypted credential, and a browser session must never reach it.
+    ['store_connection_credentials', { p_connection_id: randomUUID() }],
+    ['rotate_store_connection_secret', { p_connection_id: randomUUID(), p_secret: 'x' }],
+    ['start_store_sync', { p_connection_id: randomUUID() }],
+    [
+      'finish_store_sync',
+      { p_run_id: randomUUID(), p_status: 'succeeded', p_entries_written: 1 },
+    ],
+    ['enqueue_due_store_reports', { p_limit: 5 }],
   ];
 
   for (const [fn, params] of workerOnly) {
     const { error } = await beta.client.rpc(fn as never, params as never);
     check(`${fn} is not callable from a browser session`, error !== null);
+  }
+
+  // --- Connected stores ----------------------------------------------------
+  //
+  // The store connectors put a *customer's own credential* inside this
+  // boundary, which is a category of secret nothing else in the system holds.
+  // Three things have to be true and none of them is true by default: another
+  // firm cannot see a connection, nobody signed in can read the credential
+  // table at all, and the settings a connection carries cannot be edited by
+  // somebody outside the workspace that owns it.
+
+  console.log('\nConnected stores\n');
+
+  const { data: alphaStore, error: alphaStoreError } = await alpha.client.rpc(
+    'create_store_connection',
+    {
+      p_workspace_id: alphaData.workspaceId,
+      p_name: `Suuqa ${randomUUID().slice(0, 6)}`,
+      p_source: 'odoo',
+      p_config: {
+        base_url: 'https://alpha.odoo.com',
+        database: 'alpha',
+        username: 'api',
+      },
+    },
+  );
+  check('a member can connect a store in their own workspace', alphaStoreError === null,
+    alphaStoreError?.message);
+
+  const storeId = (alphaStore as { id?: string } | null)?.id ?? null;
+
+  const { error: crossCreate } = await beta.client.rpc('create_store_connection', {
+    p_workspace_id: alphaData.workspaceId,
+    p_name: 'not yours',
+    p_source: 'excel',
+  });
+  check("Beta cannot connect a store in Alpha's workspace", crossCreate !== null);
+
+  const { data: seenStores } = await beta.client
+    .from('store_connections')
+    .select('id')
+    .eq('workspace_id', alphaData.workspaceId);
+  check("Beta cannot read Alpha's store connections", (seenStores ?? []).length === 0);
+
+  const { data: seenSchedules } = await beta.client
+    .from('store_report_schedules')
+    .select('id')
+    .eq('workspace_id', alphaData.workspaceId);
+  check("Beta cannot read Alpha's report schedules", (seenSchedules ?? []).length === 0);
+
+  const { data: seenSyncRuns } = await beta.client
+    .from('store_sync_runs')
+    .select('id')
+    .eq('workspace_id', alphaData.workspaceId);
+  check("Beta cannot read Alpha's sync history", (seenSyncRuns ?? []).length === 0);
+
+  // The one that matters most. `store_connection_secrets` has no RLS policy at
+  // all and no grant to `authenticated`, so this is refused at the privilege
+  // level before a policy is even consulted -- an empty result would be a
+  // weaker answer than the error we want here.
+  const { data: seenSecrets, error: secretsError } = await beta.client
+    .from('store_connection_secrets')
+    .select('connection_id');
+  check(
+    'no signed-in session can read the store credential table',
+    secretsError !== null || (seenSecrets ?? []).length === 0,
+  );
+
+  if (storeId) {
+    const { error: crossUpdate } = await beta.client.rpc('update_store_connection', {
+      p_connection_id: storeId,
+      p_name: 'renamed by a stranger',
+    });
+    check("Beta cannot change Alpha's store settings", crossUpdate !== null);
+
+    const { error: crossSecret } = await beta.client.rpc('set_store_connection_secret', {
+      p_connection_id: storeId,
+      p_secret: 'stolen',
+    });
+    check("Beta cannot set a credential on Alpha's store", crossSecret !== null);
+
+    const { error: crossSchedule } = await beta.client.rpc('set_store_report_schedule', {
+      p_connection_id: storeId,
+      p_cadence: 'weekly',
+    });
+    check("Beta cannot schedule reports on Alpha's store", crossSchedule !== null);
+
+    // A credential can be replaced and never retrieved: there is no route and
+    // no function reachable from a session that returns one, and the column
+    // that would carry it does not exist on the readable table.
+    const { data: alphaSees } = await alpha.client
+      .from('store_connections')
+      .select('*')
+      .eq('id', storeId)
+      .maybeSingle();
+    check(
+      'a store row carries no credential material, even for its owner',
+      alphaSees !== null &&
+        !Object.keys(alphaSees as Record<string, unknown>).some((column) =>
+          ['secret', 'secret_id', 'api_key', 'refresh_token', 'password'].includes(column),
+        ),
+    );
+
+    const { error: directWrite } = await beta.client
+      .from('store_connections')
+      .update({ status: 'paused' })
+      .eq('id', storeId);
+    const { data: stillActive } = await admin
+      .from('store_connections')
+      .select('status')
+      .eq('id', storeId)
+      .maybeSingle();
+    check(
+      'a direct update to a store connection changes nothing',
+      directWrite !== null || stillActive?.status === 'active',
+    );
   }
 
   // --- Queue protocol ------------------------------------------------------

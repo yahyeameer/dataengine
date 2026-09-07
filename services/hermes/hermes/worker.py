@@ -96,6 +96,24 @@ class Worker:
                 kind for kind in self.capabilities if kind != "kanban_report"
             )
 
+        # The store connectors' off switch, with the same teeth and for the same
+        # reason. These are the two kinds that reach a customer's own system
+        # holding a customer's own credential, so a worker that has not been
+        # deliberately switched on for that should not claim them.
+        store_kinds = ("sync_store", "store_financials")
+        if not config.store.enabled:
+            named = [kind for kind in requested if kind in store_kinds]
+            if named:
+                raise ConfigError(
+                    f"HERMES_CAPABILITIES names {', '.join(named)}, but HERMES_STORE_ENABLED "
+                    "is not set. Enable the store connectors or drop the capability -- "
+                    "announcing a kind this worker will refuse to run is worse than not "
+                    "claiming it."
+                )
+            self.capabilities = tuple(
+                kind for kind in self.capabilities if kind not in store_kinds
+            )
+
     # -- lifecycle -----------------------------------------------------------
 
     def request_stop(self, signum: int | None = None, _frame: Any = None) -> None:
@@ -334,6 +352,35 @@ class Worker:
             stopped, len(run["task_ids"]), run.get("job_id"),
         )
 
+    def sweep_due_store_reports(self) -> None:
+        """
+        Fire the scheduled store reports that have come due.
+
+        The clock lives in the database, not here: `enqueue_due_store_reports`
+        locks each due schedule, enqueues its jobs and advances `next_run_at` in
+        one transaction. So two workers sweeping at the same moment cannot both
+        send a shop the same weekly report, and a worker that was down over the
+        weekend fires the missed schedule when it comes back rather than losing
+        it -- which a cron on the agent host would not.
+
+        On an idle pass only, and never raising. A failed sweep delays a report
+        by one interval; letting it reach the loop's handler would cost the
+        backoff too.
+        """
+        if not self.config.store.enabled:
+            return
+
+        try:
+            fired = self.supabase.rpc("enqueue_due_store_reports", {"p_limit": 20})
+        except SupabaseError as error:
+            log.warning("store schedule sweep failed: %s %s", error.status, error.body)
+            return
+
+        if isinstance(fired, list):
+            fired = fired[0] if fired else 0
+        if fired:
+            log.info("store schedules: enqueued %s report run(s)", fired)
+
     def finish(
         self,
         job_id: str,
@@ -458,6 +505,7 @@ class Worker:
         self._last_announce = time.monotonic()
         last_health = time.monotonic()
         last_sweep = time.monotonic()
+        last_store_sweep = time.monotonic()
         backoff = self.config.poll_seconds
 
         while not self._stopping.is_set():
@@ -478,6 +526,9 @@ class Worker:
                     if now - last_sweep >= self.config.kanban.sweep_seconds:
                         self.sweep_cancelled_kanban_runs()
                         last_sweep = now
+                    if now - last_store_sweep >= self.config.store.sweep_seconds:
+                        self.sweep_due_store_reports()
+                        last_store_sweep = now
                     self._stopping.wait(self.config.poll_seconds)
                     backoff = self.config.poll_seconds
                     continue

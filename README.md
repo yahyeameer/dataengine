@@ -20,6 +20,7 @@ product the PRD describes.
 ```
 apps/web/           Next.js 16 App Router application
 services/hermes/    the agent: parser, profiler, deviation engine, analytics
+  hermes/connectors/  connected stores: spreadsheet, QuickBooks, Odoo
 supabase/           config + SQL migrations
 scripts/            test suites and fixture generation
 fixtures/messy/     deliberately messy workbooks (PRD section 6)
@@ -59,6 +60,36 @@ nothing — it only makes the explanations plainer.
 
 See [`services/hermes/README.md`](./services/hermes/README.md) for what it does and how to run it
 24/7 on a VPS.
+
+## Connected stores
+
+The pipeline above answers an accountant's question about a client's month. A
+second path answers the shopkeeper's own: **did I make money this week, and
+where did it go.**
+
+A retailer or warehouse points the agent at whatever they already keep their
+books in — a spreadsheet they upload, a QuickBooks Online company, an Odoo
+instance — and it reads that system on a schedule and reports revenue, cost of
+goods, gross profit, running costs and net profit, daily, weekly, monthly or
+yearly, in English or Somali. It is built for Somali businesses specifically,
+and that shows up in the arithmetic rather than in the labels: the trading week
+starts on Saturday, figures carry dollars and shillings side by side with the
+rate stated, generator power and security and hawala transfer fees are their own
+cost categories, account names are matched in both languages, and zakat is
+refused rather than guessed when the balances it needs are not there.
+
+Two job kinds. `sync_store` reads a window and writes it as an ordinary
+immutable dataset version — the same Parquet, the same version chain, the same
+storage tenancy boundary as an uploaded workbook, so transactions never land in
+the database the dashboard queries. `store_financials` reads that version and
+produces the report, in Markdown, PDF, Word or Excel from one document model.
+Credentials live in Supabase Vault behind a table with no RLS policy at all, and
+no route anywhere reads one back.
+
+Off until an operator sets `HERMES_STORE_ENABLED` on the agent host, because it
+is the first thing in this system that dials out to a customer's own system
+holding a customer's own credential. See
+[`docs/CONNECTED-STORES.md`](./docs/CONNECTED-STORES.md).
 
 ## Where the tenant boundary is, and is not
 
@@ -145,6 +176,14 @@ npm run test:agent:e2e      # the agent seam over real HTTP, worker included
 
 cd services/hermes && .venv/Scripts/python -m pytest    # the agent's own tools
 ```
+
+The store connectors add three suites inside that last one, and they run with no
+database, no network and no model: `test_retail.py` (the period engine, the
+findings, both languages), `test_store_connectors.py` (QuickBooks and Odoo
+against recorded payloads, and the guard that stops a customer-supplied Odoo
+address pointing back inside our network) and `test_store_jobs.py` (the two
+handlers against a fake Supabase, tenancy first — a job whose payload names
+another firm's store connection must be refused before anything is fetched).
 
 `test:isolation` and `test:agent` are the two that matter most. Two accounting firms sharing one
 database is the entire risk model of this product (PRD section 13), and between them these suites

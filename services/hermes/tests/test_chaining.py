@@ -28,7 +28,7 @@ from typing import Any
 import polars as pl
 import pytest
 
-from hermes.config import Config, LLMConfig
+from hermes.config import Config, LLMConfig, StoreConfig
 from hermes.jobs import HANDLERS, JobContext, handle_apply_cleaning, handle_profile_dataset
 from hermes.tools.clean import ADVISORY_OPERATIONS, OPERATIONS, Table
 from hermes.tools.propose import KNOWN_OPERATIONS
@@ -323,8 +323,8 @@ def test_advisory_operations_are_proposable():
     assert ADVISORY_OPERATIONS <= KNOWN_OPERATIONS
 
 
-def _worker(capabilities: tuple[str, ...] = (), kanban: bool = True):
-    from hermes.config import KanbanConfig
+def _worker(capabilities: tuple[str, ...] = (), kanban: bool = True, store: bool = True):
+    from hermes.config import KanbanConfig, StoreConfig
     from hermes.worker import Worker
 
     return Worker(
@@ -336,6 +336,7 @@ def _worker(capabilities: tuple[str, ...] = (), kanban: bool = True):
             capabilities=capabilities,
             llm=LLMConfig(),
             kanban=KanbanConfig(enabled=kanban),
+            store=StoreConfig(enabled=store),
         )
     )
 
@@ -376,6 +377,36 @@ def test_a_disabled_bridge_is_not_announced():
         assert set(worker.capabilities) == set(HANDLERS) - {"kanban_report"}
     finally:
         worker.close()
+
+
+def test_disabled_store_connectors_are_not_announced():
+    """
+    The same exception, for the same reason, on the path that reaches a
+    customer's own system holding a customer's own credential.
+
+    Switching that on is a decision an operator makes on purpose. Until they
+    do, a store job waits in the queue where somebody can see it, rather than
+    being claimed and failed once a second by a worker that was never
+    configured to run it.
+    """
+    worker = _worker(store=False)
+    try:
+        assert not {"sync_store", "store_financials"} & set(worker.capabilities)
+        assert set(worker.capabilities) == set(HANDLERS) - {"sync_store", "store_financials"}
+    finally:
+        worker.close()
+
+
+def test_naming_a_gated_kind_without_enabling_it_is_refused_at_startup():
+    """
+    Asking for a capability the flag withholds is a configuration mistake, and
+    silently dropping it would produce a worker that looks configured and
+    claims nothing.
+    """
+    from hermes.config import ConfigError
+
+    with pytest.raises(ConfigError, match="HERMES_STORE_ENABLED"):
+        _worker(("parse_workbook", "sync_store"), store=False)
 
 
 def test_a_worker_cannot_announce_a_kind_it_cannot_run():

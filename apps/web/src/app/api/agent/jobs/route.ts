@@ -47,6 +47,24 @@ const KINDS = [
   // version's signature and refuses with a readable message when none matches --
   // the caller cannot name a recipe, only a version they already have access to.
   'replay_recipe',
+  // The connected-store path. Both are safe to expose ungated, and the reason
+  // is worth stating because `kanban_report` below is not.
+  //
+  // The switch that matters for these lives on the agent host
+  // (`HERMES_STORE_ENABLED`), and a worker that has not been switched on does
+  // not announce them -- so the job sits `queued` and visible instead of being
+  // claimed and failed. That is the designed behaviour, not a gap: "waiting for
+  // an agent that reads stores" is a state a shop can see and an operator can
+  // fix, and duplicating the flag here would only add a second place for the
+  // two to disagree. The dashboard reads `agent_workers.capabilities` and says
+  // so before anybody waits.
+  //
+  // Neither kind can reach data the caller does not already have. Both resolve
+  // the connection from the *job row's* workspace, which `enqueue_agent_job`
+  // checked against the caller's membership, and the worker refuses a payload
+  // naming a connection from anywhere else.
+  'sync_store',
+  'store_financials',
 ] as const;
 
 /**
@@ -114,7 +132,11 @@ export async function POST(request: Request) {
       // A question typed into the dashboard is someone waiting at a screen.
       // A parse is a background chore. Ordering the queue by that difference
       // costs one number here and is the whole reason the column exists.
-      p_priority: body.kind === 'query_dataset' ? 10 : 100,
+      // A question typed into the dashboard is someone waiting at a screen; a
+      // store sync is a background chore that can take minutes against somebody
+      // else's API, and putting it ahead of interactive work would make the
+      // assistant feel broken every time a shop refreshed.
+      p_priority: body.kind === 'query_dataset' ? 10 : body.kind === 'sync_store' ? 120 : 100,
     });
 
     if (error) {

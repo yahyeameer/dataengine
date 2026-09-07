@@ -28,12 +28,18 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from decimal import Decimal
 from typing import Any, Callable
 
+from .connectors import excel as excel_connector
+from .connectors import ledger
+from .connectors import odoo as odoo_connector
+from .connectors import quickbooks as quickbooks_connector
+from .connectors.ledger import FxRates
 from .job_types import JobContext, JobDeferred, JobError
 from .llm.redact import build_context
 from .supabase import SupabaseError
-from .tools import analyze, autopilot, documents, govuk, hmrc, report
+from .tools import analyze, autopilot, documents, govuk, hmrc, report, retail, somali, store_report
 from .tools.clean import ADVISORY_OPERATIONS, apply_operations, column_hash, to_parquet
 from .tools.parse import ParsedTable, SheetInterpretation, SkippedRow, parse_workbook
 from .tools.profile import Profile, profile_table
@@ -2747,6 +2753,769 @@ def handle_hmrc_knowledge_check(context: JobContext) -> dict[str, Any]:
         ),
     }
 
+# -----------------------------------------------------------------------------
+# sync_store
+#
+# Read a connected shop's own system and write what it says as an ordinary
+# immutable dataset version. This handler is a *reader*: it creates versions and
+# never modifies one, and it holds no opinion about what the numbers mean.
+#
+# The version it writes is the whole ledger the connection knows about, not just
+# the window it fetched. That is the decision the rest of the feature rests on.
+# A version per window would mean a monthly report spanning two syncs had to
+# find and concatenate several versions, and a comparison against last month had
+# to find several more; every reader would carry that logic and one of them would
+# get it wrong. A version that is a complete snapshot makes "report on this
+# ledger" a single read of the latest version, which is what the existing
+# question, export and provenance machinery already knows how to do.
+# -----------------------------------------------------------------------------
+
+
+def _store_connection(context: JobContext) -> dict[str, Any]:
+    """
+    The connection this job names, with its credential, or a readable refusal.
+
+    The workspace check is the load-bearing line. `enqueue_agent_job` validated
+    the job row's workspace against the caller's membership; it did not validate
+    the *payload*, and `store_connection_credentials` runs as the service role,
+    which sees every tenant. So a job whose payload names another firm's
+    connection would otherwise be handed that firm's credentials. The job row is
+    the authority on tenancy and the payload is not, which is the same rule the
+    rest of this worker follows.
+    """
+    connection_id = context.payload.get("connection_id")
+    if not isinstance(connection_id, str) or not connection_id.strip():
+        raise JobError("this job does not say which store connection to read")
+
+    row = context.supabase.rpc(
+        "store_connection_credentials", {"p_connection_id": connection_id}
+    )
+    if isinstance(row, list):
+        row = row[0] if row else None
+    if not isinstance(row, dict) or not row.get("id"):
+        raise JobError("that store connection no longer exists")
+
+    if row.get("workspace_id") != context.workspace_id:
+        log.error(
+            "job %s named connection %s from workspace %s",
+            context.job_id, connection_id, row.get("workspace_id"),
+        )
+        raise JobError("that store connection does not belong to this workspace")
+
+    return row
+
+
+def _store_rates(connection: dict[str, Any]) -> FxRates:
+    """
+    The connection's currency settings as a rate table.
+
+    One rate, applied to every entry regardless of date, and stated in the
+    report's footnote. See `FxRates` for why that simplification is the right
+    one here and what it costs.
+    """
+    base = str(connection.get("base_currency") or "USD").upper()
+    rates: dict[str, Decimal] = {}
+
+    secondary = connection.get("secondary_currency")
+    rate = connection.get("secondary_rate")
+    if secondary and rate is not None:
+        try:
+            rates[str(secondary).upper()] = Decimal(str(rate))
+        except (ArithmeticError, ValueError) as error:
+            raise JobError(
+                f"this connection's exchange rate ({rate!r}) is not a number"
+            ) from error
+
+    as_of = None
+    stamp = connection.get("rate_as_of")
+    if isinstance(stamp, str) and stamp:
+        try:
+            as_of = dt.date.fromisoformat(stamp[:10])
+        except ValueError:
+            as_of = None
+
+    return FxRates(base=base, rates=rates, as_of=as_of)
+
+
+def _sync_window(context: JobContext, connection: dict[str, Any]) -> tuple[dt.date, dt.date]:
+    """
+    Which dates to fetch.
+
+    An explicit window on the payload wins. Otherwise the window starts where
+    the last successful sync ended, *minus an overlap*, because every one of
+    these source systems lets somebody edit last week's invoice and a window
+    that began exactly where the last one ended would never see the correction.
+    Re-reading costs nothing: each entry carries the source system's own
+    reference, so a repeat replaces rather than duplicates.
+
+    With no successful sync behind it, the window reaches back far enough that
+    the first report has a previous period to compare against. A first report
+    with no comparison is a column of numbers.
+    """
+    payload = context.payload
+    settings = context.config.store
+
+    end = _payload_date(payload.get("window_end")) or dt.date.today()
+    start = _payload_date(payload.get("window_start"))
+
+    if start is None:
+        runs = context.supabase.select(
+            "store_sync_runs",
+            columns="window_end,finished_at",
+            filters={
+                "connection_id": f"eq.{connection['id']}",
+                "status": "eq.succeeded",
+                "window_end": "not.is.null",
+            },
+            order="finished_at.desc",
+            limit=1,
+        )
+        previous_end = _payload_date(runs[0]["window_end"]) if runs else None
+        start = (
+            previous_end - dt.timedelta(days=settings.overlap_days)
+            if previous_end
+            else end - dt.timedelta(days=settings.backfill_days)
+        )
+
+    if start > end:
+        raise JobError(
+            f"the requested window starts after it ends ({start} to {end})"
+        )
+    return start, end
+
+
+def _payload_date(value: Any) -> dt.date | None:
+    if isinstance(value, dt.date):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return dt.date.fromisoformat(value.strip()[:10])
+        except ValueError:
+            raise JobError(f"{value!r} is not a date in YYYY-MM-DD form")
+    return None
+
+
+def _secret_json(connection: dict[str, Any]) -> dict[str, Any]:
+    """
+    The stored credential, parsed.
+
+    Accepts a bare string as well as JSON so an Odoo connection can hold just
+    its API key. A credential that will not parse is reported as a credential
+    problem rather than as a JSON error, because that is what it is to the
+    person who has to fix it.
+    """
+    import json
+
+    raw = connection.get("secret")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        raise JobError(
+            f"this {connection.get('source')} connection has no stored credentials. "
+            f"Add them on the connection's settings and run the sync again."
+        )
+    if isinstance(raw, dict):
+        return raw
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return {"api_key": str(raw)}
+    return parsed if isinstance(parsed, dict) else {"api_key": str(raw)}
+
+
+def _fetch_excel(context: JobContext, connection: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+    """
+    Read the workbook the shop already uploaded through the dashboard.
+
+    Deliberately not a file this handler goes looking for on a share. The upload
+    path already exists, already writes into the tenant-scoped raw bucket
+    through a signed URL, and already records who uploaded what -- so the
+    spreadsheet source is the one that needs no new trust boundary at all, which
+    is why a shop can start with it in under a minute.
+    """
+    config = connection.get("config") or {}
+    upload_id = (
+        context.job.get("raw_upload_id")
+        or context.payload.get("upload_id")
+        or config.get("upload_id")
+    )
+
+    filters = {"workspace_id": f"eq.{context.workspace_id}", "status": "eq.stored"}
+    if upload_id:
+        filters["id"] = f"eq.{upload_id}"
+
+    uploads = context.supabase.select(
+        "raw_uploads",
+        columns="id,storage_path,original_filename,created_at",
+        filters=filters,
+        order="created_at.desc",
+        limit=1,
+    )
+    if not uploads:
+        raise JobError(
+            "there is no uploaded workbook to read for this store yet. Upload the shop's "
+            "sales sheet, then run the sync again."
+        )
+
+    upload = uploads[0]
+    context.heartbeat({"stage": "downloading", "file": upload["original_filename"]})
+    data = context.supabase.download(
+        RAW_BUCKET, upload["storage_path"], context.config.max_download_bytes
+    )
+
+    batch, columns = excel_connector.fetch(
+        data,
+        upload["original_filename"],
+        column_map=config.get("column_map"),
+        default_currency=str(connection.get("base_currency") or "USD"),
+        sheet=config.get("sheet"),
+    )
+    return batch, {
+        "upload_id": upload["id"],
+        "filename": upload["original_filename"],
+        # Reported rather than written back to the connection: the worker holds
+        # the service role and `update_store_connection` is a member's call. A
+        # shop that wants next month to skip the guessing copies this into the
+        # connection's column map, which is also the moment it gets checked.
+        "detected_columns": dict(columns),
+        "shape": excel_connector.shape_of(columns),
+    }
+
+
+def _fetch_quickbooks(
+    context: JobContext, connection: dict[str, Any], start: dt.date, end: dt.date
+) -> tuple[Any, dict[str, Any]]:
+    import json
+
+    config = connection.get("config") or {}
+    secret = _secret_json(connection)
+    realm = str(config.get("realm_id") or secret.get("realm_id") or "")
+
+    client = quickbooks_connector.QuickBooksClient(
+        client_id=str(secret.get("client_id") or ""),
+        client_secret=str(secret.get("client_secret") or ""),
+        refresh_token=str(secret.get("refresh_token") or ""),
+        realm_id=realm,
+        sandbox=bool(config.get("sandbox")),
+        timeout=context.config.store.timeout_seconds,
+    )
+    try:
+        batch = quickbooks_connector.fetch(
+            client,
+            start.isoformat(),
+            end.isoformat(),
+            default_currency=str(connection.get("base_currency") or "USD"),
+            progress=context.heartbeat,
+        )
+
+        # Intuit rotates the refresh token on every use and expires the old one.
+        # A connector that does not write the replacement back works for exactly
+        # one cycle and then locks the shop out with an error that reads like a
+        # problem on their side.
+        if client.rotated_refresh_token:
+            secret["refresh_token"] = client.rotated_refresh_token
+            context.supabase.rpc(
+                "rotate_store_connection_secret",
+                {"p_connection_id": connection["id"], "p_secret": json.dumps(secret)},
+            )
+            log.info("quickbooks refresh token rotated for connection %s", connection["id"])
+    finally:
+        client.close()
+
+    return batch, {"realm_id": realm, "sandbox": bool(config.get("sandbox"))}
+
+
+def _fetch_odoo(
+    context: JobContext, connection: dict[str, Any], start: dt.date, end: dt.date
+) -> tuple[Any, dict[str, Any]]:
+    config = connection.get("config") or {}
+    secret = _secret_json(connection)
+
+    client = odoo_connector.OdooClient(
+        base_url=str(config.get("base_url") or ""),
+        database=str(config.get("database") or ""),
+        username=str(config.get("username") or ""),
+        api_key=str(secret.get("api_key") or secret.get("password") or ""),
+        timeout=context.config.store.timeout_seconds,
+        allow_plain_http=context.config.store.allow_plain_http,
+    )
+    try:
+        batch = odoo_connector.fetch(
+            client,
+            start.isoformat(),
+            end.isoformat(),
+            default_currency=str(connection.get("base_currency") or "USD"),
+            max_lines=context.config.store.max_lines,
+            progress=context.heartbeat,
+        )
+    finally:
+        client.close()
+
+    return batch, {"database": config.get("database"), "base_url": config.get("base_url")}
+
+
+def _existing_ledger(context: JobContext, connection: dict[str, Any]) -> tuple[list, dict | None]:
+    """
+    The ledger as of the last sync, so this one can add to it rather than
+    replace it.
+    """
+    versions = context.supabase.select(
+        "dataset_versions",
+        columns="id,dataset_id,version_no,parquet_path,row_count",
+        filters={
+            "dataset_id": f"eq.{connection['dataset_id']}",
+            "parquet_path": "not.is.null",
+        },
+        order="version_no.desc",
+        limit=1,
+    )
+    if not versions:
+        return [], None
+
+    version = versions[0]
+    try:
+        data = _load_parquet(context, version)
+    except JobError as error:
+        # A missing object is recoverable here in a way it is not elsewhere: the
+        # source system still holds the history, so the sync continues with what
+        # it fetched and says in its summary that the earlier rows were lost.
+        log.warning("store ledger %s unreadable, rebuilding: %s", version["id"], error)
+        return [], version
+
+    return ledger.from_columns(_parquet_columns(data)), version
+
+
+def _parquet_columns(data: bytes) -> dict[str, list[Any]]:
+    import io
+
+    import polars as pl
+
+    frame = pl.read_parquet(io.BytesIO(data))
+    return frame.to_dict(as_series=False)
+
+
+def handle_sync_store(context: JobContext) -> dict[str, Any]:
+    connection = _store_connection(context)
+    source = str(connection.get("source") or "")
+    rates = _store_rates(connection)
+    start, end = _sync_window(context, connection)
+
+    run = context.supabase.rpc(
+        "start_store_sync",
+        {
+            "p_connection_id": connection["id"],
+            "p_job_id": context.job_id,
+            "p_window_start": start.isoformat(),
+            "p_window_end": end.isoformat(),
+        },
+    )
+    if isinstance(run, list):
+        run = run[0] if run else {}
+    run_id = (run or {}).get("id")
+
+    try:
+        context.heartbeat({"stage": "connecting", "source": source})
+
+        try:
+            if source == "excel":
+                batch, detail = _fetch_excel(context, connection)
+            elif source == "quickbooks":
+                batch, detail = _fetch_quickbooks(context, connection, start, end)
+            elif source == "odoo":
+                batch, detail = _fetch_odoo(context, connection, start, end)
+            else:
+                raise JobError(f"{source!r} is not a store source this agent can read")
+        except ledger.LedgerError as error:
+            # Every connector states its failures as sentences a shopkeeper can
+            # act on -- an expired QuickBooks grant, an Odoo address that is not
+            # reachable, a sheet with no date column. Reaching the worker's
+            # catch-all instead would replace all three with "the agent hit an
+            # unexpected error", and the one thing the shop could have fixed
+            # would be in a log on a VPS.
+            raise JobError(str(error)) from error
+
+        context.heartbeat({"stage": "merging", "fetched": len(batch.entries)})
+
+        previous, previous_version = _existing_ledger(context, connection)
+
+        # New entries first, then the ones already stored. `deduplicate` keeps
+        # the first occurrence of each source reference, so this ordering is
+        # what makes a corrected invoice replace its earlier reading rather than
+        # being discarded as a duplicate of it. Reversed, every correction the
+        # overlap window exists to catch would be silently thrown away.
+        merged, replaced = ledger.deduplicate(list(batch.entries) + previous)
+        merged.sort(key=lambda item: (item.occurred_on, item.source_ref))
+
+        if len(merged) > context.config.store.max_lines:
+            raise JobError(
+                f"this store's ledger has reached {len(merged):,} lines, past the "
+                f"{context.config.store.max_lines:,} this agent will hold in one version. "
+                f"Report on a shorter history, or raise HERMES_STORE_MAX_LINES."
+            )
+
+        if not merged:
+            summary = batch.summary()
+            summary["window"] = {"start": start.isoformat(), "end": end.isoformat()}
+            summary["detail"] = detail
+            if run_id:
+                context.supabase.rpc(
+                    "finish_store_sync",
+                    {
+                        "p_run_id": run_id,
+                        "p_status": "succeeded",
+                        "p_entries_written": 0,
+                        "p_summary": summary,
+                    },
+                )
+            return {
+                "connection_id": connection["id"],
+                "source": source,
+                "entries": 0,
+                "message": (
+                    f"No transactions were found between {start} and {end}. "
+                    f"Nothing has changed."
+                ),
+                "summary": summary,
+            }
+
+        # Convert once, here, so the stored ledger carries the base-currency
+        # figure it was synced with -- and the report still re-derives its own
+        # from the connection's current rates, so correcting a wrong rate fixes
+        # every past period rather than only the ones synced afterwards.
+        context.heartbeat({"stage": "writing", "rows": len(merged)})
+        columns = ledger.to_columns(merged, rates)
+
+        parquet_bytes = to_parquet(columns, list(range(1, len(merged) + 1)))
+        object_path = _parquet_path(
+            connection["org_id"], context.workspace_id, connection["dataset_id"], context.job_id
+        )
+        stored = context.supabase.upload(
+            PARQUET_BUCKET,
+            object_path,
+            parquet_bytes,
+            content_type="application/vnd.apache.parquet",
+            upsert=True,
+        )
+
+        summary = batch.summary()
+        summary.update(
+            {
+                "window": {"start": start.isoformat(), "end": end.isoformat()},
+                "detail": detail,
+                "fetched": len(batch.entries),
+                "replaced": replaced,
+                "stored": len(merged),
+                "previous_version_no": (previous_version or {}).get("version_no"),
+                "fx": rates.describe(),
+            }
+        )
+
+        version = context.supabase.rpc(
+            "record_dataset_version",
+            {
+                "p_dataset_id": connection["dataset_id"],
+                # 'raw' rather than 'cleaned': nothing here has been cleaned or
+                # approved. It is a faithful reading of what the shop's own
+                # system says, normalised into one row shape and no more.
+                "p_kind": "raw",
+                "p_parquet_path": stored.path,
+                "p_row_count": len(merged),
+                "p_column_hash": column_hash(columns),
+                "p_produced_by_job": context.job_id,
+                "p_created_by": context.requested_by(),
+                "p_metadata": {
+                    "stage": "synced",
+                    "source": source,
+                    "connection_id": connection["id"],
+                    "window_start": start.isoformat(),
+                    "window_end": end.isoformat(),
+                    "entries": len(merged),
+                },
+            },
+        )
+
+        if run_id:
+            context.supabase.rpc(
+                "finish_store_sync",
+                {
+                    "p_run_id": run_id,
+                    "p_status": "succeeded",
+                    "p_entries_written": len(merged),
+                    "p_dataset_version_id": version["id"],
+                    "p_summary": summary,
+                },
+            )
+
+        result = {
+            "connection_id": connection["id"],
+            "source": source,
+            "dataset_id": connection["dataset_id"],
+            "dataset_version_id": version["id"],
+            "version_no": version["version_no"],
+            "entries": len(merged),
+            "fetched": len(batch.entries),
+            "window": {"start": start.isoformat(), "end": end.isoformat()},
+            "summary": summary,
+        }
+
+        # One click from "connect my shop" to "here is my report". The chain is
+        # opt-in because a scheduled run enqueues both jobs itself, and firing a
+        # second report from inside the first would send every shop two.
+        if context.payload.get("then_report"):
+            report_job = context.supabase.rpc(
+                "enqueue_agent_job_internal",
+                {
+                    "p_workspace_id": context.workspace_id,
+                    "p_kind": "store_financials",
+                    "p_payload": {
+                        "connection_id": connection["id"],
+                        "granularity": context.payload.get("granularity"),
+                        "cadence": context.payload.get("cadence", "monthly"),
+                        "format": context.payload.get("format", "md"),
+                        "language": context.payload.get("language"),
+                        "dataset_version_id": version["id"],
+                    },
+                    "p_dataset_id": connection["dataset_id"],
+                    "p_dataset_version_id": version["id"],
+                    "p_requested_by": context.requested_by(),
+                },
+            )
+            result["report_job_id"] = (report_job or {}).get("id")
+
+        return result
+
+    except Exception as error:  # noqa: BLE001 - the run row must reach a verdict
+        # A sync that leaves no trace is the one failure mode a shop cannot
+        # diagnose: "last week is missing" and "last Tuesday's sync failed" look
+        # identical from the dashboard otherwise. So the run is closed here
+        # before the exception carries on to the worker, which still does its
+        # own reporting on the job row.
+        if run_id:
+            try:
+                context.supabase.rpc(
+                    "finish_store_sync",
+                    {
+                        "p_run_id": run_id,
+                        "p_status": "failed",
+                        "p_error": str(error)[:1000],
+                    },
+                )
+            except SupabaseError as closing:
+                log.warning("could not close sync run %s: %s", run_id, closing)
+        raise
+
+
+# -----------------------------------------------------------------------------
+# store_financials
+#
+# Revenue, cost of goods, gross profit, running costs and net profit for a day,
+# a week, a month or a year -- against the last complete period, with the one
+# before it for comparison, in English or Somali.
+#
+# Every figure comes from `tools/retail.py`, which is pure and tested. This
+# handler's job is to find the right rows, hand them over, and put the document
+# where the customer can download it.
+# -----------------------------------------------------------------------------
+
+_CADENCES = ("daily", "weekly", "monthly", "yearly")
+
+
+def _await_sync(context: JobContext) -> None:
+    """
+    Wait for the sync this report was scheduled alongside.
+
+    The schedule enqueues both jobs at once rather than chaining them, because
+    chaining would mean a failed sync silently produced no report at all. So the
+    report waits, and waiting is a deferral rather than a sleep: the job goes
+    back on the queue with its attempt returned, and this worker serves somebody
+    else's month-end in the meantime.
+    """
+    after = context.payload.get("after_job_id")
+    if not isinstance(after, str) or not after:
+        return
+
+    rows = context.supabase.select(
+        "agent_jobs",
+        columns="id,status,error",
+        filters={"id": f"eq.{after}", "workspace_id": f"eq.{context.workspace_id}"},
+        limit=1,
+    )
+    if not rows:
+        return
+
+    status = rows[0].get("status")
+    if status in ("queued", "running"):
+        raise JobDeferred(
+            30,
+            {"stage": "waiting_for_sync", "sync_job_id": after},
+            reason="waiting for the store sync to finish",
+        )
+    if status == "failed":
+        raise JobError(
+            "the sync that this report was waiting for failed, so there is nothing new to "
+            f"report on. {rows[0].get('error') or ''}".strip()
+        )
+    if status == "cancelled":
+        raise JobError("the sync this report was waiting for was cancelled")
+
+
+def _ledger_version(context: JobContext, connection: dict[str, Any]) -> dict[str, Any]:
+    version_id = context.payload.get("dataset_version_id") or context.job.get(
+        "dataset_version_id"
+    )
+    if version_id:
+        version = _load_version(context, version_id)
+        if version.get("dataset_id") != connection.get("dataset_id"):
+            raise JobError("that dataset version does not belong to this store connection")
+        return version
+
+    versions = context.supabase.select(
+        "dataset_versions",
+        columns="id,dataset_id,version_no,parquet_path,row_count,parent_version_id,raw_upload_id",
+        filters={
+            "dataset_id": f"eq.{connection['dataset_id']}",
+            "parquet_path": "not.is.null",
+        },
+        order="version_no.desc",
+        limit=1,
+    )
+    if not versions:
+        raise JobError(
+            "this store has not been synced yet, so there is nothing to report on. "
+            "Run a sync first."
+        )
+    return versions[0]
+
+
+def handle_store_financials(context: JobContext) -> dict[str, Any]:
+    _await_sync(context)
+
+    connection = _store_connection(context)
+    rates = _store_rates(connection)
+    payload = context.payload
+
+    cadence = str(payload.get("cadence") or "monthly")
+    if cadence not in _CADENCES:
+        raise JobError(f"{cadence!r} is not a reporting period; use one of {', '.join(_CADENCES)}")
+
+    granularity = str(payload.get("granularity") or "")
+    if granularity not in _CADENCES:
+        # The series inside the report, one step finer than the report itself.
+        # A month of daily bars is readable; a year of them is a wall.
+        granularity = {"daily": "daily", "weekly": "daily", "monthly": "weekly",
+                       "yearly": "monthly"}[cadence]
+
+    week_start = int(connection.get("week_start") or retail.WEEK_START)
+    language = str(payload.get("language") or connection.get("language") or "en")
+    if language not in somali.LANGUAGES:
+        language = "en"
+
+    version = _ledger_version(context, connection)
+    context.heartbeat({"stage": "reading"})
+    entries = ledger.from_columns(_parquet_columns(_load_parquet(context, version)))
+
+    explicit_start = _payload_date(payload.get("from"))
+    explicit_end = _payload_date(payload.get("to"))
+    if explicit_start and explicit_end:
+        window = (explicit_start, explicit_end)
+    else:
+        window = retail.reporting_window(
+            cadence, dt.date.today(), periods_back=1, week_start=week_start
+        )
+
+    in_window = [
+        entry for entry in entries if window[0] <= entry.occurred_on <= window[1]
+    ]
+
+    context.heartbeat({"stage": "computing", "rows": len(in_window)})
+    summary = retail.summarise(
+        in_window,
+        rates,
+        granularity=cadence,
+        week_start=week_start,
+        window=window,
+    )
+
+    # The finer series drawn inside the report covers only the period being
+    # reported, not the comparison period before it. A chart that quietly
+    # included last month would make every month look twice as long as it is.
+    reported = summary.current
+    series = None
+    if reported is not None and granularity != cadence:
+        series = retail.build_periods(
+            [e for e in in_window if reported.start <= e.occurred_on <= reported.end],
+            rates,
+            granularity,
+            week_start=week_start,
+            window=(reported.start, reported.end),
+        )
+
+    workspace_rows = context.supabase.select(
+        "workspaces", columns="id,name", filters={"id": f"eq.{context.workspace_id}"}, limit=1
+    )
+
+    document = store_report.build_store_document(
+        summary,
+        store_name=str(connection.get("name") or "Store"),
+        workspace_name=workspace_rows[0]["name"] if workspace_rows else "Workspace",
+        version_no=version["version_no"],
+        language=language,  # type: ignore[arg-type]
+        source=_SOURCE_NAMES.get(str(connection.get("source")), str(connection.get("source"))),
+        zakat=retail.estimate_zakat(connection.get("balances")),
+        series=series,
+        series_granularity=granularity,  # type: ignore[arg-type]
+    )
+
+    markdown = report.render_markdown(document)
+
+    requested = payload.get("format")
+    fmt = requested if isinstance(requested, str) and requested else "md"
+    if fmt != "md":
+        context.heartbeat({"stage": "rendering", "format": fmt})
+    rendered, content_type, extension = documents.render_document(
+        document,
+        fmt,
+        _brand_for(context, payload.get("branding")) if fmt != "md" else None,
+    )
+
+    period = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m")
+    path = (
+        f"{connection['org_id']}/{context.workspace_id}/{period}/"
+        f"{connection['id']}__{cadence}__{context.job_id}.{extension}"
+    )
+    stored = context.supabase.upload(
+        EXPORTS_BUCKET, path, rendered, content_type=content_type, upsert=True
+    )
+
+    figures = store_report.headline_figures(summary)
+    return {
+        "connection_id": connection["id"],
+        "report_path": stored.path,
+        "bucket": EXPORTS_BUCKET,
+        "format": extension,
+        # Carried so the download route names the file after the shop rather
+        # than after a uuid. See downloadName() in api/exports/route.ts.
+        "dataset_name": str(connection.get("name") or "Store report"),
+        "version_no": version["version_no"],
+        "dataset_version_id": version["id"],
+        "cadence": cadence,
+        "granularity": granularity,
+        "language": language,
+        "window": {"start": window[0].isoformat(), "end": window[1].isoformat()},
+        "markdown": markdown,
+        "figures": figures,
+        "series": [p.to_dict() for p in (series or summary.periods)],
+        "zakat": retail.estimate_zakat(connection.get("balances")).to_dict(),
+    }
+
+
+# What the report calls each source, for the "produced from" line. The enum
+# values are lowercase identifiers and a document should not print one.
+_SOURCE_NAMES = {
+    "excel": "an uploaded spreadsheet",
+    "quickbooks": "QuickBooks Online",
+    "odoo": "Odoo",
+}
+
+
 HANDLERS: dict[str, Callable[[JobContext], dict[str, Any]]] = {
     "parse_workbook": handle_parse_workbook,
     "profile_dataset": handle_profile_dataset,
@@ -2760,6 +3529,8 @@ HANDLERS: dict[str, Callable[[JobContext], dict[str, Any]]] = {
     "categorize_dataset": handle_categorize_dataset,
     "categorise_statement": handle_categorise_statement,
     "hmrc_knowledge_check": handle_hmrc_knowledge_check,
+    "sync_store": handle_sync_store,
+    "store_financials": handle_store_financials,
 }
 
 

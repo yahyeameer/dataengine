@@ -55,6 +55,11 @@ const DOWNLOADABLE_KINDS = new Set([
   'export_dataset',
   'kanban_report',
   'categorise_statement',
+  // The store report, which writes `report_path` and `bucket` under the same
+  // names for the same reason: this route needs no special case for it, only
+  // for the kind to be listed. The comment above is the record of what happens
+  // when it is not.
+  'store_financials',
 ]);
 
 /**

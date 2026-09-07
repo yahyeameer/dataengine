@@ -63,7 +63,7 @@ export function NavLink({
    Icons.
 
    Inline and stroked to match the weight of the wordmark. Four of them, drawn
-   here rather than pulled from a dependency, because four icons is not worth a
+   here rather than pulled from a dependency, because five icons is not worth a
    package and a bundle.
    -------------------------------------------------------------------------- */
 
@@ -115,6 +115,27 @@ export function AssistantIcon() {
         strokeWidth="1.4"
         strokeLinecap="round"
       />
+    </svg>
+  );
+}
+
+/** A shopfront: an awning over a counter. */
+export function StoreIcon() {
+  return (
+    <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" aria-hidden>
+      <path
+        d="M2.25 6.25h11.5v6a1.5 1.5 0 0 1-1.5 1.5h-8.5a1.5 1.5 0 0 1-1.5-1.5v-6Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M1.75 6.25 3 2.75h10l1.25 3.5"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path d="M6.25 13.75v-3.5h3.5v3.5" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
     </svg>
   );
 }

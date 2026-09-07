@@ -67,7 +67,9 @@ def _table(headers: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _bar_chart(rows: list[tuple[str, float]], width: int = 32) -> str:
+def _bar_chart(
+    rows: list[tuple[str, float]], width: int = 32, labels: list[str] | None = None
+) -> str:
     """
     A bar chart drawn in text.
 
@@ -81,6 +83,12 @@ def _bar_chart(rows: list[tuple[str, float]], width: int = 32) -> str:
     Scaled against the largest absolute value so a month of credits reads as a
     bar on the same axis rather than as an empty row. The number is always
     printed beside the bar: the bar is for the shape, the figure is the fact.
+
+    `labels` is the caller's own formatting of those figures, and using it is
+    the whole reason `Bars` carries them. This renderer ignored them and fell
+    back to `_money`'s default pound sign, so a store report priced in dollars
+    drew a chart labelled in sterling -- correct numbers under the wrong
+    currency, which is worse than no chart.
     """
     if not rows:
         return ""
@@ -89,10 +97,11 @@ def _bar_chart(rows: list[tuple[str, float]], width: int = 32) -> str:
     longest_label = max(len(label) for label, _value in rows)
 
     lines = ["```"]
-    for label, value in rows:
+    for index, (label, value) in enumerate(rows):
         filled = int(round(abs(value) / largest * width))
         bar = ("█" * filled).ljust(width, "░")
-        lines.append(f"{label.ljust(longest_label)}  {bar}  {_money(value)}")
+        figure = labels[index] if labels and index < len(labels) else _money(value)
+        lines.append(f"{label.ljust(longest_label)}  {bar}  {figure}")
     lines.append("```")
     return "\n".join(lines) + "\n"
 
@@ -157,7 +166,15 @@ class Callout:
 
 @dataclass(frozen=True)
 class KeyFigures:
+    """
+    `headers` names the two columns for the renderings that draw this as a
+    table. It exists because a Somali store report rendered "Measure | Value"
+    over a column of Somali labels, which is the exact tell of a translated
+    skin rather than a report written in the language.
+    """
+
     figures: list[Figure]
+    headers: tuple[str, str] = ("Measure", "Value")
 
 
 @dataclass(frozen=True)
@@ -479,13 +496,13 @@ def render_markdown(document: ReportDocument) -> str:
                 rows.append([figure.label, figure.value])
                 if figure.note:
                     rows.append([figure.note[0], figure.note[1]])
-            parts.append(_table(["Measure", "Value"], rows))
+            parts.append(_table(list(block.headers), rows))
 
         elif isinstance(block, Table):
             parts.append(_table(block.headers, block.rows))
 
         elif isinstance(block, Bars):
-            parts.append(_bar_chart(block.items))
+            parts.append(_bar_chart(block.items, labels=block.labels))
 
         elif isinstance(block, Footnote):
             parts.append(f"\n---\n\n_{block.text}_\n")

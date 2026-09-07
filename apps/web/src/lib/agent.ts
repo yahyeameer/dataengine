@@ -121,6 +121,10 @@ export const JOB_KIND_LABELS: Record<AgentJobKind, string> = {
   // "verifier" are the internal machinery of this one; an accountant is waiting
   // for a report that somebody checked, and that is what the label should say.
   kanban_report: 'Writing and checking the report',
+  // Named for what the shopkeeper asked for, not for the machinery. Nobody
+  // waiting on this cares that it speaks JSON-RPC to Odoo.
+  sync_store: 'Reading your store',
+  store_financials: 'Working out your revenue and profit',
 };
 
 /**
