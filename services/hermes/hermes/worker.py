@@ -100,7 +100,7 @@ class Worker:
         # reason. These are the two kinds that reach a customer's own system
         # holding a customer's own credential, so a worker that has not been
         # deliberately switched on for that should not claim them.
-        store_kinds = ("sync_store", "store_financials")
+        store_kinds = ("sync_store", "store_financials", "test_store_connection")
         if not config.store.enabled:
             named = [kind for kind in requested if kind in store_kinds]
             if named:

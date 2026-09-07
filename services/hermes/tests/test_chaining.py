@@ -391,8 +391,9 @@ def test_disabled_store_connectors_are_not_announced():
     """
     worker = _worker(store=False)
     try:
-        assert not {"sync_store", "store_financials"} & set(worker.capabilities)
-        assert set(worker.capabilities) == set(HANDLERS) - {"sync_store", "store_financials"}
+        gated = {"sync_store", "store_financials", "test_store_connection"}
+        assert not gated & set(worker.capabilities)
+        assert set(worker.capabilities) == set(HANDLERS) - gated
     finally:
         worker.close()
 

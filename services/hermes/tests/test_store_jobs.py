@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as dt
 import io
+import json
 from typing import Any
 
 import polars as pl
@@ -29,6 +30,7 @@ from hermes.jobs import (
     JobError,
     handle_store_financials,
     handle_sync_store,
+    handle_test_store_connection,
 )
 
 USD = FxRates(base="USD", rates={"SOS": __import__("decimal").Decimal("570")})
@@ -534,3 +536,219 @@ class TestReport:
             )
         )
         assert result["zakat"]["computed"] is False
+
+
+# -----------------------------------------------------------------------------
+# Setting a store up
+# -----------------------------------------------------------------------------
+
+
+ODOO_CONNECTION = {
+    **CONNECTION,
+    "source": "odoo",
+    "config": {},
+    "language": "so",
+    "secret": None,
+}
+
+
+class FakeOdooClient:
+    """Records what it was constructed with, so the test can assert on it."""
+
+    last: dict[str, Any] = {}
+
+    def __init__(self, **kwargs: Any):
+        FakeOdooClient.last = kwargs
+
+    def close(self) -> None:
+        pass
+
+
+class FakeQuickBooksClient:
+    last: dict[str, Any] = {}
+
+    def __init__(self, **kwargs: Any):
+        FakeQuickBooksClient.last = kwargs
+        self.rotated_refresh_token = None
+
+    def close(self) -> None:
+        pass
+
+
+class TestConnectionSetup:
+    """
+    What a shop owner sees between "here is what my accountant sent me" and a
+    working connection. Before this job existed they found out whether the
+    four boxes they filled in were right at the first sync -- which is to say,
+    when they were already waiting for a report.
+    """
+
+    def _supabase(self, connection: dict[str, Any]) -> FakeSupabase:
+        return FakeSupabase(connection=connection)
+
+    def test_a_complete_paste_connects_and_names_the_company(self, monkeypatch):
+        from hermes import jobs
+
+        monkeypatch.setattr(jobs.odoo_connector, "OdooClient", FakeOdooClient)
+        monkeypatch.setattr(
+            jobs.odoo_connector,
+            "verify",
+            lambda client: {"company_name": "Suuqa Hodan", "accounts": 84,
+                            "income_accounts": 6, "expense_accounts": 21},
+        )
+
+        supabase = self._supabase({
+            **ODOO_CONNECTION,
+            "secret": "URL=https://hodan.odoo.com\nDB=hodan_live\n"
+                      "User=api@hodan.so\nAPI_KEY=k-99887766",
+        })
+        result = handle_test_store_connection(context(supabase, {"connection_id": "conn-1"}))
+
+        assert result["ok"] is True
+        # The company name is the point: "connected" is a claim the owner
+        # cannot check, and credentials that open the wrong company file would
+        # otherwise be found at month end.
+        assert "Suuqa Hodan" in result["message"]
+        assert "Suuqa Hodan" in result["message_so"]
+        assert result["evidence"]["accounts"] == 84
+
+    def test_the_settings_in_the_file_are_kept_so_nobody_types_them_twice(self, monkeypatch):
+        from hermes import jobs
+
+        monkeypatch.setattr(jobs.odoo_connector, "OdooClient", FakeOdooClient)
+        monkeypatch.setattr(jobs.odoo_connector, "verify", lambda client: {"company_name": "X"})
+
+        supabase = self._supabase({
+            **ODOO_CONNECTION,
+            "secret": "URL=https://hodan.odoo.com\nDB=hodan_live\nUser=api@hodan.so\nKEY=k",
+        })
+        handle_test_store_connection(context(supabase, {"connection_id": "conn-1"}))
+
+        setup = supabase.called("apply_store_connection_setup")[0]
+        assert setup["p_base_url"] == "https://hodan.odoo.com"
+        assert setup["p_database"] == "hodan_live"
+        assert setup["p_username"] == "api@hodan.so"
+
+    def test_only_the_secret_half_is_written_back_to_the_vault(self, monkeypatch):
+        from hermes import jobs
+
+        monkeypatch.setattr(jobs.odoo_connector, "OdooClient", FakeOdooClient)
+        monkeypatch.setattr(jobs.odoo_connector, "verify", lambda client: {"company_name": "X"})
+
+        supabase = self._supabase({
+            **ODOO_CONNECTION,
+            "secret": "URL=https://hodan.odoo.com\nDB=b\nUser=c\nKEY=the-key",
+        })
+        handle_test_store_connection(context(supabase, {"connection_id": "conn-1"}))
+
+        stored = json.loads(supabase.called("rotate_store_connection_secret")[0]["p_secret"])
+        assert stored == {"api_key": "the-key"}
+
+    def test_an_incomplete_paste_names_what_is_missing_in_both_languages(self):
+        supabase = self._supabase({**ODOO_CONNECTION, "secret": "just-a-key-on-its-own"})
+        result = handle_test_store_connection(context(supabase, {"connection_id": "conn-1"}))
+
+        assert result["ok"] is False
+        assert set(result["missing"]) == {"base_url", "database", "username"}
+        assert "Odoo address" in result["message"]
+        assert "Cinwaanka Odoo" in result["message_so"]
+        # And it says who to ask, which is the half the owner actually needs.
+        assert result["next_step_so"]
+        # Nothing was dialled and nothing was saved.
+        assert supabase.called("rotate_store_connection_secret") == []
+
+    def test_an_unreadable_paste_says_so_rather_than_failing_the_job(self):
+        supabase = self._supabase({**ODOO_CONNECTION, "secret": "Dear Yahye,\n\nBest wishes"})
+        result = handle_test_store_connection(context(supabase, {"connection_id": "conn-1"}))
+        assert result["ok"] is False
+        assert result["missing"]
+
+    def test_a_refusal_from_the_shop_system_is_relayed_as_a_sentence(self, monkeypatch):
+        from hermes import jobs
+
+        def refuse(client):
+            raise jobs.odoo_connector.OdooError(
+                "Odoo rejected the username or API key for database 'hodan_live'."
+            )
+
+        monkeypatch.setattr(jobs.odoo_connector, "OdooClient", FakeOdooClient)
+        monkeypatch.setattr(jobs.odoo_connector, "verify", refuse)
+
+        supabase = self._supabase({
+            **ODOO_CONNECTION,
+            "secret": "URL=https://a.odoo.com\nDB=hodan_live\nUser=c\nKEY=wrong",
+        })
+        result = handle_test_store_connection(context(supabase, {"connection_id": "conn-1"}))
+
+        assert result["ok"] is False
+        assert "rejected the username" in result["message"]
+        assert result["message_so"] != result["message"]
+        # A credential that does not work is not written back as canonical.
+        assert supabase.called("rotate_store_connection_secret") == []
+
+    def test_a_test_that_spends_a_quickbooks_token_saves_its_replacement(self, monkeypatch):
+        """
+        Intuit replaces the refresh token on every use, including this one. Not
+        writing the replacement back would mean a test that reports "connected"
+        and invalidates the credential it just proved.
+        """
+        from hermes import jobs
+
+        def verify(client):
+            client.rotated_refresh_token = "RT-NEW"
+            return {"company_name": "Hodan Electronics"}
+
+        monkeypatch.setattr(jobs.quickbooks_connector, "QuickBooksClient", FakeQuickBooksClient)
+        monkeypatch.setattr(jobs.quickbooks_connector, "verify", verify)
+
+        supabase = self._supabase({
+            **CONNECTION,
+            "source": "quickbooks",
+            "language": "en",
+            "config": {"realm_id": "9130350000"},
+            "secret": json.dumps({
+                "clientId": "A", "clientSecret": "B",
+                "refreshToken": "RT-OLD", "realmId": "9130350000",
+            }),
+        })
+        result = handle_test_store_connection(context(supabase, {"connection_id": "conn-1"}))
+
+        assert result["ok"] is True
+        stored = json.loads(supabase.called("rotate_store_connection_secret")[0]["p_secret"])
+        assert stored["refresh_token"] == "RT-NEW"
+
+    def test_a_spreadsheet_store_is_told_it_needs_nothing(self):
+        supabase = self._supabase({**CONNECTION, "source": "excel", "language": "so"})
+        result = handle_test_store_connection(context(supabase, {"connection_id": "conn-1"}))
+        assert result["ok"] is True
+        assert result["missing"] == []
+        assert "Excel" in result["message_so"]
+
+    def test_the_verdict_a_browser_receives_carries_no_credential(self, monkeypatch):
+        """
+        The whole result is returned to the dashboard and stored on the job row,
+        so it has to be safe verbatim rather than safe once somebody remembers
+        to strip it.
+        """
+        from hermes import jobs
+
+        monkeypatch.setattr(jobs.odoo_connector, "OdooClient", FakeOdooClient)
+        monkeypatch.setattr(jobs.odoo_connector, "verify", lambda client: {"company_name": "X"})
+
+        secret = "kx-0099-do-not-leak-this"
+        supabase = self._supabase({
+            **ODOO_CONNECTION,
+            "secret": f"URL=https://a.odoo.com\nDB=b\nUser=c\nKEY={secret}",
+        })
+        result = handle_test_store_connection(context(supabase, {"connection_id": "conn-1"}))
+
+        assert secret not in json.dumps(result)
+        # And it is still informative: it names the key it read the value from.
+        assert result["understood"]["api_key"] == "KEY"
+        assert result["masked"]["api_key"].startswith("kx-0")
+
+    def test_a_connection_from_another_workspace_is_refused_before_anything_is_read(self):
+        supabase = self._supabase({**ODOO_CONNECTION, "workspace_id": "ws-elsewhere"})
+        with pytest.raises(JobError) as error:
+            handle_test_store_connection(context(supabase, {"connection_id": "conn-1"}))
+        assert "does not belong to this workspace" in str(error.value)

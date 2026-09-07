@@ -2140,6 +2140,7 @@ export type Database = {
         | "kanban_report"
         | "sync_store"
         | "store_financials"
+        | "test_store_connection"
       agent_job_status:
         | "queued"
         | "running"
@@ -2327,6 +2328,7 @@ export const Constants = {
         "kanban_report",
         "sync_store",
         "store_financials",
+        "test_store_connection",
       ],
       agent_job_status: [
         "queued",

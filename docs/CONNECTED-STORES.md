@@ -35,6 +35,9 @@ Two job kinds, and the split between them is the design:
   holds no opinion about what the numbers mean.
 - **`store_financials`** reports. It reads that version, computes the period
   figures, and renders a document. It never touches the shop's system.
+- **`test_store_connection`** sets it up. It reads what the owner pasted, works
+  out which value is which, dials the system once and answers in a sentence. It
+  reads and never writes a ledger.
 
 Keeping them apart is what makes a failed sync produce a *visible failure*
 rather than a quietly stale report, and what lets a shop re-report last month in
@@ -43,14 +46,102 @@ Somali without fetching anything again.
 ## Getting a report
 
 1. **Connect the store.** *Stores* in the sidebar → *Connect a store*. Pick the
-   system, name the shop, choose the report language. A spreadsheet store needs
-   no credentials at all and takes about a minute.
+   system, name the shop, choose the report language, and **paste whatever you
+   were sent** — see below. A spreadsheet store needs no credentials at all and
+   takes about a minute.
 2. **Read it once.** *Read my store now.* The first sync reaches back 90 days so
    the first report has a previous period to compare against.
 3. **Put it on a schedule.** *Send me a report on a schedule* → every week, as a
    PDF. The report always covers the **last complete period** — a monthly report
    fired on the 1st reports the month that just ended, never the few hours of
    the one that just began.
+
+## Connecting, when nobody knows what a refresh token is
+
+This is the part that decides whether the feature is usable, and it is not a
+technical problem. Most shop owners did not set up their own QuickBooks or
+Odoo — an accountant did, or the company that sold them the system. Asking them
+to fill in four boxes labelled *Client ID*, *Client secret*, *Refresh token* and
+*Realm ID* asks them to learn somebody else's job first.
+
+So there is one box, and it takes whatever they have.
+
+```
+  the owner pastes            the worker                        the owner reads
+  ────────────────            ──────────                        ───────────────
+  a JSON file       ─┐
+  four .env lines   ─┼──▶  1. read it by key name  ──┐
+  an email          ─┤     2. ask Hermes about the   │
+  a key on its own  ─┘        names it could not     ├──▶  "Connected to Suuqa
+                              place                  │      Hodan Electronics"
+                           3. keep the settings      │            or
+                           4. save the secret        │      "Still needed: the
+                           5. dial the system once ──┘       Odoo address"
+```
+
+**Four input shapes are read.** JSON, nested or flat (vendors nest — Intuit's
+own download wraps the values in an object per environment). `KEY=value` lines
+from a `.env` or a shell snippet. `Address: … / Database: … / API key: …` lines
+from an email. And a bare value with no label at all, which is the commonest
+real case: an Odoo integrator sends the key on its own.
+
+**Key names are matched per source, not globally.** A key called `token` means
+the API key for Odoo and is genuinely ambiguous for QuickBooks, where it could
+be the refresh token or the client secret. Matching only against the roles the
+source needs removes most of the ambiguity before anything has to guess, and
+what is left is *left unresolved* rather than guessed — a wrong mapping locks
+the owner out of their own company file with an error that looks like their
+fault.
+
+**The Hermes channel sees key names and never values.** When a name is left over
+and a role is still unfilled — `Furaha_API`, say — the names go to the model and
+the mapping comes back as names. The values are re-attached inside the worker,
+from text that never left it. This is `llm/redact.py`'s discipline applied to
+the one other thing a customer types: the boundary is the signature of
+`map_credential_names`, which takes a list of strings, rather than a rule
+somebody has to remember. The deterministic table runs first, so the model is
+consulted only when it would otherwise be a dead end, and its absence costs a
+sentence rather than the feature.
+
+**The test dials the system and names the company.** "Connected" is a claim an
+owner cannot check. "Connected to Suuqa Hodan Electronics" is one they can, and
+it catches the mistake nobody expects — credentials that work perfectly against
+the *wrong* company file, which would otherwise surface at month end as a report
+full of somebody else's numbers. For Odoo the test also reads the chart of
+accounts, because an API user can authenticate perfectly and still have no
+Accounting access; a sync that discovers that at month end reports nothing with
+no explanation.
+
+**Settings found in the file are kept.** A credentials file usually carries the
+Odoo address, database and username alongside the key. Having read them once,
+asking the owner to type them again would be the whole problem restated. They
+are written by `apply_store_connection_setup`, which fills blanks only — a
+setting the owner typed outranks one read out of a pasted file, and silently
+overwriting the first with the second is how a connection starts pointing at an
+integrator's demo database three weeks after it was working.
+
+**Nothing that comes back holds a credential.** The verdict carries key names,
+masks (`AB12••••••••89XY`) and sentences, and it is returned to the browser and
+stored on the job row verbatim. That is a property of how the worker builds it,
+not of anyone remembering to strip it: `CredentialDraft.summary()` has no value
+in it to strip. `test_the_verdict_a_browser_receives_carries_no_credential`
+asserts it on the whole result rather than field by field.
+
+### For the owner who has to ask someone
+
+The setup panel carries a message to copy and send on. It names the four values
+in the words the person who set the system up will recognise, and it answers the
+question that always comes back first — *why do they want my password* — by
+saying what the tool does and does not do:
+
+> I am connecting our Odoo to a reporting tool so it can read our sales and
+> expenses. Could you send me these four things? … Read access to Accounting is
+> enough — please do not give it more than that. The tool only reads; it will
+> not post or change anything in Odoo.
+
+In Somali as well as English, along with where to find an API key
+(*Preferences → Account Security → New API Key*, which is not the user's
+password) and who to ask when they cannot.
 
 ## What makes it Somali, specifically
 
@@ -211,6 +302,7 @@ with a sentence naming the fix rather than storing a secret somewhere less safe.
 ```
 services/hermes/hermes/connectors/
   ledger.py        the one row shape, the category vocabulary, the FX table
+  credentials.py   reading whatever a shop pasted, and never leaking it
   excel.py         three sheet shapes, English and Somali headers
   quickbooks.py    OAuth refresh, the Query API, refunds as negative revenue
   odoo.py          JSON-RPC, posted move lines, the sign flip, the SSRF floor
@@ -220,7 +312,9 @@ services/hermes/hermes/tools/
   somali.py        both languages, both currencies, the trading week
   store_report.py  the document, in the order it argues
 
-services/hermes/hermes/jobs.py        handle_sync_store, handle_store_financials
+services/hermes/hermes/llm/router.py  map_credential_names — names, never values
+services/hermes/hermes/jobs.py        the three handlers
+apps/web/src/lib/store-setup.ts       what to ask for, and who to ask
 supabase/migrations/*_store_*.sql     connections, secrets, runs, schedules
 apps/web/src/app/app/stores/          the screen
 apps/web/src/app/api/stores/          connect, settings, credentials, schedule
@@ -228,8 +322,11 @@ apps/web/src/app/api/stores/          connect, settings, credentials, schedule
 
 Tests: `test_retail.py` (the engine and both languages), `test_store_connectors.py`
 (QuickBooks and Odoo against recorded payloads, and the address guard),
-`test_store_jobs.py` (the handlers, tenancy first).
+`test_store_credentials.py` (the shapes people actually paste, and the proof
+that no value reaches a log, a job result or a model), `test_store_jobs.py`
+(the handlers, tenancy first).
 
 ```bash
-cd services/hermes && python -m pytest tests/test_retail.py tests/test_store_connectors.py tests/test_store_jobs.py
+cd services/hermes && python -m pytest tests/test_retail.py \
+  tests/test_store_connectors.py tests/test_store_credentials.py tests/test_store_jobs.py
 ```

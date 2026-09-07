@@ -17,6 +17,13 @@ import { createServerSupabase } from '@/lib/supabase/server';
  *
  * Neither the credential nor any part of it is logged, and the route replies
  * with an acknowledgement rather than an echo of what it stored.
+ *
+ * PUT accepts a *paste* as well as named fields, and that is the important
+ * shape. A shopkeeper does not have a client secret; they have whatever their
+ * accountant emailed them. This route does not try to understand it -- it
+ * stores it and lets the worker's `test_store_connection` job work it out,
+ * which keeps the parsing beside the connectors that need it and keeps a
+ * decomposed credential out of this process entirely.
  */
 
 const settingsSchema = z.object({
@@ -109,6 +116,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
  * read.
  */
 const credentialSchema = z.union([
+  // What a shop actually has: the file, the email, the four lines their
+  // integrator sent. Stored as pasted and read by the worker, which is the only
+  // place that knows what an Odoo credential looks like -- and the only place
+  // that should, since parsing it here would mean the Next server holding a
+  // decomposed credential in memory for no reason.
+  z.object({ paste: z.string().min(1).max(20_000) }),
   z.object({
     clientId: z.string().min(1).max(500),
     clientSecret: z.string().min(1).max(500),
@@ -133,18 +146,27 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
       );
     }
 
+    // A paste goes to the vault exactly as typed; the structured forms are
+    // normalised here because they already are structured. Either way the
+    // worker's `test_store_connection` job reads it, works out what it is,
+    // and writes back a canonical form -- so a shop that pasted an email and
+    // one that filled in boxes end up storing the same shape.
     const secret =
-      'apiKey' in body
-        ? { api_key: body.apiKey }
-        : {
-            client_id: body.clientId,
-            client_secret: body.clientSecret,
-            refresh_token: body.refreshToken,
-          };
+      'paste' in body
+        ? body.paste
+        : JSON.stringify(
+            'apiKey' in body
+              ? { api_key: body.apiKey }
+              : {
+                  client_id: body.clientId,
+                  client_secret: body.clientSecret,
+                  refresh_token: body.refreshToken,
+                },
+          );
 
     const { error } = await supabase.rpc('set_store_connection_secret', {
       p_connection_id: id,
-      p_secret: JSON.stringify(secret),
+      p_secret: secret,
     });
 
     if (error) {

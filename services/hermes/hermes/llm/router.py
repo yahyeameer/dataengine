@@ -32,6 +32,7 @@ from typing import Any
 import httpx
 
 from ..config import LLMConfig
+from .redact import redact
 
 log = logging.getLogger("hermes.llm")
 
@@ -225,6 +226,86 @@ class LLMRouter:
             if key in valid_keys and isinstance(value, str) and value.strip()
         }
         return rationales, result.model
+
+    def map_credential_names(
+        self, source: str, key_names: list[str], roles: list[str]
+    ) -> tuple[dict[str, str], str | None]:
+        """
+        Decide which of a shop's own key names holds which credential role.
+
+        **The model is given the names and never the values.** That is the same
+        boundary `llm/redact.py` draws around a dataset, applied to the one
+        other input in this system that a customer types: a credential. A key
+        called `Furaha_API` is a name, and knowing that it means the API key is
+        a language question. What the key *contains* is not the model's
+        business, is not in the prompt, and cannot be -- this method's signature
+        takes a list of strings, so there is no value here to leak.
+
+        The names are the shop's own labels, so they are still customer text and
+        still go through `redact` on the way out: an integrator's handover file
+        occasionally uses an email address as a key.
+
+        A model that is unreachable, returns nothing, or invents a role costs
+        this nothing at all. The deterministic alias table in
+        `connectors/credentials.py` has already resolved the ordinary cases;
+        this only ever fills what that could not, and the caller reports what is
+        still missing either way.
+        """
+        if not self.enabled or not key_names or not roles:
+            return {}, None
+
+        # Belt and braces on the guarantee above. A caller that one day passes
+        # `["client_secret=abc123"]` instead of `["client_secret"]` gets its
+        # values dropped rather than sent, because the promise in the docstring
+        # should not depend on every future caller having read it.
+        safe_names = [
+            redact(name)[:120]
+            for name in key_names
+            if isinstance(name, str) and name.strip() and "=" not in name
+        ][:40]
+        if not safe_names:
+            return {}, None
+
+        system = (
+            "A small-business owner has pasted a credentials file for their accounting or "
+            "ERP system. You are given ONLY the key names from that file -- never the "
+            "values -- and the roles the connector still needs to fill.\n\n"
+            "Map key names to roles. Rules:\n"
+            "- Use only the role names given to you. Never invent one.\n"
+            "- Map a name only when you are confident. Leaving a role unfilled is correct "
+            "and safe; a wrong mapping locks the owner out of their own system with an "
+            "error that looks like their fault.\n"
+            "- The names may be in English or Somali, and may be abbreviated.\n"
+            "- Each role appears at most once. Omit any name you cannot place.\n\n"
+            'Return JSON: {"mapping": {"<key name>": "<role>"}}'
+        )
+
+        user = json.dumps(
+            {"system_type": source, "key_names": safe_names, "roles_needed": roles},
+            default=str,
+        )
+
+        result = self._complete("reasoning", system, user, json_mode=True)
+        if not result.ok or not result.content:
+            return {}, None
+
+        parsed = self._parse_json(result.content)
+        if not parsed or not isinstance(parsed.get("mapping"), dict):
+            return {}, result.model
+
+        allowed_roles = set(roles)
+        allowed_names = set(safe_names)
+        mapping: dict[str, str] = {}
+        taken: set[str] = set()
+        for name, role in parsed["mapping"].items():
+            if not isinstance(name, str) or not isinstance(role, str):
+                continue
+            if name not in allowed_names or role not in allowed_roles or role in taken:
+                continue
+            mapping[name] = role
+            taken.add(role)
+
+        return mapping, result.model
 
     def categorize_values(
         self,

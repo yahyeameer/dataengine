@@ -65,6 +65,12 @@ const KINDS = [
   // naming a connection from anywhere else.
   'sync_store',
   'store_financials',
+  // Setting a store up. Reads the credential the caller just stored, works out
+  // what it is, dials the shop's system once and reports whether it answered.
+  // It writes no ledger and returns no credential material -- the verdict it
+  // produces holds key names, masks and sentences, which is why it can go
+  // straight onto the job row and into a browser.
+  'test_store_connection',
 ] as const;
 
 /**
@@ -136,7 +142,14 @@ export async function POST(request: Request) {
       // store sync is a background chore that can take minutes against somebody
       // else's API, and putting it ahead of interactive work would make the
       // assistant feel broken every time a shop refreshed.
-      p_priority: body.kind === 'query_dataset' ? 10 : body.kind === 'sync_store' ? 120 : 100,
+      // A connection test is somebody sitting at a setup screen watching a
+      // spinner, so it goes near the front with the typed questions.
+      p_priority:
+        body.kind === 'query_dataset' || body.kind === 'test_store_connection'
+          ? 10
+          : body.kind === 'sync_store'
+            ? 120
+            : 100,
     });
 
     if (error) {

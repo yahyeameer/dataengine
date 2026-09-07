@@ -373,6 +373,59 @@ MOVE_LINE_FIELDS = [
 ]
 
 
+def verify(client: OdooClient) -> dict[str, Any]:
+    """
+    Prove the credentials work, and that the API user can see the accounts.
+
+    Two checks rather than one, because logging in is not the thing that
+    matters. An Odoo user can authenticate perfectly and still have no
+    Accounting access, and a sync that discovers that at month end reports
+    nothing at all with no explanation. Reading the chart of accounts is
+    exactly what `fetch` does first, so a test that passes here is a test of
+    the real path.
+
+    The company name comes back too, so the owner can confirm it opened *their*
+    database and not the demo one their integrator left behind.
+    """
+    uid = client.authenticate()
+
+    company = ""
+    try:
+        rows = client.execute("res.company", "search_read", [[], ["name"]], {"limit": 1})
+        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+            company = str(rows[0].get("name") or "").strip()
+    except OdooError:
+        # Not fatal and not worth failing a test over: some API users are
+        # scoped to accounting alone, which is exactly the access we want.
+        company = ""
+
+    accounts = client.read_accounts()
+    income = sum(1 for account in accounts.values() if direction_for(account) == "revenue")
+    expense = sum(
+        1 for account in accounts.values() if direction_for(account) in ("expense", "cogs")
+    )
+
+    if not accounts:
+        raise OdooError(
+            "the login worked but the chart of accounts is empty. Check that Accounting is "
+            "installed in this Odoo database."
+        )
+    if income == 0 and expense == 0:
+        raise OdooError(
+            f"the login worked and {len(accounts)} accounts were read, but none of them is an "
+            "income or expense account. The API user may be looking at the wrong database, or "
+            "may need read access to Accounting."
+        )
+
+    return {
+        "user_id": uid,
+        "company_name": company,
+        "accounts": len(accounts),
+        "income_accounts": income,
+        "expense_accounts": expense,
+    }
+
+
 def fetch(
     client: OdooClient,
     start: str,
@@ -425,4 +478,5 @@ __all__ = [
     "direction_for",
     "entries_from_move_lines",
     "fetch",
+    "verify",
 ]

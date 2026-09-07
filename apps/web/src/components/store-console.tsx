@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { isWorkerOnline, type EngineWorker } from '@/lib/agent';
+import { needsCredentials, setupGuide, type SetupLanguage } from '@/lib/store-setup';
 
 import {
   Badge,
@@ -95,21 +96,6 @@ const SOURCE_LABELS: Record<Source, string> = {
   odoo: 'Odoo',
 };
 
-/**
- * What each source needs, said in the shop's terms rather than the API's.
- *
- * The spreadsheet line matters most: it is the one a shop can act on in a
- * minute, and it is what most Somali retailers actually keep their books in.
- */
-const SOURCE_HELP: Record<Source, string> = {
-  excel:
-    'Reads the sales sheet you upload here. Columns can be named in English or Somali — Date or Taariikh, Amount or Qiimaha, Income and Expenses or Dakhli and Kharash.',
-  quickbooks:
-    'Reads invoices, sales receipts, credit notes and purchases straight from your QuickBooks company. You will need the client id, client secret and refresh token from your Intuit app.',
-  odoo:
-    'Reads the posted general ledger from your Odoo instance, so the figures agree with your own Odoo profit and loss. You will need an API key from Preferences → Account Security.',
-};
-
 const CADENCES = [
   { value: 'daily', label: 'Every day' },
   { value: 'weekly', label: 'Every week' },
@@ -174,7 +160,7 @@ export function StoreConsole({ workspaces }: { workspaces: StoreWorkspace[] }) {
       runs: (storeData.runs ?? []) as SyncRun[],
       schedules: (storeData.schedules ?? []) as Schedule[],
       jobs: ((agentData.jobs ?? []) as Job[]).filter((job) =>
-        ['sync_store', 'store_financials'].includes(job.kind),
+        ['sync_store', 'store_financials', 'test_store_connection'].includes(job.kind),
       ),
       workers: (agentData.workers ?? []) as Worker[],
     };
@@ -256,7 +242,10 @@ export function StoreConsole({ workspaces }: { workspaces: StoreWorkspace[] }) {
     [connections, selectedId],
   );
 
-  async function enqueue(kind: 'sync_store' | 'store_financials', payload: Record<string, unknown>) {
+  async function enqueue(
+    kind: 'sync_store' | 'store_financials' | 'test_store_connection',
+    payload: Record<string, unknown>,
+  ) {
     if (!selected) return;
     setBusy(true);
     setError(null);
@@ -278,6 +267,15 @@ export function StoreConsole({ workspaces }: { workspaces: StoreWorkspace[] }) {
 
   const latestReport = jobs.find(
     (job) => job.kind === 'store_financials' && job.status === 'succeeded',
+  );
+
+  // Only for the store being looked at, and only the newest. A verdict from a
+  // different shop's setup would be worse than none.
+  const latestTest = jobs.find(
+    (job) =>
+      job.kind === 'test_store_connection' &&
+      job.status === 'succeeded' &&
+      (job.result as { connection_id?: string } | null)?.connection_id === selectedId,
   );
 
   return (
@@ -326,8 +324,24 @@ export function StoreConsole({ workspaces }: { workspaces: StoreWorkspace[] }) {
         {showForm && (
           <ConnectForm
             workspaceId={workspaceId}
-            onDone={async () => {
+            onDone={async (connectionId) => {
               setShowForm(false);
+              // Test it straight away rather than waiting for the owner to
+              // press something. The question they have at this moment is "did
+              // that work", and the whole point of the job is that it can be
+              // answered in seconds instead of at the first sync.
+              if (connectionId) {
+                await fetch('/api/agent/jobs', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    workspaceId,
+                    kind: 'test_store_connection',
+                    payload: { connection_id: connectionId },
+                  }),
+                }).catch(() => undefined);
+                setSelectedId(connectionId);
+              }
               await load();
             }}
           />
@@ -393,6 +407,16 @@ export function StoreConsole({ workspaces }: { workspaces: StoreWorkspace[] }) {
                 <button
                   type="button"
                   disabled={busy}
+                  className={ghostButtonClass('sm')}
+                  onClick={() =>
+                    enqueue('test_store_connection', { connection_id: selected.id })
+                  }
+                >
+                  Check connection
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
                   className={secondaryButtonClass('sm')}
                   onClick={() =>
                     enqueue('sync_store', {
@@ -454,6 +478,8 @@ export function StoreConsole({ workspaces }: { workspaces: StoreWorkspace[] }) {
             />
           </Panel>
 
+          {latestTest && <ConnectionVerdict job={latestTest} />}
+
           {latestReport && <ReportCard job={latestReport} />}
 
           <RunHistory runs={runs.filter((run) => run.connection_id === selected.id)} jobs={jobs} />
@@ -470,36 +496,24 @@ function ConnectForm({
   onDone,
 }: {
   workspaceId: string;
-  onDone: () => Promise<void>;
+  onDone: (connectionId: string | null) => Promise<void>;
 }) {
   const [source, setSource] = useState<Source>('excel');
   const [name, setName] = useState('');
-  const [language, setLanguage] = useState<'en' | 'so'>('en');
+  const [language, setLanguage] = useState<SetupLanguage>('en');
   const [baseCurrency, setBaseCurrency] = useState('USD');
   const [shillingRate, setShillingRate] = useState('');
-  const [realmId, setRealmId] = useState('');
-  const [baseUrl, setBaseUrl] = useState('');
-  const [database, setDatabase] = useState('');
-  const [username, setUsername] = useState('');
-  const [clientId, setClientId] = useState('');
-  const [clientSecret, setClientSecret] = useState('');
-  const [refreshToken, setRefreshToken] = useState('');
-  const [apiKey, setApiKey] = useState('');
+  const [paste, setPaste] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const guide = setupGuide(source, language);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const config =
-        source === 'odoo'
-          ? { baseUrl, database, username }
-          : source === 'quickbooks'
-            ? { realmId }
-            : {};
-
       const response = await fetch('/api/stores', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -507,7 +521,11 @@ function ConnectForm({
           workspaceId,
           name,
           source,
-          config,
+          // The settings a paste usually carries are left empty on purpose. The
+          // connection test reads them out of what was pasted and fills them
+          // in, so asking for them here would be asking twice for the same
+          // thing — and getting a mismatch when the two disagree.
+          config: {},
           baseCurrency: baseCurrency.toUpperCase(),
           // The shilling column appears only when a rate is given. A converted
           // figure with no stated rate is a number nobody can check.
@@ -519,21 +537,23 @@ function ConnectForm({
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? 'Could not connect that store');
 
-      if (source !== 'excel') {
-        const credentials =
-          source === 'odoo' ? { apiKey } : { clientId, clientSecret, refreshToken };
-        const stored = await fetch(`/api/stores/${data.connection.id}`, {
+      const connectionId: string = data.connection.id;
+
+      if (needsCredentials(source) && paste.trim()) {
+        const stored = await fetch(`/api/stores/${connectionId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(credentials),
+          body: JSON.stringify({ paste }),
         });
         if (!stored.ok) {
           const problem = await stored.json();
-          throw new Error(problem.error ?? 'The store was created but its credentials were not saved.');
+          throw new Error(
+            problem.error ?? 'The store was created but its credentials were not saved.',
+          );
         }
       }
 
-      await onDone();
+      await onDone(connectionId);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Something went wrong');
     } finally {
@@ -555,7 +575,7 @@ function ConnectForm({
           />
         </Field>
 
-        <Field label="Where do you keep your books?" hint={SOURCE_HELP[source]}>
+        <Field label="Where do you keep your books?" hint={guide.summary}>
           <select
             className={selectClass}
             value={source}
@@ -573,7 +593,7 @@ function ConnectForm({
           <select
             className={selectClass}
             value={language}
-            onChange={(event) => setLanguage(event.target.value as 'en' | 'so')}
+            onChange={(event) => setLanguage(event.target.value as SetupLanguage)}
           >
             <option value="en">English</option>
             <option value="so">Soomaali</option>
@@ -606,75 +626,112 @@ function ConnectForm({
         </Field>
       </div>
 
-      {source === 'quickbooks' && (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Company (realm) id">
-            <input className={inputClass} value={realmId} onChange={(e) => setRealmId(e.target.value)} required />
-          </Field>
-          <Field label="Client id">
-            <input className={inputClass} value={clientId} onChange={(e) => setClientId(e.target.value)} required />
-          </Field>
-          <Field label="Client secret">
-            <input
-              className={inputClass}
-              type="password"
-              value={clientSecret}
-              onChange={(e) => setClientSecret(e.target.value)}
-              required
-            />
-          </Field>
+      {needsCredentials(source) && (
+        <>
+          {/*
+            One box, not four. A shopkeeper does not have a "client secret" —
+            they have whatever their accountant emailed them, and the agent is
+            better at reading that than they are at taking it apart.
+          */}
           <Field
-            label="Refresh token"
-            hint="Stored encrypted and never shown again. QuickBooks replaces it each time it is used, and the agent keeps the replacement."
+            label="Paste what you were sent"
+            hint="A file, an email, a few lines — whatever form it came in. The agent works out which value is which and tells you if anything is still missing. Nothing is shown again once it is saved."
           >
-            <input
-              className={inputClass}
-              type="password"
-              value={refreshToken}
-              onChange={(e) => setRefreshToken(e.target.value)}
-              required
+            <textarea
+              className={`${inputClass} min-h-32 font-mono text-xs`}
+              value={paste}
+              onChange={(event) => setPaste(event.target.value)}
+              placeholder={
+                source === 'odoo'
+                  ? 'Address: https://mystore.odoo.com\nDatabase: mystore\nUser: api@mystore.so\nAPI key: ...'
+                  : '{\n  "clientId": "...",\n  "clientSecret": "...",\n  "refreshToken": "...",\n  "realmId": "..."\n}'
+              }
+              spellCheck={false}
             />
           </Field>
-        </div>
-      )}
 
-      {source === 'odoo' && (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Odoo address" hint="Must be https and reachable from the internet.">
-            <input
-              className={inputClass}
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="https://mystore.odoo.com"
-              required
-            />
-          </Field>
-          <Field label="Database name">
-            <input className={inputClass} value={database} onChange={(e) => setDatabase(e.target.value)} required />
-          </Field>
-          <Field label="Username">
-            <input className={inputClass} value={username} onChange={(e) => setUsername(e.target.value)} required />
-          </Field>
-          <Field label="API key" hint="Stored encrypted and never shown again.">
-            <input
-              className={inputClass}
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              required
-            />
-          </Field>
-        </div>
+          <SetupHelp source={source} language={language} />
+        </>
       )}
 
       {error && <ErrorText>{error}</ErrorText>}
 
       <div>
         <button type="submit" className={buttonClass()} disabled={busy || !name}>
-          {busy ? 'Connecting…' : 'Connect'}
+          {busy ? 'Connecting…' : needsCredentials(source) ? 'Connect and test' : 'Connect'}
         </button>
       </div>
     </form>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Where to get the credentials, and what to send the person who has them.
+ *
+ * The copy button is the feature. Most shop owners did not set up their own
+ * QuickBooks or Odoo, so the useful thing is not a better form — it is a
+ * message they can forward to their accountant that names the four values in
+ * the words that accountant will recognise, and says what the tool does and
+ * does not do with them.
+ */
+function SetupHelp({ source, language }: { source: Source; language: SetupLanguage }) {
+  const guide = setupGuide(source, language);
+  const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(guide.request);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      // Clipboard access is refused in some embedded browsers. The text is on
+      // screen and selectable either way, so this is not worth an error.
+      setOpen(true);
+    }
+  }
+
+  return (
+    <div className="rounded-[var(--radius-md)] border border-border bg-surface-2 p-4">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center justify-between gap-3 text-left text-sm font-medium"
+      >
+        <span>{language === 'so' ? 'Ma haysatid furayaasha?' : 'Don’t have these?'}</span>
+        <span className="text-xs text-subtle">{open ? '−' : '+'}</span>
+      </button>
+
+      {open && (
+        <div className="mt-3 flex flex-col gap-3 text-sm">
+          <ol className="ml-4 list-decimal space-y-1.5 text-muted">
+            {guide.steps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+
+          <div>
+            <p className="text-sm font-medium">
+              {language === 'so' ? 'Weydii' : 'Ask'}: <span className="font-normal text-muted">{guide.askWho}</span>
+            </p>
+            <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded-[var(--radius-md)] border border-border bg-surface p-3 text-xs leading-relaxed text-muted">
+              {guide.request}
+            </pre>
+            <button type="button" onClick={copy} className={`${secondaryButtonClass('sm')} mt-2`}>
+              {copied
+                ? language === 'so'
+                  ? 'La koobiyeeyay'
+                  : 'Copied'
+                : language === 'so'
+                  ? 'Koobi codsiga'
+                  : 'Copy this request'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -761,6 +818,109 @@ function ScheduleRow({
       )}
       {error && <ErrorText>{error}</ErrorText>}
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What the agent made of what you pasted.
+ *
+ * Three things, in this order: whether it connected and to whose company, what
+ * it understood from the file, and what is still missing. The middle one is
+ * there because a shop owner who pasted the wrong half of an email needs to see
+ * that we read `clientId` and `realmId` and nothing else — a bare "failed"
+ * leaves them with no idea which line was wrong.
+ *
+ * Everything shown here comes off the job result verbatim. It holds key names,
+ * masks and sentences and no credential material at all, which is a property of
+ * how the worker builds it rather than of this component remembering to strip
+ * anything.
+ */
+function ConnectionVerdict({ job }: { job: Job }) {
+  const result = (job.result ?? {}) as Record<string, unknown>;
+  const ok = result.ok === true;
+  const language = result.language === 'so' ? 'so' : 'en';
+
+  const message = String(
+    (language === 'so' ? result.message_so : result.message) ?? result.message ?? '',
+  );
+  const nextStep = String(
+    (language === 'so' ? result.next_step_so : result.next_step) ?? result.next_step ?? '',
+  );
+  const understood = (result.understood ?? {}) as Record<string, string>;
+  const masked = (result.masked ?? {}) as Record<string, string>;
+  const missingLabels = Array.isArray(result.missing_labels)
+    ? (result.missing_labels as Array<{ role: string; en: string; so: string }>)
+    : [];
+  const evidence = (result.evidence ?? {}) as Record<string, unknown>;
+
+  if (!message) return null;
+
+  return (
+    <Panel title={ok ? 'Connection checked' : 'Connection not ready yet'}>
+      <div
+        className={`rounded-[var(--radius-md)] border px-4 py-3 text-sm ${
+          ok
+            ? 'border-success/25 bg-success-soft text-success'
+            : 'border-warning/25 bg-warning-soft text-warning'
+        }`}
+      >
+        {message}
+      </div>
+
+      {nextStep && <p className="mt-3 text-sm text-muted">{nextStep}</p>}
+
+      {Object.keys(understood).length > 0 && (
+        <div className="mt-4">
+          <p className="mb-2 text-sm font-medium">What the agent read</p>
+          <ul className="flex flex-col gap-1.5 text-sm">
+            {Object.entries(understood).map(([role, key]) => (
+              <li
+                key={role}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-md)] border border-border bg-surface-2 px-3 py-2"
+              >
+                <span className="text-muted">
+                  {role.replace(/_/g, ' ')} <span className="text-subtle">← {key}</span>
+                </span>
+                <span className="tabular text-xs text-subtle">{masked[role]}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {missingLabels.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-2 text-sm font-medium">Still needed</p>
+          <ul className="ml-4 list-disc space-y-1 text-sm text-muted">
+            {missingLabels.map((field) => (
+              <li key={field.role}>{language === 'so' ? field.so : field.en}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {Array.isArray(result.unresolved) && (result.unresolved as string[]).length > 0 && (
+        <p className="mt-3 text-xs text-subtle">
+          Not recognised: {(result.unresolved as string[]).join(', ')}. If one of these is a value
+          the agent needs, rename it or paste it on its own line with a label.
+        </p>
+      )}
+
+      {ok && Object.keys(evidence).length > 0 && (
+        <dl className="mt-4 grid gap-2 sm:grid-cols-3">
+          {Object.entries(evidence)
+            .filter(([, value]) => value !== '' && value !== null && value !== false)
+            .map(([key, value]) => (
+              <div key={key} className="rounded-[var(--radius-md)] border border-border bg-surface-2 p-3">
+                <dt className="text-xs text-subtle">{key.replace(/_/g, ' ')}</dt>
+                <dd className="mt-1 text-sm font-medium">{String(value)}</dd>
+              </div>
+            ))}
+        </dl>
+      )}
+    </Panel>
   );
 }
 
@@ -864,7 +1024,11 @@ function RunHistory({ runs, jobs }: { runs: SyncRun[]; jobs: Job[] }) {
           {active.map((job) => (
             <li key={job.id} className="flex items-center gap-2 text-sm text-muted">
               <StatusBadge status={job.status} />
-              {job.kind === 'sync_store' ? 'Reading your store' : 'Working out your figures'}
+              {job.kind === 'sync_store'
+                ? 'Reading your store'
+                : job.kind === 'test_store_connection'
+                  ? 'Checking the connection'
+                  : 'Working out your figures'}
             </li>
           ))}
         </ul>

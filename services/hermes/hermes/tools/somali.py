@@ -1,5 +1,5 @@
 """
-Somali localisation for store reports.
+Somali localisation for store reports and for connecting a store.
 
 Not a translation layer bolted onto an English report. The figures are computed
 once in `retail.py` and this module decides only how they are *said*, so the
@@ -208,6 +208,118 @@ def zakat_note(computed: bool, english: str, language: Language = "en") -> str:
     return ZAKAT_NOTES["computed" if computed else "missing"]
 
 
+# The credential roles, named the way the person holding the file would name
+# them. `client_id` is a role name in our code and a meaningless phrase to a
+# shopkeeper, and the Somali gloss matters more here than anywhere else in the
+# product: this is the one screen where someone is looking at a file they were
+# handed and trying to work out which line is which.
+FIELD_LABELS: dict[str, tuple[str, str]] = {
+    "client_id": ("Client ID", "Client ID — aqoonsiga barnaamijka"),
+    "client_secret": ("Client secret", "Client secret — furaha qarsoon ee barnaamijka"),
+    "refresh_token": ("Refresh token", "Refresh token — furaha cusboonaysiinta"),
+    "realm_id": ("Company ID", "Company ID — aqoonsiga shirkadda QuickBooks"),
+    "base_url": ("Odoo address", "Cinwaanka Odoo — sida https://dukaankayga.odoo.com"),
+    "database": ("Database name", "Magaca database-ka"),
+    "username": ("Username", "Magaca isticmaalaha"),
+    "api_key": ("API key", "API key — furaha Odoo"),
+}
+
+# What a connection test says when it is done. Keyed by code so the sentence a
+# shop reads and the sentence stored on the job are the same fact in two
+# languages, rather than an English message with a Somali caption.
+CONNECTION_MESSAGES: dict[str, tuple[str, str]] = {
+    "connected": (
+        "Connected to {company}. The agent can read this store.",
+        "Waa la isku xiray {company}. Wakiilku hadda wuu akhrisan karaa dukaankan.",
+    ),
+    "connected_unnamed": (
+        "Connected. The agent can read this store.",
+        "Waa la isku xiray. Wakiilku hadda wuu akhrisan karaa dukaankan.",
+    ),
+    "missing": (
+        "Almost there. Still needed: {fields}.",
+        "Waad ku dhowdahay. Wali waxaa loo baahan yahay: {fields}.",
+    ),
+    "nothing_understood": (
+        "Nothing in what was pasted looks like a credential for this system. "
+        "Paste the whole file or email you were sent, including the labels.",
+        "Waxa la dhajiyay midna uma eka furayaal nidaamkan. Fadlan dhaji dhammaan faylka ama "
+        "emailka lagu soo diray, magacyada oo dhan la socdaan.",
+    ),
+    "refused": (
+        "{system} refused these credentials. {detail}",
+        "{system} wuu diiday furayaashan. {detail}",
+    ),
+    "unreachable": (
+        "The agent could not reach {system}. {detail}",
+        "Wakiilku ma gaari karin {system}. {detail}",
+    ),
+    "no_credentials_needed": (
+        "A spreadsheet store reads the files you upload here, so there is nothing to connect.",
+        "Dukaanka warqadda Excel wuxuu akhriyaa faylasha aad halkan soo shubto, "
+        "sidaas darteed wax la isku xiro ma jiro.",
+    ),
+}
+
+# What to do next, which is the half a shopkeeper actually needs.
+NEXT_STEPS: dict[str, tuple[str, str]] = {
+    "ask_owner": (
+        "Send the request below to whoever set up your system — your accountant, or the "
+        "company that installed it. They will recognise what it asks for.",
+        "Codsiga hoose u dir qofka nidaamkaaga sameeyay — xisaabiyahaaga, ama shirkadda "
+        "kuu rakibtay. Way garan doonaan waxa la weydiinayo.",
+    ),
+    "reconnect": (
+        "Reconnect the company and paste the new credentials. A QuickBooks refresh token "
+        "expires after 100 days without use.",
+        "Dib u xir shirkadda oo dhaji furayaasha cusub. Furaha QuickBooks wuu dhacaa haddii "
+        "aan la isticmaalin 100 maalmood.",
+    ),
+    "check_address": (
+        "Check the address is the one you use in a browser, and that it opens from outside "
+        "your shop's own network.",
+        "Hubi in cinwaanku yahay kan aad browser-ka ku isticmaasho, iyo inuu ka furmo meel "
+        "ka baxsan shabakadda dukaanka.",
+    ),
+    "ready": (
+        "Nothing else to do. Ask for a report whenever you like, or put one on a schedule.",
+        "Wax kale ma jiraan. Warbixin codso markaad rabto, ama jadwal u samee.",
+    ),
+}
+
+
+def field_label(role: str, language: Language = "en") -> str:
+    pair = FIELD_LABELS.get(role)
+    if not pair:
+        return role.replace("_", " ")
+    return pair[1] if language == "so" else pair[0]
+
+
+def connection_message(code: str, language: Language = "en", **values: Any) -> str:
+    """
+    A connection-test verdict, in the reader's language.
+
+    Falls back to the code's English rather than to a formatted string with a
+    hole in it: a template that outgrew its values is a bug, and the reader
+    should see a sentence either way.
+    """
+    pair = CONNECTION_MESSAGES.get(code)
+    if not pair:
+        return str(values.get("detail") or code)
+    template = pair[1] if language == "so" else pair[0]
+    try:
+        return template.format(**values).strip()
+    except (KeyError, IndexError):
+        return (pair[0].format(**values) if language == "so" else template).strip()
+
+
+def next_step(code: str, language: Language = "en") -> str:
+    pair = NEXT_STEPS.get(code)
+    if not pair:
+        return ""
+    return pair[1] if language == "so" else pair[0]
+
+
 def term(key: str, language: Language = "en") -> str:
     pair = TERMS.get(key)
     if not pair:
@@ -377,6 +489,9 @@ def translate_insight(code: str, english: str, values: dict[str, Any], currency:
 
 __all__ = [
     "CATEGORY_LABELS",
+    "CONNECTION_MESSAGES",
+    "FIELD_LABELS",
+    "NEXT_STEPS",
     "CURRENCIES",
     "GRANULARITY_LABELS",
     "LANGUAGES",
@@ -386,11 +501,14 @@ __all__ = [
     "WEEKDAYS",
     "ZAKAT_NOTES",
     "category_label",
+    "connection_message",
     "dual_money",
     "format_date",
     "format_period_label",
+    "field_label",
     "granularity_label",
     "money",
+    "next_step",
     "percent",
     "signed_percent",
     "term",

@@ -125,6 +125,7 @@ export const JOB_KIND_LABELS: Record<AgentJobKind, string> = {
   // waiting on this cares that it speaks JSON-RPC to Odoo.
   sync_store: 'Reading your store',
   store_financials: 'Working out your revenue and profit',
+  test_store_connection: 'Checking the connection to your store',
 };
 
 /**

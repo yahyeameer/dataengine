@@ -395,6 +395,34 @@ class QuickBooksClient:
                 return rows
 
 
+def verify(client: QuickBooksClient) -> dict[str, Any]:
+    """
+    Prove the credentials work, and say whose company they open.
+
+    The company name is the point. "Connected" is a claim a shop owner cannot
+    check; "connected to Suuqa Hodan Electronics" is one they can, and it is
+    also the check that catches the real mistake here — credentials that work
+    perfectly against the wrong company file, which would otherwise be found
+    at the end of the month by a report full of somebody else's numbers.
+
+    CompanyInfo is the cheapest read in the API and needs no date window, so a
+    test costs one call and never touches a transaction.
+    """
+    client.authenticate()
+    payload = client.query("select * from CompanyInfo")
+    rows = (payload.get("QueryResponse") or {}).get("CompanyInfo") or []
+    company = rows[0] if rows and isinstance(rows[0], dict) else {}
+
+    address = company.get("CompanyAddr") or {}
+    return {
+        "company_name": str(company.get("CompanyName") or "").strip(),
+        "country": str(address.get("Country") or "").strip(),
+        "currency": str((company.get("Country") or "")).strip(),
+        "fiscal_year_start": str(company.get("FiscalYearStartMonth") or "").strip(),
+        "rotated_refresh_token": bool(client.rotated_refresh_token),
+    }
+
+
 def fetch(
     client: QuickBooksClient,
     start: str,
@@ -422,4 +450,5 @@ __all__ = [
     "QuickBooksError",
     "entries_from_documents",
     "fetch",
+    "verify",
 ]

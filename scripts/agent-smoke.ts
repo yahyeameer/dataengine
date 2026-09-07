@@ -325,6 +325,10 @@ async function main() {
       { p_run_id: randomUUID(), p_status: 'succeeded', p_entries_written: 1 },
     ],
     ['enqueue_due_store_reports', { p_limit: 5 }],
+    // Writes connection settings from what a test worked out. Reachable from a
+    // browser it would let anyone repoint someone else's store at their own
+    // Odoo, so it is worker-only like the rest.
+    ['apply_store_connection_setup', { p_connection_id: randomUUID(), p_base_url: 'https://x.odoo.com' }],
   ];
 
   for (const [fn, params] of workerOnly) {

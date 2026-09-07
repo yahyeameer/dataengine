@@ -78,7 +78,17 @@ rate stated, generator power and security and hawala transfer fees are their own
 cost categories, account names are matched in both languages, and zakat is
 refused rather than guessed when the balances it needs are not there.
 
-Two job kinds. `sync_store` reads a window and writes it as an ordinary
+Connecting is one box, not four. A shop owner does not have a "refresh token";
+they have whatever their accountant emailed them, so they paste it — a JSON
+file, four `.env` lines, an email, a bare key — and a `test_store_connection`
+job works out which value is which, dials the system once and answers *connected
+to Suuqa Hodan Electronics* or *still needed: the Odoo address*. Where a key
+name defeats the deterministic table, the Hermes channel is asked about the
+**names** and never the values: `map_credential_names` takes a list of strings,
+so the boundary is a signature rather than a rule. The panel also carries a
+message to copy and send to whoever set the system up, in Somali or English.
+
+Three job kinds. `sync_store` reads a window and writes it as an ordinary
 immutable dataset version — the same Parquet, the same version chain, the same
 storage tenancy boundary as an uploaded workbook, so transactions never land in
 the database the dashboard queries. `store_financials` reads that version and
@@ -181,9 +191,11 @@ The store connectors add three suites inside that last one, and they run with no
 database, no network and no model: `test_retail.py` (the period engine, the
 findings, both languages), `test_store_connectors.py` (QuickBooks and Odoo
 against recorded payloads, and the guard that stops a customer-supplied Odoo
-address pointing back inside our network) and `test_store_jobs.py` (the two
-handlers against a fake Supabase, tenancy first — a job whose payload names
-another firm's store connection must be refused before anything is fetched).
+address pointing back inside our network), `test_store_credentials.py` (the
+shapes people actually paste, and the proof that no credential value reaches a
+log, a job result or a model) and `test_store_jobs.py` (the three handlers
+against a fake Supabase, tenancy first — a job whose payload names another
+firm's store connection must be refused before anything is fetched).
 
 `test:isolation` and `test:agent` are the two that matter most. Two accounting firms sharing one
 database is the entire risk model of this product (PRD section 13), and between them these suites

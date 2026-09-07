@@ -27,10 +27,12 @@ dataset has reached instead of one opaque "working…".
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 from decimal import Decimal
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
+from .connectors import credentials
 from .connectors import excel as excel_connector
 from .connectors import ledger
 from .connectors import odoo as odoo_connector
@@ -3516,6 +3518,277 @@ _SOURCE_NAMES = {
 }
 
 
+# -----------------------------------------------------------------------------
+# test_store_connection
+#
+# The job that turns "here is what my accountant sent me" into either a working
+# connection or one sentence saying what is still missing.
+#
+# It exists because of what the setup flow used to demand. A shop owner in
+# Bakaara does not know what a refresh token is, and the product asked them for
+# four of those, in four boxes, and then said nothing at all about whether they
+# were right until the first sync -- which is to say, at the moment they were
+# waiting for a report. Now they paste whatever they were given, and this
+# answers within seconds.
+#
+# The order matters and is the whole design:
+#
+#   1. read what was pasted, deterministically, by key name;
+#   2. ask the Hermes channel about the *names* it could not place -- never the
+#      values, which do not leave this process;
+#   3. keep the non-secret half on the connection so nobody types it twice;
+#   4. re-store the secret half in canonical form, so every later sync reads
+#      one shape rather than whatever the shop happened to paste;
+#   5. dial the system once, and report whose company answered.
+#
+# Step 5 is the one that catches the mistake nobody expects: credentials that
+# work perfectly against the wrong company file. "Connected" is a claim the
+# owner cannot check. "Connected to Suuqa Hodan Electronics" is one they can.
+# -----------------------------------------------------------------------------
+
+
+def _connection_language(connection: dict[str, Any]) -> str:
+    language = str(connection.get("language") or "en")
+    return language if language in somali.LANGUAGES else "en"
+
+
+def _resolve_credentials(
+    context: JobContext, connection: dict[str, Any], raw: str
+) -> tuple[credentials.CredentialDraft, str | None]:
+    """
+    Work out what the shop pasted, using the model only for the names.
+
+    The deterministic alias table in `connectors/credentials.py` handles the
+    ordinary cases -- `QUICKBOOKS_CLIENT_ID`, `clientId`, `client_secret` -- and
+    this only reaches for the model when a key name is left over *and* a role is
+    still unfilled. That ordering matters: a model consulted first would be
+    consulted on every setup, cost a call every time, and be the thing that
+    breaks when it is unreachable. Consulted last, it is the difference between
+    "we could not place `Furaha_API`" and a working connection, and its absence
+    costs a sentence rather than the feature.
+
+    What it is given is key names. Values are not in the call and cannot be --
+    `map_credential_names` takes a list of strings, so the boundary is the
+    signature rather than a rule somebody has to remember.
+    """
+    source = str(connection.get("source") or "")
+    draft = credentials.parse_credentials(raw, source)
+
+    if draft.complete or not draft.unresolved or not context.llm.enabled:
+        return draft, None
+
+    mapping, model = context.llm.map_credential_names(source, draft.unresolved, draft.missing)
+    if mapping:
+        credentials.apply_mapping(draft, mapping, raw)
+    return draft, model
+
+
+def _verify_source(
+    context: JobContext, connection: dict[str, Any], draft: credentials.CredentialDraft
+) -> dict[str, Any]:
+    """Dial the shop's system once. Raises LedgerError with a readable message."""
+    source = str(connection.get("source") or "")
+    fields = draft.fields
+    config = connection.get("config") or {}
+    settings = context.config.store
+
+    if source == "quickbooks":
+        client = quickbooks_connector.QuickBooksClient(
+            client_id=fields.get("client_id", ""),
+            client_secret=fields.get("client_secret", ""),
+            refresh_token=fields.get("refresh_token", ""),
+            realm_id=fields.get("realm_id") or str(config.get("realm_id") or ""),
+            sandbox=bool(config.get("sandbox")),
+            timeout=settings.timeout_seconds,
+        )
+        try:
+            evidence = quickbooks_connector.verify(client)
+            # A test spends a refresh token like any other call, and Intuit
+            # replaces it. Not writing the replacement back would mean a
+            # successful test that quietly invalidates the credential it just
+            # proved -- the next sync would fail, and the last thing the shop
+            # saw was the word "connected".
+            if client.rotated_refresh_token:
+                fields["refresh_token"] = client.rotated_refresh_token
+            return evidence
+        finally:
+            client.close()
+
+    if source == "odoo":
+        client = odoo_connector.OdooClient(
+            base_url=fields.get("base_url") or str(config.get("base_url") or ""),
+            database=fields.get("database") or str(config.get("database") or ""),
+            username=fields.get("username") or str(config.get("username") or ""),
+            api_key=fields.get("api_key", ""),
+            timeout=settings.timeout_seconds,
+            allow_plain_http=settings.allow_plain_http,
+        )
+        try:
+            return odoo_connector.verify(client)
+        finally:
+            client.close()
+
+    raise JobError(f"{source!r} is not a store source this agent can test")
+
+
+def handle_test_store_connection(context: JobContext) -> dict[str, Any]:
+    connection = _store_connection(context)
+    source = str(connection.get("source") or "")
+    language = _connection_language(connection)
+
+    def say(code: str, **values: Any) -> dict[str, str]:
+        """Both languages, always. The stored verdict is not one of them."""
+        return {
+            "message": somali.connection_message(code, "en", **values),
+            "message_so": somali.connection_message(code, "so", **values),
+        }
+
+    if source == "excel":
+        return {
+            "connection_id": connection["id"],
+            "source": source,
+            "ok": True,
+            "language": language,
+            **say("no_credentials_needed"),
+            "next_step": somali.next_step("ready", "en"),
+            "next_step_so": somali.next_step("ready", "so"),
+            "understood": {},
+            "missing": [],
+        }
+
+    raw = connection.get("secret")
+    if not isinstance(raw, str) or not raw.strip():
+        return {
+            "connection_id": connection["id"],
+            "source": source,
+            "ok": False,
+            "language": language,
+            **say("nothing_understood"),
+            "next_step": somali.next_step("ask_owner", "en"),
+            "next_step_so": somali.next_step("ask_owner", "so"),
+            "understood": {},
+            "missing": list(credentials.REQUIRED_FIELDS.get(source, ())),
+            "missing_labels": _field_labels(source, credentials.REQUIRED_FIELDS.get(source, ())),
+        }
+
+    context.heartbeat({"stage": "reading_credentials"})
+    draft, model = _resolve_credentials(context, connection, raw)
+
+    # Keep the non-secret half, so the settings a file already carried are never
+    # asked for twice. Fills blanks only -- see apply_store_connection_setup.
+    public = draft.public()
+    if public:
+        context.supabase.rpc(
+            "apply_store_connection_setup",
+            {
+                "p_connection_id": connection["id"],
+                "p_base_url": public.get("base_url"),
+                "p_database": public.get("database"),
+                "p_username": public.get("username"),
+                "p_realm_id": public.get("realm_id"),
+            },
+        )
+
+    # Everything reported outward from here is a name, a mask or a sentence.
+    # `draft.summary()` holds no value, by construction rather than by care.
+    verdict: dict[str, Any] = {
+        "connection_id": connection["id"],
+        "source": source,
+        "language": language,
+        "model_used": model,
+        **draft.summary(),
+        "missing_labels": _field_labels(source, draft.missing),
+    }
+
+    if not draft.fields:
+        verdict.update(say("nothing_understood"))
+        verdict["ok"] = False
+        verdict["next_step"] = somali.next_step("ask_owner", "en")
+        verdict["next_step_so"] = somali.next_step("ask_owner", "so")
+        return verdict
+
+    if not draft.complete:
+        labels = ", ".join(somali.field_label(role, "en") for role in draft.missing)
+        labels_so = ", ".join(somali.field_label(role, "so") for role in draft.missing)
+        verdict.update(
+            {
+                "ok": False,
+                "message": somali.connection_message("missing", "en", fields=labels),
+                "message_so": somali.connection_message("missing", "so", fields=labels_so),
+                "next_step": somali.next_step("ask_owner", "en"),
+                "next_step_so": somali.next_step("ask_owner", "so"),
+            }
+        )
+        return verdict
+
+    context.heartbeat({"stage": "connecting", "source": source})
+    system = _SOURCE_NAMES.get(source, source)
+
+    try:
+        evidence = _verify_source(context, connection, draft)
+    except ledger.LedgerError as error:
+        # The connectors already phrase their failures for the person who has to
+        # fix them -- an expired grant, an address that is not reachable, an API
+        # user with no accounting access. Reaching the worker's catch-all would
+        # replace all three with "the agent hit an unexpected error".
+        detail = str(error)
+        refused = "refused" in detail.lower() or "rejected" in detail.lower()
+        code = "refused" if refused else "unreachable"
+        verdict.update(
+            {
+                "ok": False,
+                "error_detail": detail,
+                "message": somali.connection_message(code, "en", system=system, detail=detail),
+                "message_so": somali.connection_message(code, "so", system=system, detail=detail),
+            }
+        )
+        step = "reconnect" if (refused and source == "quickbooks") else (
+            "check_address" if source == "odoo" and not refused else "ask_owner"
+        )
+        verdict["next_step"] = somali.next_step(step, "en")
+        verdict["next_step_so"] = somali.next_step(step, "so")
+        return verdict
+
+    # Canonical form, written back now rather than at the first sync. Every
+    # later run then reads one shape instead of whatever the shop pasted -- and
+    # for QuickBooks this is also where the refresh token the test just spent is
+    # replaced by the one Intuit issued in its place.
+    context.heartbeat({"stage": "saving"})
+    context.supabase.rpc(
+        "rotate_store_connection_secret",
+        {
+            "p_connection_id": connection["id"],
+            "p_secret": json.dumps(draft.secret()),
+        },
+    )
+
+    company = str(evidence.get("company_name") or "").strip()
+    verdict.update(
+        {
+            "ok": True,
+            "evidence": evidence,
+            "next_step": somali.next_step("ready", "en"),
+            "next_step_so": somali.next_step("ready", "so"),
+        }
+    )
+    verdict.update(
+        say("connected", company=company) if company else say("connected_unnamed")
+    )
+    return verdict
+
+
+def _field_labels(source: str, roles: Iterable[str]) -> list[dict[str, str]]:
+    """Each role named the way the person holding the file would name it."""
+    return [
+        {
+            "role": role,
+            "en": somali.field_label(role, "en"),
+            "so": somali.field_label(role, "so"),
+        }
+        for role in roles
+    ]
+
+
 HANDLERS: dict[str, Callable[[JobContext], dict[str, Any]]] = {
     "parse_workbook": handle_parse_workbook,
     "profile_dataset": handle_profile_dataset,
@@ -3531,6 +3804,7 @@ HANDLERS: dict[str, Callable[[JobContext], dict[str, Any]]] = {
     "hmrc_knowledge_check": handle_hmrc_knowledge_check,
     "sync_store": handle_sync_store,
     "store_financials": handle_store_financials,
+    "test_store_connection": handle_test_store_connection,
 }
 
 
