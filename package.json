@@ -17,11 +17,14 @@
     "test:pipeline": "scripts/e2e/bootstrap.sh && scripts/e2e/run.sh",
     "test:pipeline:db": "scripts/e2e/bootstrap.sh",
     "fixtures": "python scripts/make_messy_fixture.py",
-    "test:health": "tsx scripts/health-banner-smoke.ts"
+    "test:health": "tsx scripts/health-banner-smoke.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.112.3",
     "dotenv": "^17.2.3",
+    "prettier": "^3.9.9",
     "supabase": "^2.115.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
