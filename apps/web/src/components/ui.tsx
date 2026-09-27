@@ -503,10 +503,12 @@ export function EmptyState({
   const laddered = Boolean(steps && steps.length > 0);
 
   return (
-    // A solid surface rather than a dashed outline. The dashed box read as a
+    // A filled panel rather than a dashed outline. The dashed box read as a
     // drop target on the workspace page -- it sat beside an upload form, and
-    // nothing could be dropped on it.
-    <div className="rounded-[var(--radius-lg)] border border-border bg-surface px-6 py-10 sm:px-8">
+    // nothing could be dropped on it. Glass now, because this stands in for a
+    // panel: an empty Stores or Assistant page that fell back to a flat box
+    // would be the one screen in the product that did not match the rest.
+    <div className="liquid liquid--dense rounded-[var(--radius-lg)] px-6 py-10 sm:px-8">
       <div className={laddered ? '' : 'text-center'}>
         <h3 className="text-base font-semibold tracking-tight">{title}</h3>
         <p

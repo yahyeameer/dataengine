@@ -232,7 +232,11 @@ export function AssistantConsole({
       {/* ---------------------------------------------------------------- */}
       {/* The record                                                        */}
       {/* ---------------------------------------------------------------- */}
-      <aside className="flex min-h-0 shrink-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)] lg:w-[19rem]">
+      {/* Glass, like every other panel on a working screen. `liquid` carries
+          the fill, the border and the specular edge; the strips inside it keep
+          their own translucent grounds, which now composite over the glass
+          rather than over `surface`. Measured there, not assumed. */}
+      <aside className="liquid liquid--dense flex min-h-0 shrink-0 flex-col overflow-hidden rounded-[var(--radius-lg)] lg:w-[19rem]">
         <div className="border-b border-border-subtle px-4 py-3.5">
           <div className="flex items-baseline justify-between gap-2">
             <h2 className="text-[13px] font-semibold uppercase tracking-[0.08em] text-subtle">
@@ -362,7 +366,7 @@ export function AssistantConsole({
       {/* ---------------------------------------------------------------- */}
       {/* The conversation                                                  */}
       {/* ---------------------------------------------------------------- */}
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
+      <section className="liquid liquid--dense flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-lg)]">
         <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border-subtle px-5 py-3.5">
           <div className="flex min-w-0 items-center gap-2.5">
             <span className={waitingFor ? 'text-accent pulse-dot' : 'text-subtle'}>
