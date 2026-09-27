@@ -98,7 +98,7 @@ export function ProductStory() {
 
 function Assurance({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-[var(--radius)] border border-border bg-surface/60 p-3.5">
+    <div className="liquid rounded-[var(--radius-lg)] p-3.5">
       <p className="text-[13px] font-semibold tracking-tight">{title}</p>
       <p className="mt-1 text-[13px] leading-relaxed text-subtle">{children}</p>
     </div>

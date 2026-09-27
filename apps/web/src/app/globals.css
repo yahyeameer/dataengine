@@ -305,10 +305,131 @@ pre {
 
 @supports not (backdrop-filter: blur(1px)) {
   .glass,
-  .glass-bar {
+  .glass-bar,
+  .liquid {
     background: var(--color-surface);
   }
 }
+
+/* --- liquid ------------------------------------------------------------------
+   The heavier glass, for the front door only.
+
+   `.glass` above is the workmanlike version: it frosts a floating surface so
+   content can pass under it. This is the one that is meant to be *looked at* —
+   the sign-in and sign-up screens, where somebody is deciding whether to trust
+   this with a client's books and there is nothing else on screen competing for
+   the attention.
+
+   It is deliberately not available to the data screens. A figure read over a
+   blur is a figure somebody has to squint at, and the whole argument this
+   product makes is that every number can be checked. Glass everywhere would
+   mean glass signifies nothing, which is the reasoning `.glass` already
+   carries; this is the same rule with one loud exception rather than an
+   abandonment of it.
+
+   Three layers make the material, and they have to be in this order:
+
+     1. a tinted fill, so the panel has a body rather than being a window;
+     2. a specular top edge — the bright hairline where light catches a real
+        pane — drawn as a gradient border via `border-image` would clip the
+        radius, so it is an inset ring instead;
+     3. the blur, which is what makes the ambient light behind it bend.
+   -------------------------------------------------------------------------- */
+.liquid {
+  position: relative;
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--color-surface-3) 58%, transparent),
+      color-mix(in srgb, var(--color-surface) 68%, transparent)
+    );
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 85%, transparent);
+  box-shadow:
+    /* The specular edge: bright along the top, gone by the middle. */
+    inset 0 1px 0 0 rgb(255 255 255 / 0.16),
+    inset 0 -1px 0 0 rgb(255 255 255 / 0.04),
+    /* A cool inner wash, so the pane has a body and not just a border. */
+    inset 0 24px 48px -32px rgb(91 157 255 / 0.22),
+    var(--shadow-lg);
+}
+
+/* The light behind the glass. Without something to bend, a blur is just a
+   darker box — so the page carries three slow, very low-opacity washes in the
+   accent hue and the panel refracts them.
+
+   Sized in vmax and positioned off-canvas so they read as light entering the
+   frame rather than as circles on it. This is the one piece of decoration in
+   the product and it is confined to the two screens nobody works in. */
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--color-background);
+}
+.ambient::before,
+.ambient::after {
+  content: "";
+  position: absolute;
+  width: 70vmax;
+  height: 70vmax;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.55;
+}
+.ambient::before {
+  top: -28vmax;
+  left: -18vmax;
+  background: radial-gradient(circle, var(--color-accent) 0%, transparent 62%);
+  animation: de-drift-a 26s var(--ease-in-out, ease-in-out) infinite alternate;
+}
+.ambient::after {
+  right: -24vmax;
+  bottom: -30vmax;
+  background: radial-gradient(circle, var(--color-info) 0%, transparent 62%);
+  animation: de-drift-b 32s var(--ease-in-out, ease-in-out) infinite alternate;
+}
+
+/* The third wash. `accent` and `info` are both blue and nearly the same blue,
+   so without a third hue the field has no depth to it — but the first try used
+   `success`, and green against those two on a near-black ground came out
+   swampy rather than luminous.
+
+   A violet, written as a literal because it is not a product colour: nothing
+   is ever drawn in it, nothing is labelled with it, and promoting it to a token
+   would invite someone to use it for a status. It exists only to stop the light
+   being one hue. */
+.ambient > span {
+  position: absolute;
+  left: 38%;
+  top: 46%;
+  width: 46vmax;
+  height: 46vmax;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.34;
+  background: radial-gradient(circle, #6f5bff 0%, transparent 60%);
+  animation: de-drift-c 38s var(--ease-in-out, ease-in-out) infinite alternate;
+}
+
+@keyframes de-drift-c {
+  to { transform: translate3d(-6vmax, 7vmax, 0) scale(1.15); }
+}
+
+@keyframes de-drift-a {
+  to { transform: translate3d(8vmax, 6vmax, 0) scale(1.12); }
+}
+@keyframes de-drift-b {
+  to { transform: translate3d(-7vmax, -5vmax, 0) scale(1.08); }
+}
+
+/* The global reduced-motion rule collapses the duration, which would freeze the
+   washes at their start frame. That is the right still image, so nothing more
+   is needed here — but the blur and the layering stay, because they are the
+   material rather than the movement. */
 
 /* --- interaction ------------------------------------------------------------
    The product's one flourish. A surface the reader can act on lifts a little

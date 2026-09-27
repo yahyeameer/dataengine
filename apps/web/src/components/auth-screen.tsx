@@ -1,34 +1,28 @@
 import type { ReactNode } from 'react';
 
 import { ProductStory } from '@/components/product-story';
-import { Card } from '@/components/ui';
 
 /**
  * The frame both sign-in and sign-up sit in.
  *
  * It exists because they were the same forty lines twice, and a layout kept in
- * two places is a layout that drifts: the columns, the gap, the ordering and
- * the footnote all had to be changed identically or the two screens would stop
- * matching.
+ * two places is a layout that drifts.
  *
- * The geometry is the part worth explaining, because the previous version
- * measured badly in a way that is easy to miss in code and obvious on screen.
- * It asked for `1.1fr` of a `max-w-6xl` container against a 420px card, which
- * resolved to a 652px track — while the content inside that track was capped at
- * `max-w-md`, or 448px. So 204px of the left column was empty by construction,
- * the gap *read* as 220px rather than the 80px it was set to, and the whole
- * composition sat off-centre with a hole down the middle.
+ * **This is the one screen in the product that is meant to be looked at.**
+ * Everywhere else somebody is working — reading a figure, approving a change,
+ * checking a total — and the interface's job is to get out of the way. Here
+ * nobody is working yet: they are deciding whether to hand this thing a
+ * client's books, and there is nothing else on screen to compete with. So this
+ * is where the glass, the ambient light and the depth live, and it is the only
+ * place they do. `.liquid` in globals.css says the same thing from the other
+ * side.
  *
- * So the track is now the measure. The left column is 29rem because that is a
- * comfortable line length for the story at 15px, the card is 25rem, the gap is
- * the 5rem it says it is, and the container is exactly their sum — which means
- * the page is centred on its content rather than on a box that content does not
- * fill.
- *
- * `items-start` rather than `items-center`: the story is 981px tall and the
- * card is 384px, and centring a short thing against a long one left ~270px of
- * nothing above the form on every screen. Aligned to the top, the empty space
- * ends up below the fold where nobody is looking for anything.
+ * The geometry underneath is unchanged and was measured rather than guessed:
+ * a 29rem story column, a 25rem card, the 5rem gap it says it is, and a
+ * container that is exactly their sum — so the page is centred on its content
+ * rather than on a box the content does not fill. `items-start` because the
+ * story is 960px tall against a 384px card, and centring a short thing against
+ * a long one puts a quarter of a screen of nothing above the form.
  */
 export function AuthScreen({
   title,
@@ -40,27 +34,35 @@ export function AuthScreen({
   children: ReactNode;
 }) {
   return (
-    <main className="flex min-h-svh flex-1 items-center justify-center px-6 py-14">
-      <div className="mx-auto grid w-full max-w-[59rem] items-start gap-14 lg:grid-cols-[minmax(0,29rem)_minmax(0,25rem)] lg:gap-20">
-        {/* The form first on a phone: somebody returning to sign in should not
-            have to scroll past the pitch to reach the thing they came for. */}
-        <div className="order-2 lg:order-1">
-          <ProductStory />
-        </div>
-
-        <div className="order-1 lg:order-2">
-          <Card className="p-7">
-            <h1 className="text-[22px] font-semibold tracking-tight">{title}</h1>
-            <p className="mt-1.5 text-sm leading-relaxed text-muted">{subtitle}</p>
-            <div className="mt-6">{children}</div>
-          </Card>
-
-          <p className="mt-4 px-1 text-center text-xs leading-relaxed text-subtle">
-            A copilot, not an autonomous accountant. Every change is verified and signed off by a
-            person.
-          </p>
-        </div>
+    <>
+      {/* Behind everything, fixed, and the only decoration in the product. The
+          glass needs something to bend or it is just a darker box. */}
+      <div className="ambient" aria-hidden>
+        <span />
       </div>
-    </main>
+
+      <main className="flex min-h-svh flex-1 items-center justify-center px-6 py-14">
+        <div className="mx-auto grid w-full max-w-[59rem] items-start gap-14 lg:grid-cols-[minmax(0,29rem)_minmax(0,25rem)] lg:gap-20">
+          {/* The form first on a phone: somebody returning to sign in should
+              not have to scroll past the pitch to reach what they came for. */}
+          <div className="order-2 lg:order-1">
+            <ProductStory />
+          </div>
+
+          <div className="order-1 lg:order-2">
+            <div className="liquid rounded-[var(--radius-xl)] p-7">
+              <h1 className="text-[22px] font-semibold tracking-tight">{title}</h1>
+              <p className="mt-1.5 text-sm leading-relaxed text-muted">{subtitle}</p>
+              <div className="mt-6">{children}</div>
+            </div>
+
+            <p className="mt-4 px-1 text-center text-xs leading-relaxed text-subtle">
+              A copilot, not an autonomous accountant. Every change is verified and signed off by
+              a person.
+            </p>
+          </div>
+        </div>
+      </main>
+    </>
   );
 }
