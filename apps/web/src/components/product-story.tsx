@@ -12,6 +12,12 @@
  * distrust everything else on the page.
  *
  * Server component: no state, no effects, no JavaScript shipped.
+ *
+ * It sets no width of its own. It used to cap the heading at `max-w-lg` and
+ * everything under it at `max-w-md`, inside a column that was wider than
+ * either — so the heading wrapped on a different measure from the body it
+ * introduced, and 204px of the column was empty by construction. The column is
+ * the measure now; see `AuthScreen`.
  */
 
 const PIPELINE = [
@@ -31,11 +37,11 @@ export function ProductStory() {
         <span className="text-[15px] font-semibold tracking-tight">DataEngine</span>
       </div>
 
-      <h1 className="max-w-lg text-4xl font-semibold leading-[1.1] tracking-tight text-balance sm:text-5xl">
+      <h1 className="text-4xl font-semibold leading-[1.1] tracking-tight text-balance sm:text-5xl">
         Turn messy business data into decisions.
       </h1>
 
-      <p className="mt-5 max-w-md text-[15px] leading-relaxed text-muted">
+      <p className="mt-5 text-[15px] leading-relaxed text-muted">
         Upload a spreadsheet. DataEngine finds the real table inside it, tells you what is wrong
         with the data, and proposes fixes for you to approve — then does the same work again next
         month without being asked twice.
@@ -43,7 +49,7 @@ export function ProductStory() {
 
       {/* The pipeline. A list rather than a diagram: it reads on a phone, it
           reads to a screen reader, and it ships no JavaScript. */}
-      <ol className="mt-10 max-w-md space-y-0">
+      <ol className="mt-10 space-y-0">
         {PIPELINE.map(({ step, detail }, i) => (
           <li key={step} className="group relative flex gap-4 pb-5 last:pb-0">
             {/* Connector, drawn behind the marker and stopped on the last item. */}
@@ -69,7 +75,7 @@ export function ProductStory() {
 
       {/* The two things that actually differentiate this product, and the two
           an accountant cares about most. Both are verifiable in the codebase. */}
-      <div className="mt-10 grid max-w-md gap-3 sm:grid-cols-2">
+      <div className="mt-10 grid gap-3 sm:grid-cols-2">
         <Assurance title="You approve every change">
           Nothing is altered on its own. DataEngine proposes; a person decides; the original file is
           never overwritten.
@@ -80,7 +86,7 @@ export function ProductStory() {
         </Assurance>
       </div>
 
-      <p className="mt-8 max-w-md text-sm leading-relaxed text-subtle">
+      <p className="mt-8 text-sm leading-relaxed text-subtle">
         <span className="font-medium text-muted">It learns your month-end.</span> When you approve a
         set of fixes, DataEngine keeps them as a recipe. Next month&rsquo;s file with the same shape
         is cleaned the same way automatically, and only the things that differ are brought back to
@@ -111,10 +117,19 @@ export function Mark({ className = 'h-6 w-6' }: { className?: string }) {
     <svg viewBox="0 0 32 32" className={className} aria-hidden fill="none">
       {/* Three ragged rows — the spreadsheet as it arrives. Drawn in the
           inherited colour at falling opacity so the eye reads them as one
-          group rather than three facts. */}
-      <rect x="4" y="5" width="15" height="3" rx="1.5" fill="currentColor" opacity="0.35" />
-      <rect x="4" y="11" width="21" height="3" rx="1.5" fill="currentColor" opacity="0.45" />
-      <rect x="4" y="17" width="11" height="3" rx="1.5" fill="currentColor" opacity="0.35" />
+          group rather than three facts.
+
+          At 0.35 and 0.45 the faded rows measured about 2:1 against the
+          surface, under the 3:1 a graphical object needs to be made out at all,
+          and at 24px the mark read as one bar with some smudges above it. Lifted
+          until they clear it. The hierarchy is the whole glyph — many messy rows
+          resolving to one clean one — so the gap between faded and full is kept
+          and only the floor moves. The binding case is the sidebar, where the
+          mark is drawn in the accent rather than the foreground and composites
+          lower against `surface`; the login page had room to spare. */}
+      <rect x="4" y="5" width="15" height="3" rx="1.5" fill="currentColor" opacity="0.62" />
+      <rect x="4" y="11" width="21" height="3" rx="1.5" fill="currentColor" opacity="0.74" />
+      <rect x="4" y="17" width="11" height="3" rx="1.5" fill="currentColor" opacity="0.62" />
       {/* One clean row: the answer. Full strength, full width. */}
       <rect x="4" y="24" width="24" height="3" rx="1.5" fill="currentColor" />
     </svg>

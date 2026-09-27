@@ -149,8 +149,14 @@ export async function AppShell({
               {isAdmin && <EngineStatus state={health.state} />}
 
               <div className="px-5 py-4">
+                {/* `muted`, not `subtle`. The token itself clears AA on this
+                    surface at 5.2:1, but this is eleven-pixel monospace in the
+                    quietest corner of the screen, and 4.5:1 is a threshold
+                    written for text around sixteen pixels. The one line that
+                    tells you which account you are signed into should not be
+                    the hardest thing on the page to read. */}
                 {email && (
-                  <p className="mb-2.5 truncate font-mono text-[11px] text-subtle" title={email}>
+                  <p className="mb-2.5 truncate font-mono text-xs text-muted" title={email}>
                     {email}
                   </p>
                 )}
