@@ -24,7 +24,9 @@ export default async function AuditPage() {
   const [{ data: entries, error }, { data: workspaces }] = await Promise.all([
     supabase
       .from('audit_logs')
-      .select('id, action, entity_type, entity_id, workspace_id, actor_user_id, metadata, created_at')
+      .select(
+        'id, action, entity_type, entity_id, workspace_id, actor_user_id, metadata, created_at',
+      )
       .eq('org_id', org.id)
       .order('created_at', { ascending: false })
       .limit(LIMIT),
@@ -77,8 +79,7 @@ export default async function AuditPage() {
                 // times, which is two hundred lines of noise in the column the
                 // eye scans first.
                 const previous = i > 0 ? new Date(rows[i - 1].created_at) : null;
-                const newDay =
-                  !previous || previous.toDateString() !== at.toDateString();
+                const newDay = !previous || previous.toDateString() !== at.toDateString();
 
                 return (
                   <tr key={entry.id}>
@@ -100,14 +101,15 @@ export default async function AuditPage() {
                       <span className="font-medium">{describeAction(entry.action)}</span>
                     </Td>
                     <Td className="text-muted">
-                      <span className="block truncate" title={
-                        entry.workspace_id
-                          ? (workspaceNames.get(entry.workspace_id) ?? undefined)
-                          : undefined
-                      }>
-                        {entry.workspace_id
-                          ? (workspaceNames.get(entry.workspace_id) ?? '—')
-                          : '—'}
+                      <span
+                        className="block truncate"
+                        title={
+                          entry.workspace_id
+                            ? (workspaceNames.get(entry.workspace_id) ?? undefined)
+                            : undefined
+                        }
+                      >
+                        {entry.workspace_id ? (workspaceNames.get(entry.workspace_id) ?? '—') : '—'}
                       </span>
                     </Td>
                     <Td>
@@ -237,9 +239,7 @@ function summarise(metadata: unknown): string {
     // An approval can cover a dozen groups. The count is what is scannable;
     // the group names are in the proposals themselves.
     if (Array.isArray(value)) {
-      return value.length <= 3
-        ? `${key}=${value.join(',')}`
-        : `${key}=${value.length} groups`;
+      return value.length <= 3 ? `${key}=${value.join(',')}` : `${key}=${value.length} groups`;
     }
     return `${key}=${String(value)}`;
   });

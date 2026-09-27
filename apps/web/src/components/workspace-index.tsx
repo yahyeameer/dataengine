@@ -221,9 +221,7 @@ function WorkspaceRowItem({ workspace }: { workspace: WorkspaceRow }) {
               </p>
               <p className="mt-0.5 flex items-baseline gap-1.5 text-[13px]">
                 <span className="tabular font-semibold">{workspace.waiting}</span>
-                <span className="text-muted">
-                  proposal{workspace.waiting === 1 ? '' : 's'}
-                </span>
+                <span className="text-muted">proposal{workspace.waiting === 1 ? '' : 's'}</span>
               </p>
               {workspace.atStake > 0 && (
                 <p className="tabular mt-0.5 text-[12px] text-muted">

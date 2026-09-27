@@ -57,7 +57,9 @@ export function Panel({
     <Card as="section" className={className}>
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border-subtle px-5 py-4">
         <div className="min-w-0">
-          <h2 className="font-heading text-base font-semibold tracking-tight text-foreground">{title}</h2>
+          <h2 className="font-heading text-base font-semibold tracking-tight text-foreground">
+            {title}
+          </h2>
           {description && <p className="mt-1 text-sm leading-relaxed text-muted">{description}</p>}
         </div>
         {action && <div className="shrink-0">{action}</div>}
@@ -66,7 +68,6 @@ export function Panel({
     </Card>
   );
 }
-
 
 /* --------------------------------------------------------------------------
    Type and page structure
@@ -545,9 +546,7 @@ export function EmptyState({
         </ol>
       )}
 
-      {action && (
-        <div className={`mt-7 flex ${laddered ? '' : 'justify-center'}`}>{action}</div>
-      )}
+      {action && <div className={`mt-7 flex ${laddered ? '' : 'justify-center'}`}>{action}</div>}
     </div>
   );
 }
@@ -644,9 +643,7 @@ export function TableShell({
       // filter is a column somebody squints at, and this product's whole claim
       // is that every one of them can be checked.
       className={`scroll-x rounded-[var(--radius-lg)] border border-border ${
-        stickyHead
-          ? 'overflow-y-auto [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10'
-          : ''
+        stickyHead ? 'overflow-y-auto [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10' : ''
       }`}
       style={
         {
@@ -750,13 +747,7 @@ export function Stat({
  * column name beside it. Materiality is the axis the whole queue is ranked on;
  * it should not be the quietest thing in the row.
  */
-export function Money({
-  children,
-  size = 'sm',
-}: {
-  children: ReactNode;
-  size?: 'sm' | 'lg';
-}) {
+export function Money({ children, size = 'sm' }: { children: ReactNode; size?: 'sm' | 'lg' }) {
   return (
     <span
       className={`tabular font-semibold tracking-tight text-foreground ${
@@ -831,9 +822,7 @@ export function RightRail({
         aria-label={railLabel}
         className="w-full shrink-0 lg:w-[19rem] lg:self-start xl:w-[21rem]"
       >
-        <div className={`flex flex-col gap-4 ${sticky ? 'lg:sticky lg:top-6' : ''}`}>
-          {rail}
-        </div>
+        <div className={`flex flex-col gap-4 ${sticky ? 'lg:sticky lg:top-6' : ''}`}>{rail}</div>
       </aside>
     </div>
   );

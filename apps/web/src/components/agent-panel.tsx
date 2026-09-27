@@ -162,8 +162,13 @@ export function AgentPanel({
       ) : (
         <ul className="divide-y divide-border-subtle">
           {recent.map((job) => (
-            <li key={job.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-3.5 hover:bg-surface-2 transition-colors">
-              <span className="text-sm font-semibold text-foreground">{JOB_KIND_LABELS[job.kind] ?? job.kind}</span>
+            <li
+              key={job.id}
+              className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-3.5 hover:bg-surface-2 transition-colors"
+            >
+              <span className="text-sm font-semibold text-foreground">
+                {JOB_KIND_LABELS[job.kind] ?? job.kind}
+              </span>
 
               <JobStatus job={job} />
 
@@ -178,7 +183,6 @@ export function AgentPanel({
       )}
     </section>
   );
-
 }
 
 /**
@@ -725,16 +729,15 @@ export function CategorizeButton({
         {hmrc ? (
           <>
             Values are sorted into HMRC&rsquo;s self-employment boxes (SA103F) — travel, premises,
-            office costs and the rest. Personal spending and transfers between the
-            client&rsquo;s own accounts are labelled as such rather than deducted. Most of a UK
-            bank statement is matched from rules, so this runs whether or not a model is
-            connected.
+            office costs and the rest. Personal spending and transfers between the client&rsquo;s
+            own accounts are labelled as such rather than deducted. Most of a UK bank statement is
+            matched from rules, so this runs whether or not a model is connected.
           </>
         ) : (
           <>
-            The agent proposes the vocabulary as well as the assignments. Naming the
-            categories you want makes it a closed list — anything outside it is dropped rather
-            than added. Needs a model.
+            The agent proposes the vocabulary as well as the assignments. Naming the categories you
+            want makes it a closed list — anything outside it is dropped rather than added. Needs a
+            model.
           </>
         )}
       </p>
@@ -753,7 +756,8 @@ export function CategorizeButton({
  * it is worth two lines of guessing to land on it.
  */
 function bestColumnFor(columns: string[]): string {
-  const preferred = /^(transaction|description|details|narrative|payee|vendor|supplier|merchant|reference|memo|type)/i;
+  const preferred =
+    /^(transaction|description|details|narrative|payee|vendor|supplier|merchant|reference|memo|type)/i;
   return columns.find((name) => preferred.test(name)) ?? columns[0] ?? '';
 }
 

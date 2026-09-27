@@ -26,8 +26,8 @@
      monospace). IBM Plex was drawn for technical and financial interfaces and
      ships a mono that shares its skeleton, so figures in a table and the
      labels above them belong to the same voice. */
-  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, -apple-system,
-    "Segoe UI", sans-serif;
+  --font-sans:
+    var(--font-plex-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-heading: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-plex-mono), ui-monospace, "SFMono-Regular", monospace;
 
@@ -165,7 +165,9 @@ pre {
    transition on a property that was going to change anyway. */
 
 @keyframes de-shimmer {
-  100% { transform: translateX(100%); }
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 .skeleton {
@@ -184,10 +186,17 @@ pre {
 }
 
 @keyframes de-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
 }
-.pulse-dot { animation: de-pulse 2.4s ease-in-out infinite; }
+.pulse-dot {
+  animation: de-pulse 2.4s ease-in-out infinite;
+}
 
 /* The agent thinking.
 
@@ -200,8 +209,12 @@ pre {
    with the pending state -- an animation that outlives the work it describes is
    the failure this replaces. */
 @keyframes de-thinking {
-  from { width: 0; }
-  to   { width: 1.15em; }
+  from {
+    width: 0;
+  }
+  to {
+    width: 1.15em;
+  }
 }
 .thinking-dots::after {
   content: "\B7\B7\B7";
@@ -225,10 +238,18 @@ pre {
 /* Arrival, for a panel that appears in response to something the reader did.
    Small enough to be felt rather than watched. */
 @keyframes de-rise {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
-.rise { animation: de-rise var(--duration-slow) var(--ease-out) both; }
+.rise {
+  animation: de-rise var(--duration-slow) var(--ease-out) both;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -239,7 +260,9 @@ pre {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
-  .skeleton::after { display: none; }
+  .skeleton::after {
+    display: none;
+  }
 }
 
 /* --- horizontal scroll ------------------------------------------------------
@@ -273,8 +296,16 @@ pre {
     linear-gradient(to left, var(--scroll-shadow-bg, var(--color-surface)) 40%, transparent),
     radial-gradient(farthest-side at 0 50%, rgb(0 0 0 / 0.5), transparent),
     radial-gradient(farthest-side at 100% 50%, rgb(0 0 0 / 0.5), transparent);
-  background-position: 0 0, 100% 0, 0 0, 100% 0;
-  background-size: 32px 100%, 32px 100%, 16px 100%, 16px 100%;
+  background-position:
+    0 0,
+    100% 0,
+    0 0,
+    100% 0;
+  background-size:
+    32px 100%,
+    32px 100%,
+    16px 100%,
+    16px 100%;
   background-repeat: no-repeat;
   /* The covers travel with the content; the shadows stay with the box. This
      line is the whole trick. */
@@ -306,106 +337,104 @@ pre {
    true.
    -------------------------------------------------------------------------- */
 @layer components {
+  /* The panels on a working screen are a denser glass than the front door's.
+     That is the whole trick for making this readable: the light is allowed to be
+     bright *between* the panels, where nothing is written, and the panel itself
+     blocks enough of it that the quietest text on it still clears AA. Raising the
+     light and thinning the glass at the same time is what would have pushed
+     `subtle` under 4.5:1.
 
-/* The panels on a working screen are a denser glass than the front door's.
-   That is the whole trick for making this readable: the light is allowed to be
-   bright *between* the panels, where nothing is written, and the panel itself
-   blocks enough of it that the quietest text on it still clears AA. Raising the
-   light and thinning the glass at the same time is what would have pushed
-   `subtle` under 4.5:1.
-
-   Compound, and it has to be. `.liquid` is declared *below* this in the file,
-   and two single-class selectors of equal specificity are settled by source
-   order -- so written as `.liquid--dense` this modifier lost every property it
-   shares with the thing it is modifying, and every panel on every working
-   screen quietly rendered at the front door's 58/68% instead. The compound
-   selector says what was meant: this is `.liquid`, modified. */
-.liquid.liquid--dense {
-  background:
+     Compound, and it has to be. `.liquid` is declared *below* this in the file,
+     and two single-class selectors of equal specificity are settled by source
+     order -- so written as `.liquid--dense` this modifier lost every property it
+     shares with the thing it is modifying, and every panel on every working
+     screen quietly rendered at the front door's 58/68% instead. The compound
+     selector says what was meant: this is `.liquid`, modified. */
+  .liquid.liquid--dense {
+    background:
     /* A tone, when a panel has one to carry. Painted *over* the fill rather
        than replacing it, because the fill is what holds the contrast: a stat
        that swapped its glass for a wash of accent would be the one panel on
        the screen whose figure could not be read. See `.liquid--accent`. */
-    var(--liquid-tint, linear-gradient(transparent, transparent)),
-    linear-gradient(
-      160deg,
-      color-mix(in srgb, var(--color-surface-2) 88%, transparent),
-      color-mix(in srgb, var(--color-surface) 94%, transparent)
-    );
-  /* No hand-written `-webkit-` twin here or anywhere below. Lightning CSS
+      var(--liquid-tint, linear-gradient(transparent, transparent)),
+      linear-gradient(
+        160deg,
+        color-mix(in srgb, var(--color-surface-2) 88%, transparent),
+        color-mix(in srgb, var(--color-surface) 94%, transparent)
+      );
+    /* No hand-written `-webkit-` twin here or anywhere below. Lightning CSS
      prefixes from browserslist on its own, and writing the prefixed property
      by hand made it drop the standard one and ship only the alias -- which
      current Chromium ignores outright, so the blur silently did nothing and
      every "glass" panel in the product was a flat translucent fill. */
-  backdrop-filter: blur(24px) saturate(150%);
-  box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.12),
-    inset 0 -1px 0 0 rgb(255 255 255 / 0.03),
-    var(--shadow-md);
-}
+    backdrop-filter: blur(24px) saturate(150%);
+    box-shadow:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.12),
+      inset 0 -1px 0 0 rgb(255 255 255 / 0.03),
+      var(--shadow-md);
+  }
 
-/* The two tones a panel can carry: "this wants your attention" and "this is
-   waiting on you". Flat washes rather than gradients, so the tint reads as the
-   panel being a different colour rather than as more weather.
+  /* The two tones a panel can carry: "this wants your attention" and "this is
+     waiting on you". Flat washes rather than gradients, so the tint reads as the
+     panel being a different colour rather than as more weather.
 
-   6%, and the figure is measured rather than chosen. These replaced a
-   `bg-accent-soft/30` wash that sat on an opaque fill; the same strength over
-   glass lifts the ground far enough that the stat's own label and hint, both
-   `subtle`, land at 4.46:1 and 4.36:1 -- under AA on the two panels the eye is
-   being *directed* to. Stepping down until both cleared put the ceiling at
-   8%; 6% takes it with a margin and still reads as a tinted panel. */
-.liquid--accent {
-  --liquid-tint: linear-gradient(
-    color-mix(in srgb, var(--color-accent) 6%, transparent),
-    color-mix(in srgb, var(--color-accent) 6%, transparent)
-  );
-}
-.liquid--warning {
-  --liquid-tint: linear-gradient(
-    color-mix(in srgb, var(--color-warning) 6%, transparent),
-    color-mix(in srgb, var(--color-warning) 6%, transparent)
-  );
-}
+     6%, and the figure is measured rather than chosen. These replaced a
+     `bg-accent-soft/30` wash that sat on an opaque fill; the same strength over
+     glass lifts the ground far enough that the stat's own label and hint, both
+     `subtle`, land at 4.46:1 and 4.36:1 -- under AA on the two panels the eye is
+     being *directed* to. Stepping down until both cleared put the ceiling at
+     8%; 6% takes it with a margin and still reads as a tinted panel. */
+  .liquid--accent {
+    --liquid-tint: linear-gradient(
+      color-mix(in srgb, var(--color-accent) 6%, transparent),
+      color-mix(in srgb, var(--color-accent) 6%, transparent)
+    );
+  }
+  .liquid--warning {
+    --liquid-tint: linear-gradient(
+      color-mix(in srgb, var(--color-warning) 6%, transparent),
+      color-mix(in srgb, var(--color-warning) 6%, transparent)
+    );
+  }
 
-/* The navigation rail, in the same material family as the panels but without
-   the optics. It is opaque on purpose: a backdrop-filter here bought no depth
-   (nothing scrolls under a full-height column) and Chromium sampled the wrong
-   region into it, painting ghosts of the right rail's figures over the empty
-   middle of the sidebar. A fixed gradient and a lit inner edge cost no
-   compositing layer and cannot sample anything, so the rail reads as the same
-   glass without the bug. */
-.rail {
-  background:
-    linear-gradient(
+  /* The navigation rail, in the same material family as the panels but without
+     the optics. It is opaque on purpose: a backdrop-filter here bought no depth
+     (nothing scrolls under a full-height column) and Chromium sampled the wrong
+     region into it, painting ghosts of the right rail's figures over the empty
+     middle of the sidebar. A fixed gradient and a lit inner edge cost no
+     compositing layer and cannot sample anything, so the rail reads as the same
+     glass without the bug. */
+  .rail {
+    background: linear-gradient(
       200deg,
       color-mix(in srgb, var(--color-surface-2) 70%, var(--color-surface)),
       var(--color-surface) 60%
     );
-  box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.05);
-}
+    box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.05);
+  }
 
-/* --- glass ------------------------------------------------------------------
-   Used for the surfaces that float above the page rather than sit in it: the
-   auth panel, the sticky application bar, the AI panels. A frosted interface is
-   a tiring interface, and glass everywhere means glass signifies nothing.
+  /* --- glass ------------------------------------------------------------------
+     Used for the surfaces that float above the page rather than sit in it: the
+     auth panel, the sticky application bar, the AI panels. A frosted interface is
+     a tiring interface, and glass everywhere means glass signifies nothing.
 
-   This replaces the `apple-glass` / `apple-glass-card` pair that was added
-   alongside it and did the same job with hand-mixed rgba values. */
-.glass {
-  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
-  backdrop-filter: blur(16px) saturate(140%);
-  border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
-}
+     This replaces the `apple-glass` / `apple-glass-card` pair that was added
+     alongside it and did the same job with hand-mixed rgba values. */
+  .glass {
+    background: color-mix(in srgb, var(--color-surface) 72%, transparent);
+    backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+  }
 
-/* The same treatment for a bar that has content scrolling under it. Heavier
-   blur, no border of its own -- the bar draws its own bottom hairline. */
-.glass-bar {
-  background: color-mix(in srgb, var(--color-surface) 82%, transparent);
-  backdrop-filter: blur(14px) saturate(140%);
-}
+  /* The same treatment for a bar that has content scrolling under it. Heavier
+     blur, no border of its own -- the bar draws its own bottom hairline. */
+  .glass-bar {
+    background: color-mix(in srgb, var(--color-surface) 82%, transparent);
+    backdrop-filter: blur(14px) saturate(140%);
+  }
 
-@supports not (backdrop-filter: blur(1px)) {
-  .glass,
+  @supports not (backdrop-filter: blur(1px)) {
+    .glass,
   .glass-bar,
   .liquid,
   /* Compound, to match the specificity of the rule it is overriding. A plain
@@ -413,54 +442,52 @@ pre {
      fallback would quietly serve a translucent panel on the one engine that
      cannot blur what is behind it. */
   .liquid.liquid--dense {
-    background: var(--color-surface);
+      background: var(--color-surface);
+    }
   }
-}
 
-/* --- liquid ------------------------------------------------------------------
-   The material itself, at the front door's strength.
+  /* --- liquid ------------------------------------------------------------------
+     The material itself, at the front door's strength.
 
-   `.glass` above is the workmanlike version: it frosts a floating surface so
-   content can pass under it. This is the one that is meant to be *looked at* —
-   the sign-in and sign-up screens, where somebody is deciding whether to trust
-   this with a client's books and there is nothing else on screen competing for
-   the attention.
+     `.glass` above is the workmanlike version: it frosts a floating surface so
+     content can pass under it. This is the one that is meant to be *looked at* —
+     the sign-in and sign-up screens, where somebody is deciding whether to trust
+     this with a client's books and there is nothing else on screen competing for
+     the attention.
 
-   The working screens use it too, but always with `.liquid--dense` beside it.
-   The rule that used to keep it off them still holds and is what that modifier
-   exists for: a figure read over a blur is a figure somebody has to squint at,
-   and the whole argument this product makes is that every number can be
-   checked. So the *container* is glass and the ground under a figure is not —
-   a table, a stat, a list of proposals each keep a solid fill, and the light is
-   only allowed to be bright in the gaps between panels.
+     The working screens use it too, but always with `.liquid--dense` beside it.
+     The rule that used to keep it off them still holds and is what that modifier
+     exists for: a figure read over a blur is a figure somebody has to squint at,
+     and the whole argument this product makes is that every number can be
+     checked. So the *container* is glass and the ground under a figure is not —
+     a table, a stat, a list of proposals each keep a solid fill, and the light is
+     only allowed to be bright in the gaps between panels.
 
-   Three layers make the material, and they have to be in this order:
+     Three layers make the material, and they have to be in this order:
 
      1. a tinted fill, so the panel has a body rather than being a window;
      2. a specular top edge — the bright hairline where light catches a real
         pane — drawn as a gradient border via `border-image` would clip the
         radius, so it is an inset ring instead;
      3. the blur, which is what makes the ambient light behind it bend.
-   -------------------------------------------------------------------------- */
-.liquid {
-  position: relative;
-  background:
-    linear-gradient(
+     -------------------------------------------------------------------------- */
+  .liquid {
+    position: relative;
+    background: linear-gradient(
       160deg,
       color-mix(in srgb, var(--color-surface-3) 58%, transparent),
       color-mix(in srgb, var(--color-surface) 68%, transparent)
     );
-  backdrop-filter: blur(32px) saturate(180%);
-  border: 1px solid color-mix(in srgb, var(--color-border-strong) 85%, transparent);
-  box-shadow:
+    backdrop-filter: blur(32px) saturate(180%);
+    border: 1px solid color-mix(in srgb, var(--color-border-strong) 85%, transparent);
+    box-shadow:
     /* The specular edge: bright along the top, gone by the middle. */
-    inset 0 1px 0 0 rgb(255 255 255 / 0.16),
-    inset 0 -1px 0 0 rgb(255 255 255 / 0.04),
-    /* A cool inner wash, so the pane has a body and not just a border. */
-    inset 0 24px 48px -32px rgb(91 157 255 / 0.22),
-    var(--shadow-lg);
-}
-
+      inset 0 1px 0 0 rgb(255 255 255 / 0.16),
+      inset 0 -1px 0 0 rgb(255 255 255 / 0.04),
+      /* A cool inner wash, so the pane has a body and not just a border. */ inset 0 24px 48px -32px
+        rgb(91 157 255 / 0.22),
+      var(--shadow-lg);
+  }
 } /* end @layer components */
 
 /* The light behind the glass. Without something to bend, a blur is just a
@@ -524,14 +551,20 @@ pre {
 }
 
 @keyframes de-drift-c {
-  to { transform: translate3d(-6vmax, 7vmax, 0) scale(1.15); }
+  to {
+    transform: translate3d(-6vmax, 7vmax, 0) scale(1.15);
+  }
 }
 
 @keyframes de-drift-a {
-  to { transform: translate3d(8vmax, 6vmax, 0) scale(1.12); }
+  to {
+    transform: translate3d(8vmax, 6vmax, 0) scale(1.12);
+  }
 }
 @keyframes de-drift-b {
-  to { transform: translate3d(-7vmax, -5vmax, 0) scale(1.08); }
+  to {
+    transform: translate3d(-7vmax, -5vmax, 0) scale(1.08);
+  }
 }
 
 /* The global reduced-motion rule collapses the duration, which would freeze the

@@ -18,10 +18,7 @@ export const metadata = { title: 'Sign in · DataEngine' };
  */
 export default function LoginPage() {
   return (
-    <AuthScreen
-      title="Welcome back"
-      subtitle="Sign in to your firm’s workspaces and audit trail."
-    >
+    <AuthScreen title="Welcome back" subtitle="Sign in to your firm’s workspaces and audit trail.">
       <AuthForm mode="login" />
     </AuthScreen>
   );

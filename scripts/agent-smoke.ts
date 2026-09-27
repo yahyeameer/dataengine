@@ -204,10 +204,7 @@ async function main() {
   });
   const alphaJobId = alphaJobs.id as string;
 
-  const { data: seenJobs } = await beta.client
-    .from('agent_jobs')
-    .select('id')
-    .eq('id', alphaJobId);
+  const { data: seenJobs } = await beta.client.from('agent_jobs').select('id').eq('id', alphaJobId);
   check("Beta cannot read Alpha's agent jobs", (seenJobs ?? []).length === 0);
 
   const { data: seenChanges } = await beta.client
@@ -320,15 +317,15 @@ async function main() {
     ['store_connection_credentials', { p_connection_id: randomUUID() }],
     ['rotate_store_connection_secret', { p_connection_id: randomUUID(), p_secret: 'x' }],
     ['start_store_sync', { p_connection_id: randomUUID() }],
-    [
-      'finish_store_sync',
-      { p_run_id: randomUUID(), p_status: 'succeeded', p_entries_written: 1 },
-    ],
+    ['finish_store_sync', { p_run_id: randomUUID(), p_status: 'succeeded', p_entries_written: 1 }],
     ['enqueue_due_store_reports', { p_limit: 5 }],
     // Writes connection settings from what a test worked out. Reachable from a
     // browser it would let anyone repoint someone else's store at their own
     // Odoo, so it is worker-only like the rest.
-    ['apply_store_connection_setup', { p_connection_id: randomUUID(), p_base_url: 'https://x.odoo.com' }],
+    [
+      'apply_store_connection_setup',
+      { p_connection_id: randomUUID(), p_base_url: 'https://x.odoo.com' },
+    ],
   ];
 
   for (const [fn, params] of workerOnly) {
@@ -360,8 +357,11 @@ async function main() {
       },
     },
   );
-  check('a member can connect a store in their own workspace', alphaStoreError === null,
-    alphaStoreError?.message);
+  check(
+    'a member can connect a store in their own workspace',
+    alphaStoreError === null,
+    alphaStoreError?.message,
+  );
 
   const storeId = (alphaStore as { id?: string } | null)?.id ?? null;
 
@@ -594,7 +594,7 @@ async function main() {
     .from('proposed_changes')
     .update({ operation: { op: 'drop_duplicate_rows' } })
     .eq('id', approvedRow!.id);
-  check('an approved proposal\'s operation cannot be rewritten', rewriteOperation !== null);
+  check("an approved proposal's operation cannot be rewritten", rewriteOperation !== null);
 
   const { error: deleteProposal } = await admin
     .from('proposed_changes')

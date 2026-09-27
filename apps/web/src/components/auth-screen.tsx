@@ -62,8 +62,8 @@ export function AuthScreen({
             </div>
 
             <p className="mt-4 px-1 text-center text-xs leading-relaxed text-subtle">
-              A copilot, not an autonomous accountant. Every change is verified and signed off by
-              a person.
+              A copilot, not an autonomous accountant. Every change is verified and signed off by a
+              person.
             </p>
           </div>
         </div>

@@ -81,8 +81,7 @@ export function ReviewQueue({
   // the one thing in this component that must not silently depend on how the
   // Postgres enum happens to be declared.
   const ordered = [...changes].sort((a, b) => {
-    const tier =
-      CONFIDENCE_ORDER.indexOf(a.confidence) - CONFIDENCE_ORDER.indexOf(b.confidence);
+    const tier = CONFIDENCE_ORDER.indexOf(a.confidence) - CONFIDENCE_ORDER.indexOf(b.confidence);
     if (tier !== 0) return tier;
     return Math.abs(Number(b.materiality ?? 0)) - Math.abs(Number(a.materiality ?? 0));
   });
@@ -193,9 +192,9 @@ export function ReviewQueue({
               Blocks the run — resolve before applying anything
             </p>
             <p className="mt-2 text-sm leading-relaxed text-muted">
-              A blocking finding carries no change to apply; it is a question. Either answer
-              clears the block and both are recorded in the audit log — the difference is what
-              you are on record as having decided.
+              A blocking finding carries no change to apply; it is a question. Either answer clears
+              the block and both are recorded in the audit log — the difference is what you are on
+              record as having decided.
             </p>
           </div>
           <ul className="divide-y divide-danger/15">
@@ -242,7 +241,12 @@ export function ReviewQueue({
                 type="button"
                 className={`${ghostButtonClass()} ml-auto`}
                 disabled={busy !== null}
-                onClick={() => decide(reviewable.map((change) => change.group_key), true)}
+                onClick={() =>
+                  decide(
+                    reviewable.map((change) => change.group_key),
+                    true,
+                  )
+                }
               >
                 {busy === reviewable.map((c) => c.group_key).join(',') + 'true'
                   ? 'Recording…'
@@ -353,11 +357,13 @@ function ChangeRow({
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1">
-            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
-              blocking 
-                ? 'bg-danger-soft text-danger border border-danger/30' 
-                : 'bg-accent-soft text-accent border border-accent/30'
-            }`}>
+            <span
+              className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                blocking
+                  ? 'bg-danger-soft text-danger border border-danger/30'
+                  : 'bg-accent-soft text-accent border border-accent/30'
+              }`}
+            >
               {CONFIDENCE_LABELS[change.confidence]}
             </span>
             {change.column_name ? (
@@ -378,14 +384,20 @@ function ChangeRow({
           <div className="mt-3.5 flex flex-wrap items-center gap-6 text-xs text-muted">
             {money !== '—' ? (
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Impact:</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
+                  Impact:
+                </span>
                 <span className="font-mono text-sm font-extrabold text-accent">{money}</span>
               </div>
             ) : null}
 
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Rows:</span>
-              <span className="font-mono font-medium text-foreground">{change.affected_rows.toLocaleString('en-GB')}</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
+                Rows:
+              </span>
+              <span className="font-mono font-medium text-foreground">
+                {change.affected_rows.toLocaleString('en-GB')}
+              </span>
             </div>
           </div>
         </div>
@@ -418,7 +430,9 @@ function ChangeRow({
             aria-expanded={open}
             onClick={() => setOpen(!open)}
           >
-            <span className={`inline-block transition-transform duration-200 ${open ? 'rotate-90' : ''}`}>
+            <span
+              className={`inline-block transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+            >
               ›
             </span>
             {open ? 'Hide Audit Evidence' : 'Inspect Raw Evidence Payload'}
@@ -433,4 +447,3 @@ function ChangeRow({
     </li>
   );
 }
-

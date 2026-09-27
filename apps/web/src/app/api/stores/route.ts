@@ -66,8 +66,14 @@ const createSchema = z
   .object({
     workspaceId: z.string().uuid(),
     name: z.string().min(1).max(200),
-    baseCurrency: z.string().regex(/^[A-Za-z]{3,5}$/).default('USD'),
-    secondaryCurrency: z.string().regex(/^[A-Za-z]{3,5}$/).nullish(),
+    baseCurrency: z
+      .string()
+      .regex(/^[A-Za-z]{3,5}$/)
+      .default('USD'),
+    secondaryCurrency: z
+      .string()
+      .regex(/^[A-Za-z]{3,5}$/)
+      .nullish(),
     secondaryRate: z.number().positive().nullish(),
     language: z.enum(['en', 'so']).default('en'),
     // Monday 0 … Sunday 6. Saturday by default: the working week here runs
@@ -120,9 +126,7 @@ export async function POST(request: Request) {
       // and it is the caller's to fix rather than a server fault.
       const status = error.code === '23505' ? 409 : 400;
       const message =
-        status === 409
-          ? 'A store with that name already exists in this workspace.'
-          : error.message;
+        status === 409 ? 'A store with that name already exists in this workspace.' : error.message;
       return NextResponse.json({ error: message }, { status });
     }
 

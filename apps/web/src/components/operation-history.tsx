@@ -130,10 +130,7 @@ export function OperationHistory({
         </p>
       )}
 
-      <Toolbar
-        title="History"
-        count={`${shown.length} of ${operations.length}`}
-      >
+      <Toolbar title="History" count={`${shown.length} of ${operations.length}`}>
         {families.length > 1 && (
           <SegmentedControl
             label="Filter history by operation type"
@@ -218,9 +215,7 @@ function OperationRow({
     <li
       id={anchorId}
       ref={anchor}
-      className={`row-hover scroll-mt-24 ${
-        arrivedAt ? 'ring-subject' : ''
-      }`}
+      className={`row-hover scroll-mt-24 ${arrivedAt ? 'ring-subject' : ''}`}
     >
       <div className="flex flex-wrap items-start gap-x-4 gap-y-3 px-4 py-3.5">
         <div className="min-w-0 flex-1">

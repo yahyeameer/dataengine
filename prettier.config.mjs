@@ -34,6 +34,13 @@
  * that way: an option nobody can point at a measurement for is an option that
  * will be argued about later.
  *
+ * The one override is `singleQuote` in CSS, and it is here because the first
+ * version of this file got it wrong. `singleQuote` was measured on the
+ * TypeScript, where it is right by 262 to 4 -- but Prettier applies it to
+ * stylesheets as well, and `globals.css` is double-quoted 13 times out of 13.
+ * Left alone it rewrote `@import "tailwindcss"`, both font stacks and every
+ * `content: ""`. Two languages, two conventions, both counted.
+ *
  * Head to head on five files, formatting each one with this config and again
  * with Prettier's defaults, counting the lines each run rewrites:
  *
@@ -62,6 +69,13 @@ const config = {
   tabWidth: 2,
   trailingComma: 'all',
   arrowParens: 'always',
+  overrides: [
+    {
+      // Stylesheets quote the other way round here. See above.
+      files: ['*.css'],
+      options: { singleQuote: false },
+    },
+  ],
 };
 
 export default config;

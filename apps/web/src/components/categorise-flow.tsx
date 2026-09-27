@@ -134,7 +134,9 @@ export function CategoriseFlow() {
     setError(null);
 
     if (!isAcceptedFilename(file.name)) {
-      setError(`We can read ${ACCEPTED_EXTENSIONS.join(', ')} files. This one is a different type.`);
+      setError(
+        `We can read ${ACCEPTED_EXTENSIONS.join(', ')} files. This one is a different type.`,
+      );
       return;
     }
     if (file.size > MAX_UPLOAD_BYTES) {
@@ -217,10 +219,7 @@ export function CategoriseFlow() {
       railLabel="Run status"
       rail={
         <>
-          <RailSection
-            title="This run"
-            hint={<RunState status={status} started={started} />}
-          >
+          <RailSection title="This run" hint={<RunState status={status} started={started} />}>
             <StepList steps={steps} dimmed={!started} />
           </RailSection>
 
@@ -249,16 +248,14 @@ export function CategoriseFlow() {
           <RailSection title="What this does">
             <dl className="space-y-3">
               <Guarantee term="Nothing is overwritten">
-                Your file is stored as uploaded. Categories are written to a new
-                dataset version beside it.
+                Your file is stored as uploaded. Categories are written to a new dataset version
+                beside it.
               </Guarantee>
               <Guarantee term="HMRC SA103F boxes">
-                Transactions are mapped to the self-assessment categories, not to
-                invented ones.
+                Transactions are mapped to the self-assessment categories, not to invented ones.
               </Guarantee>
               <Guarantee term="Every decision is logged">
-                Each category carries the rule or model reply behind it, in the
-                activity log.
+                Each category carries the rule or model reply behind it, in the activity log.
               </Guarantee>
             </dl>
           </RailSection>
@@ -368,8 +365,8 @@ function Dropzone({
         Categorise a bank statement
       </h1>
       <p className="mt-2 max-w-xl text-[15px] leading-relaxed text-muted">
-        Drop a CSV or Excel statement in. It comes back with an HMRC category
-        against every transaction and the ones worth a second look flagged.
+        Drop a CSV or Excel statement in. It comes back with an HMRC category against every
+        transaction and the ones worth a second look flagged.
       </p>
 
       {/* The label is the control: clicking anywhere in the box opens the file
@@ -395,9 +392,7 @@ function Dropzone({
         // which would have swapped the panel's body for a flat wash at the one
         // moment the reader is looking straight at it.
         className={`liquid liquid--dense mt-7 flex cursor-pointer flex-col items-center justify-center rounded-[var(--radius-lg)] border border-dashed px-8 py-14 text-center transition-[color,background-color,border-color,box-shadow] duration-[--duration] focus-within:border-accent focus-within:ring-2 focus-within:ring-[var(--accent-ring)] ${
-          over
-            ? 'liquid--accent border-accent'
-            : 'border-border-strong hover:border-accent/50'
+          over ? 'liquid--accent border-accent' : 'border-border-strong hover:border-accent/50'
         } ${busy ? 'pointer-events-none opacity-70' : ''}`}
       >
         <input
@@ -439,7 +434,11 @@ function Dropzone({
         )}
       </label>
 
-      {error && <div className="mt-4"><ErrorText>{error}</ErrorText></div>}
+      {error && (
+        <div className="mt-4">
+          <ErrorText>{error}</ErrorText>
+        </div>
+      )}
     </div>
   );
 }
@@ -562,7 +561,11 @@ function Result({
         </button>
       </div>
 
-      {error && <div className="mt-4 max-w-md"><ErrorText>{error}</ErrorText></div>}
+      {error && (
+        <div className="mt-4 max-w-md">
+          <ErrorText>{error}</ErrorText>
+        </div>
+      )}
     </div>
   );
 }
@@ -597,9 +600,9 @@ function Failure({
         <div>
           <dt className="font-medium">What you can do</dt>
           <dd className="text-muted">
-            Check the statement opens in Excel and has a header row with a date, a
-            description and an amount. Then send it through again — nothing from this
-            attempt was saved over your file.
+            Check the statement opens in Excel and has a header row with a date, a description and
+            an amount. Then send it through again — nothing from this attempt was saved over your
+            file.
           </dd>
         </div>
       </dl>

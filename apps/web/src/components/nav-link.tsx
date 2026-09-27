@@ -91,10 +91,42 @@ export function CategoriseIcon() {
 export function WorkspacesIcon() {
   return (
     <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" aria-hidden>
-      <rect x="1.75" y="2.75" width="5" height="4.5" rx="1.25" stroke="currentColor" strokeWidth="1.4" />
-      <rect x="9.25" y="2.75" width="5" height="4.5" rx="1.25" stroke="currentColor" strokeWidth="1.4" />
-      <rect x="1.75" y="8.75" width="5" height="4.5" rx="1.25" stroke="currentColor" strokeWidth="1.4" />
-      <rect x="9.25" y="8.75" width="5" height="4.5" rx="1.25" stroke="currentColor" strokeWidth="1.4" />
+      <rect
+        x="1.75"
+        y="2.75"
+        width="5"
+        height="4.5"
+        rx="1.25"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      <rect
+        x="9.25"
+        y="2.75"
+        width="5"
+        height="4.5"
+        rx="1.25"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      <rect
+        x="1.75"
+        y="8.75"
+        width="5"
+        height="4.5"
+        rx="1.25"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      <rect
+        x="9.25"
+        y="8.75"
+        width="5"
+        height="4.5"
+        rx="1.25"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
     </svg>
   );
 }
@@ -135,7 +167,12 @@ export function StoreIcon() {
         strokeWidth="1.4"
         strokeLinejoin="round"
       />
-      <path d="M6.25 13.75v-3.5h3.5v3.5" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path
+        d="M6.25 13.75v-3.5h3.5v3.5"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

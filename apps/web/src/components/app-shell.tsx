@@ -211,10 +211,7 @@ export async function AppShell({
  */
 function SignOutButton({ full = false }: { full?: boolean }) {
   return (
-    <button
-      type="submit"
-      className={`${secondaryButtonClass('sm')} ${full ? 'w-full' : ''}`}
-    >
+    <button type="submit" className={`${secondaryButtonClass('sm')} ${full ? 'w-full' : ''}`}>
       Sign out
     </button>
   );

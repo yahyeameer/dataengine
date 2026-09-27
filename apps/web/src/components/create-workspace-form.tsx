@@ -45,7 +45,14 @@ export function CreateWorkspaceForm({ orgId }: { orgId: string }) {
       <input type="hidden" name="orgId" value={orgId} />
 
       <Field label="Workspace name" hint="How your team refers to this engagement.">
-        <input className={inputClass} name="name" required minLength={2} maxLength={200} autoFocus />
+        <input
+          className={inputClass}
+          name="name"
+          required
+          minLength={2}
+          maxLength={200}
+          autoFocus
+        />
       </Field>
 
       <Field label="Client name (optional)">

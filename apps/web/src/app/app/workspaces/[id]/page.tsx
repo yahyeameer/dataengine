@@ -3,11 +3,7 @@ import { notFound } from 'next/navigation';
 
 import { AgentPanel } from '@/components/agent-panel';
 import { CleanedDataCard } from '@/components/cleaned-data-card';
-import {
-  DeviationsPanel,
-  type Deviation,
-  type RecipeRun,
-} from '@/components/deviations-panel';
+import { DeviationsPanel, type Deviation, type RecipeRun } from '@/components/deviations-panel';
 import { OperationHistory } from '@/components/operation-history';
 import { ReviewQueue, type ProposedChange } from '@/components/review-queue';
 import { UploadPanel } from '@/components/upload-panel';
@@ -269,7 +265,8 @@ export default async function WorkspacePage({
   });
   const supersededDownloads = readyDownloads.filter((job) => !currentDownloads.includes(job));
 
-  const decisions = (reviewVersionId && changes.length > 0 ? changes.length : 0) + (openRun ? 1 : 0);
+  const decisions =
+    (reviewVersionId && changes.length > 0 ? changes.length : 0) + (openRun ? 1 : 0);
 
   // A workspace nobody has uploaded to yet is a different screen. Tabs on it
   // would be three empty rooms and a locked front door.
@@ -285,10 +282,7 @@ export default async function WorkspacePage({
         subtitle={workspace.client_name ?? 'Client workspace'}
         action={
           !isNew ? (
-            <Link
-              href={`/app/assistant?w=${workspace.id}`}
-              className={secondaryButtonClass('sm')}
-            >
+            <Link href={`/app/assistant?w=${workspace.id}`} className={secondaryButtonClass('sm')}>
               Ask about this client
             </Link>
           ) : null

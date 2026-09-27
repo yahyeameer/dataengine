@@ -100,9 +100,7 @@ const GATED_KINDS = ['kanban_report'] as const;
  * path, and worse for the one that closes it again.
  */
 function allowedKinds(): readonly string[] {
-  return process.env.KANBAN_BRIDGE_ENABLED === 'true'
-    ? [...KINDS, ...GATED_KINDS]
-    : KINDS;
+  return process.env.KANBAN_BRIDGE_ENABLED === 'true' ? [...KINDS, ...GATED_KINDS] : KINDS;
 }
 
 const createSchema = z.object({

@@ -235,9 +235,7 @@ export function DeviationsPanel({
                 {deviation.detail ? ` — ${deviation.detail}` : ''}
               </p>
 
-              {(deviation.affected_rows > 0 ||
-                deviation.materiality ||
-                deviation.column_name) && (
+              {(deviation.affected_rows > 0 || deviation.materiality || deviation.column_name) && (
                 <div className="mt-3 flex flex-wrap items-end gap-x-6 gap-y-3">
                   {deviation.materiality ? (
                     <Fact label="Affected">

@@ -130,10 +130,7 @@ export function AssistantConsole({
     [turns, selectedWorkspaceId],
   );
 
-  const sweepable = useMemo(
-    () => redundantTurns(turns.filter((turn) => !turn.deletedAt)),
-    [turns],
-  );
+  const sweepable = useMemo(() => redundantTurns(turns.filter((turn) => !turn.deletedAt)), [turns]);
 
   const selectedWorkspace = workspaces.find((w) => w.id === selectedWorkspaceId) ?? null;
 
@@ -568,9 +565,7 @@ function BulkBar({
   if (chosen.length > 0) {
     return (
       <div className="flex flex-wrap items-center gap-2 border-b border-border-subtle bg-surface-2/50 px-3 py-2.5">
-        <span className="tabular mr-auto text-[12px] font-medium">
-          {chosen.length} selected
-        </span>
+        <span className="tabular mr-auto text-[12px] font-medium">{chosen.length} selected</span>
 
         {inTrash ? (
           <button
@@ -722,7 +717,9 @@ function HistoryRow({
           onChange={onToggle}
           aria-label={`Select “${turn.question.slice(0, 60)}”`}
           className={`mt-1 h-3.5 w-3.5 shrink-0 cursor-pointer accent-[var(--accent)] transition-opacity ${
-            checked || anySelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'
+            checked || anySelected
+              ? 'opacity-100'
+              : 'opacity-0 group-hover:opacity-100 focus:opacity-100'
           }`}
         />
 
@@ -790,7 +787,9 @@ function IconAction({
       disabled={disabled}
       onClick={onClick}
       className={`cursor-pointer rounded-[var(--radius-sm)] border border-border bg-surface p-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)] disabled:cursor-not-allowed disabled:opacity-50 ${
-        danger ? 'text-subtle hover:border-danger/40 hover:text-danger' : 'text-subtle hover:text-foreground'
+        danger
+          ? 'text-subtle hover:border-danger/40 hover:text-danger'
+          : 'text-subtle hover:text-foreground'
       }`}
     >
       {children}
@@ -825,8 +824,8 @@ function ConfirmPermanentDelete({
             {intent?.title ?? 'Delete for good?'}
           </h2>
           <p className="mt-2 text-[13px] leading-relaxed text-muted">
-            This removes the row from the database. The question, the answer and anything either
-            of them quoted stop existing on the server — there is no undo and no copy kept.
+            This removes the row from the database. The question, the answer and anything either of
+            them quoted stop existing on the server — there is no undo and no copy kept.
           </p>
           <p className="mt-2 text-[13px] leading-relaxed text-muted">
             The activity log records that you deleted{' '}

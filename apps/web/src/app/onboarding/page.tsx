@@ -30,11 +30,13 @@ const NEXT_STEPS = [
   },
   {
     step: 'Add your first client',
-    detail: 'Each client gets a workspace. Data, recipes and the audit trail stay separate between them.',
+    detail:
+      'Each client gets a workspace. Data, recipes and the audit trail stay separate between them.',
   },
   {
     step: 'Upload their spreadsheet',
-    detail: 'As the client sends it. DataEngine finds the real table inside it before anything else happens.',
+    detail:
+      'As the client sends it. DataEngine finds the real table inside it before anything else happens.',
   },
 ];
 
@@ -75,8 +77,8 @@ export default async function OnboardingPage() {
 
             <p className="mt-5 text-[15px] leading-relaxed text-muted">
               A firm is the top of the structure: it owns the workspaces, and a workspace holds one
-              client&rsquo;s data. It is the name that sits above your workspace list, and it is only
-              ever seen by the people you invite into the firm.
+              client&rsquo;s data. It is the name that sits above your workspace list, and it is
+              only ever seen by the people you invite into the firm.
             </p>
 
             {/* The same numbered sequence as the sign-in page's pipeline, so the
@@ -121,7 +123,11 @@ export default async function OnboardingPage() {
                 the shell, so it is also the one screen with no way back out.
                 Somebody who signed in as the wrong account should not have to
                 clear a cookie to fix it. */}
-            <form action="/auth/signout" method="post" className="mt-4 flex items-center justify-center gap-2 px-1">
+            <form
+              action="/auth/signout"
+              method="post"
+              className="mt-4 flex items-center justify-center gap-2 px-1"
+            >
               <span className="truncate text-xs text-subtle" title={user.email ?? undefined}>
                 Signed in as {user.email ?? 'this account'}
               </span>

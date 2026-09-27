@@ -59,9 +59,9 @@ export default async function WorkspacesPage() {
             .select('id, workspace_id, materiality')
             .in('workspace_id', ids)
             .eq('status', 'pending')
-        : Promise.resolve(
-            { data: [] as { id: string; workspace_id: string; materiality: number | null }[] },
-          ),
+        : Promise.resolve({
+            data: [] as { id: string; workspace_id: string; materiality: number | null }[],
+          }),
       // What each workspace has actually been used for. The directory used to
       // say only that a workspace existed and how many datasets were in it,
       // which is true of an empty workspace and a workspace holding a year of
@@ -76,9 +76,9 @@ export default async function WorkspacesPage() {
             .eq('status', 'succeeded')
             .order('created_at', { ascending: false })
             .limit(500)
-        : Promise.resolve(
-            { data: [] as { workspace_id: string; kind: string; created_at: string }[] },
-          ),
+        : Promise.resolve({
+            data: [] as { workspace_id: string; kind: string; created_at: string }[],
+          }),
     ]);
 
   const datasetCount = tally(datasets ?? [], (d) => d.workspace_id);

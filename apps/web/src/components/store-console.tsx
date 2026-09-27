@@ -231,8 +231,7 @@ export function StoreConsole({ workspaces }: { workspaces: StoreWorkspace[] }) {
     () =>
       workers.some(
         (worker) =>
-          isWorkerOnline(worker.last_seen_at) &&
-          (worker.capabilities ?? []).includes('sync_store'),
+          isWorkerOnline(worker.last_seen_at) && (worker.capabilities ?? []).includes('sync_store'),
       ),
     [workers],
   );
@@ -408,9 +407,7 @@ export function StoreConsole({ workspaces }: { workspaces: StoreWorkspace[] }) {
                   type="button"
                   disabled={busy}
                   className={ghostButtonClass('sm')}
-                  onClick={() =>
-                    enqueue('test_store_connection', { connection_id: selected.id })
-                  }
+                  onClick={() => enqueue('test_store_connection', { connection_id: selected.id })}
                 >
                   Check connection
                 </button>
@@ -714,7 +711,8 @@ function SetupHelp({ source, language }: { source: Source; language: SetupLangua
 
           <div>
             <p className="text-sm font-medium">
-              {language === 'so' ? 'Weydii' : 'Ask'}: <span className="font-normal text-muted">{guide.askWho}</span>
+              {language === 'so' ? 'Weydii' : 'Ask'}:{' '}
+              <span className="font-normal text-muted">{guide.askWho}</span>
             </p>
             <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded-[var(--radius-md)] border border-border bg-surface p-3 text-xs leading-relaxed text-muted">
               {guide.request}
@@ -777,7 +775,11 @@ function ScheduleRow({
       <div className="flex flex-wrap items-end gap-3">
         <div className="w-44">
           <Field label="How often">
-            <select className={selectClass} value={cadence} onChange={(e) => setCadence(e.target.value)}>
+            <select
+              className={selectClass}
+              value={cadence}
+              onChange={(e) => setCadence(e.target.value)}
+            >
               {CADENCES.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -788,7 +790,11 @@ function ScheduleRow({
         </div>
         <div className="w-36">
           <Field label="As">
-            <select className={selectClass} value={format} onChange={(e) => setFormat(e.target.value)}>
+            <select
+              className={selectClass}
+              value={format}
+              onChange={(e) => setFormat(e.target.value)}
+            >
               <option value="pdf">PDF</option>
               <option value="xlsx">Excel</option>
               <option value="docx">Word</option>
@@ -796,7 +802,12 @@ function ScheduleRow({
             </select>
           </Field>
         </div>
-        <button type="button" className={buttonClass('sm')} disabled={busy} onClick={() => save(true)}>
+        <button
+          type="button"
+          className={buttonClass('sm')}
+          disabled={busy}
+          onClick={() => save(true)}
+        >
           {existing ? 'Update' : 'Turn on'}
         </button>
         {existing && (
@@ -913,7 +924,10 @@ function ConnectionVerdict({ job }: { job: Job }) {
           {Object.entries(evidence)
             .filter(([, value]) => value !== '' && value !== null && value !== false)
             .map(([key, value]) => (
-              <div key={key} className="rounded-[var(--radius-md)] border border-border bg-surface-2 p-3">
+              <div
+                key={key}
+                className="rounded-[var(--radius-md)] border border-border bg-surface-2 p-3"
+              >
                 <dt className="text-xs text-subtle">{key.replace(/_/g, ' ')}</dt>
                 <dd className="mt-1 text-sm font-medium">{String(value)}</dd>
               </div>
@@ -959,9 +973,7 @@ function ReportCard({ job }: { job: Job }) {
   return (
     <Panel
       title={`Report · ${String(period.label)}`}
-      description={
-        window.start ? `Covering ${window.start} to ${window.end}` : undefined
-      }
+      description={window.start ? `Covering ${window.start} to ${window.end}` : undefined}
       action={
         typeof result.report_path === 'string' ? (
           // By job id, not by path. The download route resolves the object from
@@ -975,7 +987,10 @@ function ReportCard({ job }: { job: Job }) {
     >
       <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {rows.map(([label, value, note]) => (
-          <div key={label} className="rounded-[var(--radius-md)] border border-border bg-surface-2 p-3">
+          <div
+            key={label}
+            className="rounded-[var(--radius-md)] border border-border bg-surface-2 p-3"
+          >
             <dt className="text-xs text-subtle">{label}</dt>
             <dd className="tabular mt-1 text-lg font-semibold">{value}</dd>
             {note && note !== '—' && <dd className="text-xs text-subtle">{note}</dd>}
@@ -994,7 +1009,10 @@ function ReportCard({ job }: { job: Job }) {
                   ? 'border-success/25 bg-success-soft text-success'
                   : 'border-warning/25 bg-warning-soft text-warning';
             return (
-              <li key={`${insight.code}-${index}`} className={`rounded-[var(--radius-md)] border px-3 py-2 text-sm ${tone}`}>
+              <li
+                key={`${insight.code}-${index}`}
+                className={`rounded-[var(--radius-md)] border px-3 py-2 text-sm ${tone}`}
+              >
                 {insight.detail}
               </li>
             );
@@ -1018,7 +1036,10 @@ function RunHistory({ runs, jobs }: { runs: SyncRun[]; jobs: Job[] }) {
   const active = jobs.filter((job) => job.status === 'queued' || job.status === 'running');
 
   return (
-    <Panel title="What the agent has read" description="Newest first, including anything that failed.">
+    <Panel
+      title="What the agent has read"
+      description="Newest first, including anything that failed."
+    >
       {active.length > 0 && (
         <ul className="mb-4 flex flex-col gap-2">
           {active.map((job) => (

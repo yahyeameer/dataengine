@@ -29,7 +29,11 @@ import { createServerSupabase } from '@/lib/supabase/server';
 const settingsSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   status: z.enum(['active', 'paused']).optional(),
-  secondaryCurrency: z.string().regex(/^[A-Za-z]{3,5}$/).nullable().optional(),
+  secondaryCurrency: z
+    .string()
+    .regex(/^[A-Za-z]{3,5}$/)
+    .nullable()
+    .optional(),
   secondaryRate: z.number().positive().nullable().optional(),
   language: z.enum(['en', 'so']).optional(),
   weekStart: z.number().int().min(0).max(6).optional(),
