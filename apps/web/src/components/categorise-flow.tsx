@@ -387,10 +387,17 @@ function Dropzone({
           const file = event.dataTransfer.files?.[0];
           if (file && !busy) onFile(file);
         }}
-        className={`mt-7 flex cursor-pointer flex-col items-center justify-center rounded-[var(--radius-lg)] border border-dashed px-8 py-14 text-center transition-[color,background-color,border-color,box-shadow] duration-[--duration] focus-within:border-accent focus-within:ring-2 focus-within:ring-[var(--accent-ring)] ${
+        // Glass, and still dashed. `.liquid` sets the `border` shorthand, but
+        // the material classes are in `@layer components` and a utility
+        // outranks a layered rule -- so `border-dashed` and the tone colours
+        // below survive it. The drag-over state tints the fill through
+        // `--liquid-tint` rather than replacing it with `bg-accent-soft`,
+        // which would have swapped the panel's body for a flat wash at the one
+        // moment the reader is looking straight at it.
+        className={`liquid liquid--dense mt-7 flex cursor-pointer flex-col items-center justify-center rounded-[var(--radius-lg)] border border-dashed px-8 py-14 text-center transition-[color,background-color,border-color,box-shadow] duration-[--duration] focus-within:border-accent focus-within:ring-2 focus-within:ring-[var(--accent-ring)] ${
           over
-            ? 'border-accent bg-accent-soft'
-            : 'border-border-strong bg-surface hover:border-accent/50'
+            ? 'liquid--accent border-accent'
+            : 'border-border-strong hover:border-accent/50'
         } ${busy ? 'pointer-events-none opacity-70' : ''}`}
       >
         <input

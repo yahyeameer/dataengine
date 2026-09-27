@@ -856,7 +856,10 @@ export function RailSection({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[var(--radius-lg)] border border-border bg-surface p-4">
+    // Glass, like every other panel, but this one stays quiet on purpose: the
+    // rail is read out of the corner of the eye while the task column has the
+    // reader's attention, so it gets the material and none of the emphasis.
+    <section className="liquid liquid--dense rounded-[var(--radius-lg)] p-4">
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <h2 className="text-[11px] font-semibold uppercase tracking-[0.09em] text-subtle">
           {title}

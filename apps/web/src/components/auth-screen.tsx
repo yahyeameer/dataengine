@@ -8,14 +8,19 @@ import { ProductStory } from '@/components/product-story';
  * It exists because they were the same forty lines twice, and a layout kept in
  * two places is a layout that drifts.
  *
- * **This is the one screen in the product that is meant to be looked at.**
+ * **This is the screen in the product that is meant to be looked at.**
  * Everywhere else somebody is working — reading a figure, approving a change,
  * checking a total — and the interface's job is to get out of the way. Here
  * nobody is working yet: they are deciding whether to hand this thing a
- * client's books, and there is nothing else on screen to compete with. So this
- * is where the glass, the ambient light and the depth live, and it is the only
- * place they do. `.liquid` in globals.css says the same thing from the other
- * side.
+ * client's books, and there is nothing else on screen to compete with.
+ *
+ * So this is where the glass runs at full strength. The working screens carry
+ * the same material with `.liquid--dense` over it and the light turned down to
+ * `.ambient--quiet`, which is the same rule applied at the strength each
+ * screen can afford rather than a different one. `.liquid` in globals.css says
+ * it from the other side. `/onboarding` is the third screen of this flow and
+ * is built the same way, without sharing this component — its left column is
+ * its own.
  *
  * The geometry underneath is unchanged and was measured rather than guessed:
  * a 29rem story column, a 25rem card, the 5rem gap it says it is, and a
