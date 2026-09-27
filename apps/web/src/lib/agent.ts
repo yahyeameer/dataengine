@@ -197,7 +197,7 @@ const MONEY_LOCALE: Record<string, string> = {
  * same review queue: its store report was denominated in dollars and shillings
  * while its cleaning proposals were ranked in pounds.
  *
- * Nothing here converts. `materiality_gbp` is whatever the customer's own
+ * Nothing here converts. `materiality` is whatever the customer's own
  * numbers already were; this only labels it correctly instead of asserting a
  * currency nobody checked. The default stays GBP so a caller that has no
  * workspace to hand behaves as it always did.

@@ -279,7 +279,7 @@ def test_blocking_items_sort_above_everything(table, profile):
 
 def test_review_items_are_ranked_by_money_not_row_count(table, profile):
     review = [p for p in build_proposals(table, profile) if p.confidence == "medium"]
-    amounts = [p.materiality_gbp or 0 for p in review]
+    amounts = [p.materiality or 0 for p in review]
     assert amounts == sorted(amounts, reverse=True)
     # The date proposal touches one row and outranks the two-row supplier merge
     # because it is worth more. Section 5.2's whole point.

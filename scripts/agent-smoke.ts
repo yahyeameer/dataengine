@@ -137,7 +137,7 @@ async function seedProposal(versionId: string, groupKey: string) {
         evidence: { groups: [] },
         confidence: 'medium',
         affected_rows: 2,
-        materiality_gbp: '1200.00',
+        materiality: '1200.00',
       },
     ],
   });

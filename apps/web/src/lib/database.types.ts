@@ -552,7 +552,7 @@ export type Database = {
           evidence: Json
           group_key: string
           id: string
-          materiality_gbp: number | null
+          materiality: number | null
           resolution: Database["public"]["Enums"]["deviation_resolution"]
           resolution_note: string | null
           resolved_at: string | null
@@ -574,7 +574,7 @@ export type Database = {
           evidence?: Json
           group_key: string
           id?: string
-          materiality_gbp?: number | null
+          materiality?: number | null
           resolution?: Database["public"]["Enums"]["deviation_resolution"]
           resolution_note?: string | null
           resolved_at?: string | null
@@ -596,7 +596,7 @@ export type Database = {
           evidence?: Json
           group_key?: string
           id?: string
-          materiality_gbp?: number | null
+          materiality?: number | null
           resolution?: Database["public"]["Enums"]["deviation_resolution"]
           resolution_note?: string | null
           resolved_at?: string | null
@@ -823,7 +823,7 @@ export type Database = {
           group_key: string
           id: string
           job_id: string | null
-          materiality_gbp: number | null
+          materiality: number | null
           operation: Json
           rationale: string
           status: Database["public"]["Enums"]["proposed_change_status"]
@@ -844,7 +844,7 @@ export type Database = {
           group_key: string
           id?: string
           job_id?: string | null
-          materiality_gbp?: number | null
+          materiality?: number | null
           operation: Json
           rationale: string
           status?: Database["public"]["Enums"]["proposed_change_status"]
@@ -865,7 +865,7 @@ export type Database = {
           group_key?: string
           id?: string
           job_id?: string | null
-          materiality_gbp?: number | null
+          materiality?: number | null
           operation?: Json
           rationale?: string
           status?: Database["public"]["Enums"]["proposed_change_status"]
@@ -1973,7 +1973,7 @@ export type Database = {
           evidence: Json
           group_key: string
           id: string
-          materiality_gbp: number | null
+          materiality: number | null
           resolution: Database["public"]["Enums"]["deviation_resolution"]
           resolution_note: string | null
           resolved_at: string | null

@@ -72,7 +72,7 @@ class Deviation:
     source_value: str | None = None
     suggested_value: str | None = None
     affected_rows: int = 0
-    materiality_gbp: float | None = None
+    materiality: float | None = None
     evidence: dict[str, Any] = field(default_factory=dict)
 
     def to_row(self) -> dict[str, Any]:
@@ -86,7 +86,7 @@ class Deviation:
             "source_value": self.source_value,
             "suggested_value": self.suggested_value,
             "affected_rows": self.affected_rows,
-            "materiality_gbp": self.materiality_gbp,
+            "materiality": self.materiality,
             "evidence": self.evidence,
         }
 
@@ -135,9 +135,9 @@ class ReplayResult:
             "auto_corrections": self.auto_corrections,
             "deviations": len(self.deviations),
             "by_severity": by_severity,
-            "review_materiality_gbp": round(
+            "review_materiality": round(
                 sum(
-                    deviation.materiality_gbp or 0
+                    deviation.materiality or 0
                     for deviation in self.deviations
                     if deviation.severity != "auto"
                 ),
@@ -547,7 +547,7 @@ def _resolve_mapping_step(
                     source_value=raw,
                     suggested_value=suggestion,
                     affected_rows=count,
-                    materiality_gbp=materiality,
+                    materiality=materiality,
                     evidence={"occurrences": count, "candidates": canonical[:10]},
                 )
             )
@@ -566,7 +566,7 @@ def _resolve_mapping_step(
                     column_name=column,
                     source_value=raw,
                     affected_rows=count,
-                    materiality_gbp=materiality,
+                    materiality=materiality,
                     evidence={"occurrences": count},
                 )
             )
@@ -686,7 +686,7 @@ def check_invariants(
                                 "parsing problem, and the two look identical in a spreadsheet."
                             ),
                             column_name=column,
-                            materiality_gbp=round(abs(actual - baseline), 2),
+                            materiality=round(abs(actual - baseline), 2),
                             evidence=outcome,
                         )
                     )

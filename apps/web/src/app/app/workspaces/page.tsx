@@ -56,11 +56,11 @@ export default async function WorkspacesPage() {
       ids.length
         ? supabase
             .from('proposed_changes')
-            .select('id, workspace_id, materiality_gbp')
+            .select('id, workspace_id, materiality')
             .in('workspace_id', ids)
             .eq('status', 'pending')
         : Promise.resolve(
-            { data: [] as { id: string; workspace_id: string; materiality_gbp: number | null }[] },
+            { data: [] as { id: string; workspace_id: string; materiality: number | null }[] },
           ),
       // What each workspace has actually been used for. The directory used to
       // say only that a workspace existed and how many datasets were in it,
@@ -87,7 +87,7 @@ export default async function WorkspacesPage() {
   const pendingValue = sumBy(
     openChanges ?? [],
     (c) => c.workspace_id,
-    (c) => Math.abs(Number(c.materiality_gbp ?? 0)),
+    (c) => Math.abs(Number(c.materiality ?? 0)),
   );
 
   // Per workspace: how many operations of each family, and the most recent one.

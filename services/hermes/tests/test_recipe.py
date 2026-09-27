@@ -279,8 +279,8 @@ def test_replay_ranks_deviations_by_money(september, recipe, august_vocabulary, 
     litware = next(d for d in result.deviations if d.source_value == "Litware Inc")
     northwind = next(d for d in result.deviations if d.source_value == "Northwind Supplies Limited")
 
-    assert litware.materiality_gbp == 4200.0
-    assert northwind.materiality_gbp == 1890.25
+    assert litware.materiality == 4200.0
+    assert northwind.materiality == 1890.25
 
 
 def test_a_run_with_open_deviations_needs_review(september, recipe, august_vocabulary, expected_columns):

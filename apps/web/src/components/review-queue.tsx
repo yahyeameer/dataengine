@@ -30,7 +30,7 @@ export type ProposedChange = {
   rationale: string;
   confidence: ChangeConfidence;
   affected_rows: number;
-  materiality_gbp: string | number | null;
+  materiality: string | number | null;
   status: string;
   evidence: Json;
 };
@@ -84,7 +84,7 @@ export function ReviewQueue({
     const tier =
       CONFIDENCE_ORDER.indexOf(a.confidence) - CONFIDENCE_ORDER.indexOf(b.confidence);
     if (tier !== 0) return tier;
-    return Math.abs(Number(b.materiality_gbp ?? 0)) - Math.abs(Number(a.materiality_gbp ?? 0));
+    return Math.abs(Number(b.materiality ?? 0)) - Math.abs(Number(a.materiality ?? 0));
   });
 
   const pending = ordered.filter((change) => change.status === 'pending');
@@ -141,7 +141,7 @@ export function ReviewQueue({
   if (changes.length === 0) return null;
 
   const atStake = pending.reduce(
-    (total, change) => total + Math.abs(Number(change.materiality_gbp ?? 0)),
+    (total, change) => total + Math.abs(Number(change.materiality ?? 0)),
     0,
   );
 
@@ -344,7 +344,7 @@ function ChangeRow({
   currency: string;
 }) {
   const [open, setOpen] = useState(false);
-  const money = formatMoney(change.materiality_gbp, currency);
+  const money = formatMoney(change.materiality, currency);
   const blocking = change.confidence === 'low';
   const deciding = busy?.startsWith(change.group_key) ?? false;
 

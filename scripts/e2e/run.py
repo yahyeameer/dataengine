@@ -369,6 +369,22 @@ def run(supabase: LocalSupabase, storage: Path) -> int:
         "every proposal carries its evidence and a rationale",
         all(p["rationale"] and p["affected_rows"] is not None for p in proposals),
     )
+
+    # The column the queue is ranked by, written by the worker through a jsonb
+    # payload. A rename that misses one side of that wire leaves every figure
+    # null and the ranking silently meaningless -- which looks like a working
+    # queue, so it is asserted rather than assumed.
+    weighted = [p for p in proposals if p["materiality"] is not None]
+    check(
+        "the queue is ranked by money that actually reached the column",
+        len(weighted) >= 2,
+        f"{len(weighted)} of {len(proposals)} proposals carry a materiality",
+    )
+    check(
+        "and the blocking finding is weighted by the 25p it found",
+        any(abs(float(p["materiality"]) - 0.25) < 0.005 for p in weighted),
+        str(sorted(float(p["materiality"]) for p in weighted)),
+    )
     check(
         "the explanations came from the rule engine, with no model configured",
         not worker.llm.enabled,

@@ -19,7 +19,7 @@ and "which 400 rows get changed" is a financial number.
 
 **It does not present 400 decisions.** Section 5.2 is explicit that a queue
 sorted by row count gets abandoned by run 3. Everything is grouped by
-`group_key` and weighted by `materiality_gbp`.
+`group_key` and weighted by `materiality`.
 
 The confidence tiers come straight from section 5.1:
 
@@ -69,7 +69,12 @@ class Proposal:
     confidence: Confidence
     affected_rows: int
     column_name: str | None = None
-    materiality_gbp: float | None = None
+    # What this change would move, in whatever currency the customer's file was
+    # already in. It was `materiality_gbp` until the schema learned that a
+    # workspace has a currency of its own -- the figure never held pounds, it
+    # held whatever the numbers in the workbook were, and the suffix was a guess
+    # written down at a time when every customer was a UK practice.
+    materiality: float | None = None
     evidence: dict[str, Any] = field(default_factory=dict)
 
     def to_row(self, workspace_id: str, dataset_version_id: str, job_id: str) -> dict[str, Any]:
@@ -86,7 +91,7 @@ class Proposal:
             "evidence": self.evidence,
             "confidence": self.confidence,
             "affected_rows": self.affected_rows,
-            "materiality_gbp": self.materiality_gbp,
+            "materiality": self.materiality,
         }
 
 
@@ -143,7 +148,7 @@ def build_proposals(table: ParsedTable, profile: Profile) -> list[Proposal]:
     proposals.sort(
         key=lambda p: (
             tier_order[p.confidence],
-            -(p.materiality_gbp or 0),
+            -(p.materiality or 0),
             -p.affected_rows,
         )
     )
@@ -264,7 +269,7 @@ def _duplicate_proposals(
                 # only the client knows which.
                 confidence="medium",
                 affected_rows=exact["duplicate_rows"],
-                materiality_gbp=_money_at_stake(table, profile, rows),
+                materiality=_money_at_stake(table, profile, rows),
                 evidence={"groups": exact.get("examples", [])},
             )
         )
@@ -296,7 +301,7 @@ def _duplicate_proposals(
                 },
                 confidence="medium",
                 affected_rows=len(rows),
-                materiality_gbp=_money_at_stake(table, profile, rows),
+                materiality=_money_at_stake(table, profile, rows),
                 evidence={"groups": conflicts.get("examples", [])},
             )
         )
@@ -351,7 +356,7 @@ def _entity_proposals(
                 # under any rule loose enough to catch the real duplicates.
                 confidence="medium",
                 affected_rows=len(affected_source_rows),
-                materiality_gbp=_money_at_stake(table, profile, affected_source_rows),
+                materiality=_money_at_stake(table, profile, affected_source_rows),
                 evidence={"groups": finding["groups"]},
             )
         )
@@ -425,7 +430,7 @@ def _date_proposals(
             },
             confidence="medium",
             affected_rows=len(suspects),
-            materiality_gbp=_money_at_stake(
+            materiality=_money_at_stake(
                 table, profile, [item["source_row"] for item in suspects]
             ),
             evidence={"months": months, "suspects": suspects},
@@ -476,7 +481,7 @@ def _totals_proposals(signals: dict[str, Any]) -> list[Proposal]:
             operation={"op": "block_totals_mismatch", "checks": failing},
             confidence="low",
             affected_rows=0,
-            materiality_gbp=round(max(abs(check["difference"]) for check in failing), 2),
+            materiality=round(max(abs(check["difference"]) for check in failing), 2),
             evidence={"checks": totals.get("checks", []), "summary_rows": totals.get("summary_rows", [])},
         )
     ]
@@ -511,7 +516,7 @@ def _vat_proposals(
             },
             confidence="medium",
             affected_rows=vat["anomaly_count"],
-            materiality_gbp=_money_at_stake(table, profile, rows),
+            materiality=_money_at_stake(table, profile, rows),
             evidence={"rate_distribution": vat.get("rate_distribution"), "anomalies": vat.get("anomalies", [])},
         )
     ]
@@ -543,7 +548,7 @@ def _outlier_proposals(
                 },
                 confidence="medium",
                 affected_rows=finding["count"],
-                materiality_gbp=_money_at_stake(table, profile, rows),
+                materiality=_money_at_stake(table, profile, rows),
                 evidence=finding,
             )
         )
@@ -568,8 +573,8 @@ def summarise(proposals: list[Proposal]) -> dict[str, Any]:
         "auto": len(auto),
         "review": len(review),
         "blocking": len(blocking),
-        "review_materiality_gbp": round(
-            sum(p.materiality_gbp or 0 for p in review + blocking), 2
+        "review_materiality": round(
+            sum(p.materiality or 0 for p in review + blocking), 2
         ),
         "blocked": bool(blocking),
         "automation_rate": round(len(auto) / len(proposals), 3) if proposals else 1.0,
@@ -579,7 +584,7 @@ def summarise(proposals: list[Proposal]) -> dict[str, Any]:
                 "title": p.title,
                 "confidence": p.confidence,
                 "affected_rows": p.affected_rows,
-                "materiality_gbp": p.materiality_gbp,
+                "materiality": p.materiality,
             }
             for p in proposals
         ],

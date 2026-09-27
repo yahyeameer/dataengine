@@ -25,7 +25,7 @@ export type Deviation = {
   source_value: string | null;
   suggested_value: string | null;
   affected_rows: number;
-  materiality_gbp: string | number | null;
+  materiality: string | number | null;
   resolution: string;
   evidence: Json;
 };
@@ -232,12 +232,12 @@ export function DeviationsPanel({
               </p>
 
               {(deviation.affected_rows > 0 ||
-                deviation.materiality_gbp ||
+                deviation.materiality ||
                 deviation.column_name) && (
                 <div className="mt-3 flex flex-wrap items-end gap-x-6 gap-y-3">
-                  {deviation.materiality_gbp ? (
+                  {deviation.materiality ? (
                     <Fact label="Affected">
-                      <Money>{formatMoney(deviation.materiality_gbp, currency)}</Money>
+                      <Money>{formatMoney(deviation.materiality, currency)}</Money>
                     </Fact>
                   ) : null}
                   {deviation.affected_rows > 0 ? (

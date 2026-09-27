@@ -201,7 +201,7 @@ class LLMRouter:
                         "operation": proposal["operation"].get("op"),
                         "column": proposal.get("column_name"),
                         "affected_rows": proposal["affected_rows"],
-                        "materiality_gbp": proposal.get("materiality_gbp"),
+                        "materiality": proposal.get("materiality"),
                         "tier": proposal["confidence"],
                         "draft": proposal["rationale"],
                     }

@@ -373,7 +373,7 @@ def build_report_document(
         )
         quality_rows.append(["Changes needing review", str(proposals_summary.get("review", 0))])
         quality_rows.append(
-            ["Value under review", _money(proposals_summary.get("review_materiality_gbp"))]
+            ["Value under review", _money(proposals_summary.get("review_materiality"))]
         )
 
     blocks.append(Table(["Check", "Result"], quality_rows, numeric=(1,)))

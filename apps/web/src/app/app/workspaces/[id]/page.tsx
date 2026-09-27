@@ -161,14 +161,14 @@ export default async function WorkspacePage({
     const { data: found } = await supabase
       .from('deviations')
       .select(
-        'id, type, severity, title, detail, column_name, source_value, suggested_value, affected_rows, materiality_gbp, resolution, evidence',
+        'id, type, severity, title, detail, column_name, source_value, suggested_value, affected_rows, materiality, resolution, evidence',
       )
       .eq('run_id', openRun.id)
       // Severity ascending puts 'block' first: the enum is declared
       // auto -> review -> block, so descending would bury the one that stops
       // everything underneath the ones that merely ask.
       .order('severity', { ascending: false })
-      .order('materiality_gbp', { ascending: false, nullsFirst: false });
+      .order('materiality', { ascending: false, nullsFirst: false });
 
     runDeviations = (found ?? []) as Deviation[];
   }
@@ -198,7 +198,7 @@ export default async function WorkspacePage({
     const { data: openChanges } = await supabase
       .from('proposed_changes')
       .select(
-        'id, group_key, step_type, column_name, title, rationale, confidence, affected_rows, materiality_gbp, status, evidence, dataset_version_id, created_at',
+        'id, group_key, step_type, column_name, title, rationale, confidence, affected_rows, materiality, status, evidence, dataset_version_id, created_at',
       )
       .eq('workspace_id', workspace.id)
       .in('status', ['pending', 'approved'])
@@ -207,7 +207,7 @@ export default async function WorkspacePage({
       // presentation: with the limit below, ascending would be the order that
       // truncates away the blockers.
       .order('confidence', { ascending: false })
-      .order('materiality_gbp', { ascending: false, nullsFirst: false })
+      .order('materiality', { ascending: false, nullsFirst: false })
       .limit(100);
 
     if (openChanges && openChanges.length > 0) {
