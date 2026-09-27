@@ -377,6 +377,50 @@ def test_compiler_binds_values_instead_of_interpolating_them():
     assert params == ["'; drop table dataset; --"]
 
 
+def test_every_malformed_spec_is_a_QueryError_and_not_a_surprise():
+    """
+    The spec is written by a language model, so malformed input is a thing that
+    happens rather than a thing that cannot.
+
+    This module's promise is that `QueryError` is "always safe to show a user",
+    and the worker converts exactly that into a readable sentence. Three shapes
+    escaped it: a non-numeric limit raised ValueError, a null selection raised
+    AttributeError, and a negative limit compiled fine and came back from DuckDB
+    as a BinderException. All three reached the worker's catch-all, told the
+    accountant the agent had hit an unexpected error, and -- because only a
+    JobError is non-retryable -- spent two further attempts producing the same
+    non-answer.
+    """
+    columns = {"net_sales", "supplier"}
+    for spec in (
+        {"select": [{"column": "net_sales"}], "limit": "lots"},
+        {"select": [{"column": "net_sales"}], "limit": -5},
+        {"select": [{"column": "net_sales"}], "limit": [10]},
+        {"select": [None]},
+        {"select": [42]},
+    ):
+        with pytest.raises(QueryError):
+            compile_query(spec, columns)
+
+
+def test_a_limit_is_capped_rather_than_refused():
+    """A model asking for a million rows is asking for the ceiling, not an error."""
+    sql, _params, _names = compile_query(
+        {"select": [{"column": "net_sales"}], "limit": 10**9}, {"net_sales"}
+    )
+    assert sql.endswith("limit 1000")
+
+    # And no limit at all means the same ceiling, not "unbounded".
+    sql, _params, _names = compile_query({"select": [{"column": "net_sales"}]}, {"net_sales"})
+    assert sql.endswith("limit 1000")
+
+
+def test_a_zero_limit_is_a_real_question_with_a_real_answer(parquet):
+    """Not an error and not the cap: the answer is "no rows"."""
+    result = run_query(parquet, {"select": [{"column": "net_sales", "agg": "sum"}], "limit": 0})
+    assert result.rows == []
+
+
 def test_compiler_refuses_an_ungrouped_non_aggregate():
     with pytest.raises(QueryError, match="neither grouped nor aggregated"):
         compile_query(

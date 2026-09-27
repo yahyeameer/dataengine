@@ -121,6 +121,15 @@ def compile_query(spec: dict[str, Any], columns: set[str]) -> tuple[str, list[An
     for item in select_specs:
         if isinstance(item, str):
             item = {"column": item}
+        if not isinstance(item, dict):
+            # The spec comes from a model, so a malformed item is a thing that
+            # happens rather than a thing that should be impossible. Raised as a
+            # QueryError because that is the type this module promises is "always
+            # safe to show a user" -- an AttributeError here reached the worker's
+            # catch-all instead, told the accountant the agent had hit an
+            # unexpected error, and was retried twice more to produce the same
+            # non-answer three times.
+            raise QueryError(f"{item!r} is not a column or a selection")
         column_name = item.get("column")
         aggregate = item.get("agg")
 
@@ -190,11 +199,37 @@ def compile_query(spec: dict[str, Any], columns: set[str]) -> tuple[str, list[An
             clauses.append(f"{target} {direction}")
         sql += " order by " + ", ".join(clauses)
 
-    limit = spec.get("limit")
-    limit = MAX_LIMIT if limit is None else min(int(limit), MAX_LIMIT)
-    sql += f" limit {limit}"
+    sql += f" limit {_limit(spec.get('limit'))}"
 
     return sql, params, output_names
+
+
+def _limit(value: Any) -> int:
+    """
+    A row ceiling, from a spec a model wrote.
+
+    Three ways this used to escape the QueryError contract, all of them reachable
+    because the value arrives from a language model rather than from code:
+    `"lots"` raised ValueError, a negative reached DuckDB and came back as a
+    BinderException, and either way the worker reported an unexpected error and
+    spent two more attempts reproducing it.
+
+    A missing limit is the cap, not an error: the caller asked for "everything",
+    and everything is bounded here.
+    """
+    if value is None:
+        return MAX_LIMIT
+    try:
+        requested = int(value)
+    except (TypeError, ValueError) as error:
+        raise QueryError(f"limit must be a whole number, got {value!r}") from error
+    if requested < 0:
+        raise QueryError(f"limit cannot be negative, got {requested}")
+    if requested == 0:
+        # Not an error and not the cap. A model that asks for no rows has asked
+        # a question whose answer is "none", and DuckDB is happy to say so.
+        return 0
+    return min(requested, MAX_LIMIT)
 
 
 def _compile_filters(

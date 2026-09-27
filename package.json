@@ -14,6 +14,8 @@
     "test:agent": "tsx scripts/agent-smoke.ts",
     "test:e2e": "tsx scripts/e2e-upload.ts",
     "test:agent:e2e": "tsx scripts/agent-e2e.ts",
+    "test:pipeline": "scripts/e2e/bootstrap.sh && scripts/e2e/run.sh",
+    "test:pipeline:db": "scripts/e2e/bootstrap.sh",
     "fixtures": "python scripts/make_messy_fixture.py",
     "test:health": "tsx scripts/health-banner-smoke.ts"
   },

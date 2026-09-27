@@ -183,9 +183,32 @@ npm run test:isolation      # cross-tenant isolation + append-only guarantees
 npm run test:agent          # agent tenancy, worker privilege, queue protocol
 npm run test:e2e            # full upload flow against the running dev server
 npm run test:agent:e2e      # the agent seam over real HTTP, worker included
+npm run test:pipeline       # the whole pipeline, real Postgres, no Docker
 
 cd services/hermes && .venv/Scripts/python -m pytest    # the agent's own tools
 ```
+
+`test:pipeline` is the one that needs nothing but a `postgresql-16` package. The
+four suites above it all need a local Supabase stack, which needs Docker — so
+until it existed, the agent, the part of this product with the customer's money
+in it, had no end-to-end coverage that could run on a CI box or in a sandbox.
+
+It builds a throwaway database from `supabase/migrations`, then drives the real
+`Worker` class through `enqueue → claim → run → finish` over two months of a
+firm's work and one Somali shop's: parse a messy workbook, profile it, propose
+changes, approve all but the blocker, write a new version, report on it; then
+month two arrives with the same layout, matches the captured recipe and replays
+it; then a retailer connects a spreadsheet store and gets a monthly report in
+Somali. Only PostgREST and the object store are substituted, and
+[`scripts/e2e/local_supabase.py`](./scripts/e2e/local_supabase.py) says exactly
+what that leaves untested.
+
+It is a different kind of test from the pytest suite, which is pure and fast and
+knows nothing about a database. This one exists for the bugs that live *between*
+the parts — a handler calling an RPC with a parameter that does not exist, a
+policy without the grant it assumes, an extension in the wrong schema — none of
+which a unit test with a hand-written fake can see, because the fake agrees with
+whatever the caller says.
 
 The store connectors add three suites inside that last one, and they run with no
 database, no network and no model: `test_retail.py` (the period engine, the
