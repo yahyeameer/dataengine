@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 /**
  * The primitives everything else is built from.
@@ -28,7 +28,11 @@ export function Card({
 }) {
   return (
     <Tag
-      className={`rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-md)] ${className}`}
+      // `liquid` carries the fill, the border and the specular edge. A panel on
+      // a working screen is the *container*; what goes inside it — a table, a
+      // list of proposals — keeps a calmer, more solid ground of its own, so a
+      // figure is never read over a blur. See `.liquid` and `TableShell`.
+      className={`liquid liquid--dense rounded-[var(--radius-lg)] ${className}`}
     >
       {children}
     </Tag>
@@ -631,12 +635,23 @@ export function TableShell({
       // scrollbar only appears once you are already scrolling -- so every
       // column past the second was reachable and undiscoverable, which for a
       // reader is the same as absent. See `.scroll-x` in globals.css.
+      // `--scroll-shadow-bg` is set because `.scroll-x` matches its edge covers
+      // to the surface it sits on, and inside a glass panel that is no longer
+      // `surface`. It is also why the table keeps a ground of its own rather
+      // than inheriting the blur: a column of figures read over a backdrop
+      // filter is a column somebody squints at, and this product's whole claim
+      // is that every one of them can be checked.
       className={`scroll-x rounded-[var(--radius-lg)] border border-border ${
         stickyHead
           ? 'overflow-y-auto [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10'
           : ''
       }`}
-      style={stickyHead ? { maxHeight } : undefined}
+      style={
+        {
+          ...(stickyHead ? { maxHeight } : {}),
+          '--scroll-shadow-bg': 'var(--color-surface-2)',
+        } as CSSProperties
+      }
     >
       <table className="w-full text-sm" style={{ minWidth }}>
         {children}

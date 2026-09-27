@@ -55,16 +55,32 @@ export async function AppShell({
   const isAdmin = role === 'owner' || role === 'admin';
 
   return (
-    <div className="flex min-h-svh flex-col bg-background text-foreground">
+    <div className="flex min-h-svh flex-col text-foreground">
+      {/* The same light as the front door, turned well down. The panels above
+          are glass now, and glass with nothing behind it is only a darker box —
+          but this is a screen people sit in front of for an hour, so the washes
+          run at a fraction of the strength and drift at half the speed. The
+          sidebar stays opaque over the top of it, deliberately; see below.
+
+          This wrapper carries no background of its own on purpose. `.ambient`
+          is `z-index: -1`, and a negative-z child paints *before* its parent's
+          block background — so `bg-background` here would have covered the
+          light completely and left the glass with nothing to bend. `body`
+          paints the base colour, which is all this needed it for. */}
+      <div className="ambient ambient--quiet" aria-hidden>
+        <span />
+      </div>
       <SystemHealthBanner role={role} health={health} />
 
       <div className="flex flex-1 flex-col lg:flex-row">
-        {/* Opaque, not frosted. On desktop this rail is a full-height column
-            with nothing scrolling under it, so a backdrop-filter bought no
-            depth and cost a compositing layer — and Chromium sampled the
-            wrong region into it, painting ghosts of the right rail's figures
-            over the empty middle of the sidebar. */}
-        <aside className="sticky top-0 z-30 shrink-0 border-b border-border bg-surface lg:h-svh lg:w-64 lg:self-start lg:border-b-0 lg:border-r">
+        {/* Opaque, not frosted — `.rail` is a fixed gradient, not a
+            backdrop-filter. On desktop this is a full-height column with
+            nothing scrolling under it, so blurring bought no depth and cost a
+            compositing layer — and Chromium sampled the wrong region into it,
+            painting ghosts of the right rail's figures over the empty middle
+            of the sidebar. The gradient gives it the same lit edge as the
+            panels with none of that. */}
+        <aside className="rail sticky top-0 z-30 shrink-0 border-b border-border lg:h-svh lg:w-64 lg:self-start lg:border-b-0 lg:border-r">
           {/* --- Mobile bar --- */}
           <div className="lg:hidden">
             <div className="flex items-center justify-between gap-3 px-4 py-3">
