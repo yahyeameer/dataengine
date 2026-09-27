@@ -85,7 +85,7 @@ export default async function WorkspacePage({
 
   const { data: workspace } = await supabase
     .from('workspaces')
-    .select('id, name, client_name, org_id')
+    .select('id, name, client_name, org_id, currency')
     .eq('id', id)
     .maybeSingle();
 
@@ -351,6 +351,7 @@ export default async function WorkspacePage({
                   workspaceId={workspace.id}
                   run={openRun}
                   deviations={runDeviations}
+                  currency={workspace.currency}
                 />
               ) : null}
 
@@ -359,6 +360,7 @@ export default async function WorkspacePage({
                   workspaceId={workspace.id}
                   datasetVersionId={reviewVersionId}
                   changes={changes}
+                  currency={workspace.currency}
                 />
               ) : null}
 

@@ -90,7 +90,13 @@ export async function AppShell({
               </form>
             </div>
 
-            <nav className="flex items-center gap-1 overflow-x-auto px-3 pb-2.5">
+            {/* Five destinations do not fit on a phone, and this bar is
+                sticky -- so wrapping to a second row would cost that row on
+                every screen for the whole session. It scrolls instead, and
+                `scroll-x` is what makes the scrolling visible: without it
+                Stores and Activity Log sat past the right edge with nothing to
+                suggest they were there. */}
+            <nav className="scroll-x flex items-center gap-1 px-3 pb-2.5">
               {NAV.map((item) => (
                 <NavLink key={item.href} href={item.href} icon={item.icon}>
                   {item.label}

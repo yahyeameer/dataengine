@@ -65,10 +65,13 @@ export function ReviewQueue({
   workspaceId,
   datasetVersionId,
   changes,
+  currency = 'GBP',
 }: {
   workspaceId: string;
   datasetVersionId: string;
   changes: ProposedChange[];
+  /** The workspace's own currency. The figures are already in it; nothing converts. */
+  currency?: string;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -172,7 +175,7 @@ export function ReviewQueue({
               </Fact>
               {atStake > 0 && (
                 <Fact label="Affected">
-                  <Money size="lg">{formatMoney(atStake)}</Money>
+                  <Money size="lg">{formatMoney(atStake, currency)}</Money>
                 </Fact>
               )}
             </div>
@@ -197,7 +200,13 @@ export function ReviewQueue({
           </div>
           <ul className="divide-y divide-danger/15">
             {blocking.map((change) => (
-              <ChangeRow key={change.id} change={change} busy={busy} onDecide={decide} />
+              <ChangeRow
+                key={change.id}
+                change={change}
+                busy={busy}
+                onDecide={decide}
+                currency={currency}
+              />
             ))}
           </ul>
         </div>
@@ -207,7 +216,13 @@ export function ReviewQueue({
         <>
           <ul className="divide-y divide-border-subtle overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
             {reviewable.map((change) => (
-              <ChangeRow key={change.id} change={change} busy={busy} onDecide={decide} />
+              <ChangeRow
+                key={change.id}
+                change={change}
+                busy={busy}
+                onDecide={decide}
+                currency={currency}
+              />
             ))}
           </ul>
 
@@ -321,13 +336,15 @@ function ChangeRow({
   change,
   busy,
   onDecide,
+  currency,
 }: {
   change: ProposedChange;
   busy: string | null;
   onDecide: (groupKeys: string[], approve: boolean) => void;
+  currency: string;
 }) {
   const [open, setOpen] = useState(false);
-  const money = formatMoney(change.materiality_gbp);
+  const money = formatMoney(change.materiality_gbp, currency);
   const blocking = change.confidence === 'low';
   const deciding = busy?.startsWith(change.group_key) ?? false;
 

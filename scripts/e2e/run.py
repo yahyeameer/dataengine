@@ -239,6 +239,11 @@ def run(supabase: LocalSupabase, storage: Path) -> int:
             "create_workspace", {"p_org_id": org["id"], "p_name": "Contoso Ltd"}
         )
     check("a firm and a client workspace exist", bool(org["id"] and workspace["id"]))
+    check(
+        "a workspace keeps its books in a stated currency, defaulting to GBP",
+        workspace["currency"] == "GBP",
+        str(workspace.get("currency")),
+    )
 
     # A browser session holds SELECT and nothing else -- there is no
     # INSERT policy on any table -- so the rows below are written the way the
@@ -558,8 +563,13 @@ def run(supabase: LocalSupabase, storage: Path) -> int:
         shop_org = supabase.rpc(
             "create_organization", {"p_name": "Hodan Traders", "p_slug": "hodan"}
         )
+        # The shop keeps dollars, and says so. Before workspaces carried a
+        # currency, its store report was denominated in dollars and shillings
+        # while its cleaning proposals were ranked in pounds by a hard-wired
+        # formatter -- two halves of one product disagreeing about the money.
         shop_ws = supabase.rpc(
-            "create_workspace", {"p_org_id": shop_org["id"], "p_name": "Suuqa Hodan"}
+            "create_workspace",
+            {"p_org_id": shop_org["id"], "p_name": "Suuqa Hodan", "p_currency": "USD"},
         )
         connection = supabase.rpc(
             "create_store_connection",
@@ -574,6 +584,11 @@ def run(supabase: LocalSupabase, storage: Path) -> int:
             },
         )
     check("connecting a store opens its own ledger dataset", bool(connection["dataset_id"]))
+    check(
+        "and the shop's workspace records the currency its books are in",
+        shop_ws["currency"] == "USD",
+        str(shop_ws.get("currency")),
+    )
 
     ledger = build_shop_workbook()
     shop_key = f"{shop_org['id']}/{shop_ws['id']}/2026-08/iibka.xlsx"

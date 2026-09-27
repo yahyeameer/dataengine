@@ -3,7 +3,14 @@
 import { useActionState, useEffect, useRef, useState } from 'react';
 
 import { createWorkspace, type ActionState } from '@/app/actions';
-import { ErrorText, Field, buttonClass, inputClass, secondaryButtonClass } from '@/components/ui';
+import {
+  ErrorText,
+  Field,
+  buttonClass,
+  inputClass,
+  secondaryButtonClass,
+  selectClass,
+} from '@/components/ui';
 
 const initialState: ActionState = { error: null };
 
@@ -43,6 +50,20 @@ export function CreateWorkspaceForm({ orgId }: { orgId: string }) {
 
       <Field label="Client name (optional)">
         <input className={inputClass} name="clientName" maxLength={200} />
+      </Field>
+
+      <Field
+        label="Currency"
+        hint="What this client's books are already in. Nothing is converted — it is what the figures on the review queue are labelled with."
+      >
+        <select className={selectClass} name="currency" defaultValue="GBP">
+          <option value="GBP">GBP — pound sterling</option>
+          <option value="USD">USD — US dollar</option>
+          <option value="EUR">EUR — euro</option>
+          <option value="SOS">SOS — Somali shilling</option>
+          <option value="AED">AED — UAE dirham</option>
+          <option value="KES">KES — Kenyan shilling</option>
+        </select>
       </Field>
 
       <ErrorText>{state.error}</ErrorText>

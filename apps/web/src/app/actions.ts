@@ -26,6 +26,16 @@ const workspaceSchema = z.object({
   orgId: z.string().uuid(),
   name: z.string().trim().min(2, 'Give the workspace a name').max(200),
   clientName: z.string().trim().max(200).optional(),
+  // What this client's books are already in. Not a conversion rate and nothing
+  // converts: it is what the materiality figures on the review queue get
+  // labelled with, so a shop keeping dollars stops being told its proposals are
+  // worth pounds.
+  currency: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z]{3}$/, 'Use a three-letter currency code, like USD')
+    .optional(),
 });
 
 /** "Hendricks & Co." -> "hendricks-co". Uniqueness is the database's job. */
@@ -86,6 +96,7 @@ export async function createWorkspace(
     orgId: formData.get('orgId'),
     name: formData.get('name'),
     clientName: formData.get('clientName') || undefined,
+    currency: formData.get('currency') || undefined,
   });
 
   if (!parsed.success) {
@@ -98,6 +109,7 @@ export async function createWorkspace(
     p_org_id: parsed.data.orgId,
     p_name: parsed.data.name,
     p_client_name: parsed.data.clientName ?? undefined,
+    p_currency: parsed.data.currency ?? undefined,
   });
 
   if (error) {

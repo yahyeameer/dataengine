@@ -1287,6 +1287,7 @@ export type Database = {
           client_name: string | null
           created_at: string
           created_by: string
+          currency: string
           id: string
           name: string
           org_id: string
@@ -1296,6 +1297,7 @@ export type Database = {
           client_name?: string | null
           created_at?: string
           created_by: string
+          currency?: string
           id?: string
           name: string
           org_id: string
@@ -1305,6 +1307,7 @@ export type Database = {
           client_name?: string | null
           created_at?: string
           created_by?: string
+          currency?: string
           id?: string
           name?: string
           org_id?: string
@@ -1588,11 +1591,17 @@ export type Database = {
         }
       }
       create_workspace: {
-        Args: { p_client_name?: string; p_name: string; p_org_id: string }
+        Args: {
+          p_client_name?: string
+          p_currency?: string
+          p_name: string
+          p_org_id: string
+        }
         Returns: {
           client_name: string | null
           created_at: string
           created_by: string
+          currency: string
           id: string
           name: string
           org_id: string

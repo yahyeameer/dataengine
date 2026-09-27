@@ -47,6 +47,8 @@ export type WorkspaceRow = {
   waiting: number;
   /** The money those proposals touch, summed. */
   atStake: number;
+  /** The workspace's own currency. The figure is already in it; nothing converts. */
+  currency: string;
   /**
    * "2 days ago", computed on the server.
    *
@@ -225,7 +227,7 @@ function WorkspaceRowItem({ workspace }: { workspace: WorkspaceRow }) {
               </p>
               {workspace.atStake > 0 && (
                 <p className="tabular mt-0.5 text-[12px] text-muted">
-                  {formatMoney(workspace.atStake)}
+                  {formatMoney(workspace.atStake, workspace.currency)}
                 </p>
               )}
             </div>

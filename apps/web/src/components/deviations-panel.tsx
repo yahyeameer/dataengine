@@ -89,10 +89,13 @@ export function DeviationsPanel({
   workspaceId,
   run,
   deviations,
+  currency = 'GBP',
 }: {
   workspaceId: string;
   run: RecipeRun;
   deviations: Deviation[];
+  /** The workspace's own currency. The figures are already in it; nothing converts. */
+  currency?: string;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -234,7 +237,7 @@ export function DeviationsPanel({
                 <div className="mt-3 flex flex-wrap items-end gap-x-6 gap-y-3">
                   {deviation.materiality_gbp ? (
                     <Fact label="Affected">
-                      <Money>{formatMoney(deviation.materiality_gbp)}</Money>
+                      <Money>{formatMoney(deviation.materiality_gbp, currency)}</Money>
                     </Fact>
                   ) : null}
                   {deviation.affected_rows > 0 ? (

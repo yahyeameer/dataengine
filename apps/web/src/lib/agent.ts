@@ -170,16 +170,64 @@ export function isTerminal(status: AgentJobStatus): boolean {
   return status === 'succeeded' || status === 'failed' || status === 'cancelled';
 }
 
-/** £4,219.00, or an em dash when a change has no monetary weight. */
-export function formatMoney(value: number | string | null | undefined): string {
+/**
+ * The locale a currency reads most naturally in.
+ *
+ * Only the separators and symbol placement come from this; the currency itself
+ * is always stated explicitly. A short map rather than the browser's locale,
+ * because a UK practice opening the dashboard on a laptop set to US English
+ * should still see £1,234.56 and not £1,234.56 rendered as if it were dollars.
+ */
+const MONEY_LOCALE: Record<string, string> = {
+  GBP: 'en-GB',
+  EUR: 'en-IE',
+  USD: 'en-US',
+  SOS: 'en-US',
+  AED: 'en-AE',
+  KES: 'en-KE',
+};
+
+/**
+ * £4,219.00 — or $4,219.00, or Sh4,219 — and an em dash when a change has no
+ * monetary weight.
+ *
+ * The currency is the workspace's, not a constant. This used to be hard-wired
+ * to GBP, which was true enough while every customer was a UK accounting
+ * practice and stopped being true the moment a shop in Bakaara could use the
+ * same review queue: its store report was denominated in dollars and shillings
+ * while its cleaning proposals were ranked in pounds.
+ *
+ * Nothing here converts. `materiality_gbp` is whatever the customer's own
+ * numbers already were; this only labels it correctly instead of asserting a
+ * currency nobody checked. The default stays GBP so a caller that has no
+ * workspace to hand behaves as it always did.
+ *
+ * `narrowSymbol` matches the store reports, so $ is $ in both halves of the
+ * product rather than US$ in one of them. A currency with no narrow symbol —
+ * the Somali shilling among them — falls back to its code, which is the honest
+ * rendering.
+ */
+export function formatMoney(
+  value: number | string | null | undefined,
+  currency: string = 'GBP',
+): string {
   if (value === null || value === undefined || value === '') return '—';
   const amount = typeof value === 'string' ? Number(value) : value;
   if (Number.isNaN(amount)) return '—';
-  return new Intl.NumberFormat('en-GB', {
-    style: 'currency',
-    currency: 'GBP',
-    maximumFractionDigits: 2,
-  }).format(amount);
+
+  const code = /^[A-Za-z]{3}$/.test(currency) ? currency.toUpperCase() : 'GBP';
+  try {
+    return new Intl.NumberFormat(MONEY_LOCALE[code] ?? 'en-GB', {
+      style: 'currency',
+      currency: code,
+      currencyDisplay: 'narrowSymbol',
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    // An unknown-but-well-formed code reaches here on runtimes that refuse it.
+    // Better a figure with its code beside it than no figure at all.
+    return `${code} ${amount.toLocaleString('en-GB', { maximumFractionDigits: 2 })}`;
+  }
 }
 
 /** "2 minutes ago" — the only thing anyone wants to know about a job's age. */

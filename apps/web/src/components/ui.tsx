@@ -626,7 +626,12 @@ export function TableShell({
       // the *page* scrolled past it: two hundred audit rows, twenty thousand
       // pixels, and a header visible for the first screenful only. Capping the
       // height is what makes the header actually stick.
-      className={`overflow-x-auto rounded-[var(--radius-lg)] border border-border bg-surface ${
+      // `scroll-x` carries the overflow *and* the shadow that says the box
+      // scrolls. On a phone the audit table is 46rem inside 390px, and a touch
+      // scrollbar only appears once you are already scrolling -- so every
+      // column past the second was reachable and undiscoverable, which for a
+      // reader is the same as absent. See `.scroll-x` in globals.css.
+      className={`scroll-x rounded-[var(--radius-lg)] border border-border ${
         stickyHead
           ? 'overflow-y-auto [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10'
           : ''

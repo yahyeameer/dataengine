@@ -242,6 +242,45 @@ pre {
   .skeleton::after { display: none; }
 }
 
+/* --- horizontal scroll ------------------------------------------------------
+   A box that scrolls sideways, and says so.
+
+   Two places in the product scroll horizontally on a narrow screen: the audit
+   table, which is 46rem wide inside whatever the phone is, and the mobile
+   navigation, which is five destinations wide inside the same. Both worked and
+   neither *looked* like it did. A touch scrollbar is an overlay that appears
+   only once you are already scrolling, so the columns past `Entity` and the
+   destinations past `Assistant` were reachable but undiscoverable -- which for
+   a reader is the same as absent.
+
+   Scroll shadows rather than a fade, a chevron or a "swipe for more" label,
+   because this is the one affordance that is *conditional without JavaScript*.
+   The two `local` layers scroll with the content and cover the edges; the two
+   `scroll` layers are fixed to the box and revealed only when a cover has moved
+   away. So the shadow on the right exists exactly while there is something to
+   the right, appears and disappears as you scroll, and costs no client
+   component -- which matters because both of these are server-rendered.
+
+   `--scroll-shadow-bg` is the surface the box sits on, because the covers have
+   to match it to hide anything. It defaults to `surface` and is overridden
+   inline where that is not true.
+   -------------------------------------------------------------------------- */
+.scroll-x {
+  overflow-x: auto;
+  background-color: var(--scroll-shadow-bg, var(--color-surface));
+  background-image:
+    linear-gradient(to right, var(--scroll-shadow-bg, var(--color-surface)) 40%, transparent),
+    linear-gradient(to left, var(--scroll-shadow-bg, var(--color-surface)) 40%, transparent),
+    radial-gradient(farthest-side at 0 50%, rgb(0 0 0 / 0.5), transparent),
+    radial-gradient(farthest-side at 100% 50%, rgb(0 0 0 / 0.5), transparent);
+  background-position: 0 0, 100% 0, 0 0, 100% 0;
+  background-size: 32px 100%, 32px 100%, 16px 100%, 16px 100%;
+  background-repeat: no-repeat;
+  /* The covers travel with the content; the shadows stay with the box. This
+     line is the whole trick. */
+  background-attachment: local, local, scroll, scroll;
+}
+
 /* --- glass ------------------------------------------------------------------
    Used for the surfaces that float above the page rather than sit in it: the
    auth panel, the sticky application bar, the AI panels. A frosted interface is

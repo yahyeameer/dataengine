@@ -32,7 +32,7 @@ export default async function WorkspacesPage() {
   // filter is the server-side half of the same check (section 13).
   const { data: workspaces, error } = await supabase
     .from('workspaces')
-    .select('id, name, client_name, status, created_at')
+    .select('id, name, client_name, status, created_at, currency')
     .eq('org_id', org.id)
     .eq('status', 'active')
     .order('created_at', { ascending: false });
@@ -127,6 +127,7 @@ export default async function WorkspacesPage() {
       processing: workingCount.get(workspace.id) ?? 0,
       waiting: pendingCount.get(workspace.id) ?? 0,
       atStake: pendingValue.get(workspace.id) ?? 0,
+      currency: workspace.currency,
       lastActivityLabel: ago(latest.get(workspace.id)?.at ?? null),
       lastOperationLabel: latest.get(workspace.id)?.label ?? null,
       families: families.get(workspace.id) ?? {},
