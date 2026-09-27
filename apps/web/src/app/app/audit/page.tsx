@@ -1,4 +1,4 @@
-import { EmptyState, PageHeader, TableShell, Td, Th, tableBodyClass } from '@/components/ui';
+import { EmptyState, PageHeader, Panel, TableShell, Td, Th, tableBodyClass } from '@/components/ui';
 import { requireCurrentOrg } from '@/lib/authz';
 import { createServerSupabase } from '@/lib/supabase/server';
 
@@ -50,14 +50,16 @@ export default async function AuditPage() {
           body="Every upload, job and approval is recorded here the moment it happens, and nothing in this application can edit or remove an entry."
         />
       ) : (
-        <>
-          <p className="mb-3 text-[13px] text-subtle">
-            Showing the{' '}
-            <span className="tabular font-medium text-muted">{rows.length}</span> most recent
-            {rows.length === LIMIT ? ' of this organisation’s entries' : ' entries'}, newest
-            first.
-          </p>
-
+        // The table is the page, so it is given the panel every other screen
+        // puts its table in rather than sitting on the background as the one
+        // bare table in the product. The line that used to float above it is
+        // the panel's description now, which is where a reader looks for it.
+        <Panel
+          title="The trail"
+          description={`Showing the ${rows.length} most recent${
+            rows.length === LIMIT ? ' of this organisation’s entries' : ' entries'
+          }, newest first.`}
+        >
           <TableShell stickyHead minWidth="46rem">
             <thead>
               <tr>
@@ -118,7 +120,7 @@ export default async function AuditPage() {
               })}
             </tbody>
           </TableShell>
-        </>
+        </Panel>
       )}
     </>
   );

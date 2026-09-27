@@ -30,7 +30,7 @@ export function WorkspaceFiles({
   datasetNames: Map<string, string>;
 }) {
   return (
-    <ul className="divide-y divide-border-subtle overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
+    <ul className="liquid liquid--dense divide-y divide-border-subtle overflow-hidden rounded-[var(--radius-lg)]">
       {uploads.map((upload) => (
         <li
           key={upload.id}

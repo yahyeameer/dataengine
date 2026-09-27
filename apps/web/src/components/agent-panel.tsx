@@ -128,7 +128,11 @@ export function AgentPanel({
   const recent = jobs.slice(0, 5);
 
   return (
-    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-xl backdrop-blur-xl">
+    // This carried `backdrop-blur-xl` behind an opaque `bg-surface`, which
+    // blurs nothing and costs a compositing layer for it. `liquid` is the blur
+    // it was reaching for, over a fill translucent enough for it to do
+    // something.
+    <section className="liquid liquid--dense overflow-hidden rounded-[var(--radius-lg)]">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border-subtle bg-background/50 px-5 py-3.5">
         <EngineDot state={state} busy={active > 0} />
         <span className="text-sm font-bold text-foreground">{ENGINE_STATE_LABELS[state]}</span>

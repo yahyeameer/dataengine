@@ -719,14 +719,22 @@ export function Stat({
   hint?: string;
   tone?: 'neutral' | 'accent' | 'warning';
 }) {
+  // The tone used to be a `bg-*` wash over an opaque fill. On glass it has to
+  // be a tint *over* the fill instead: a `bg-accent-soft/30` utility would
+  // replace `.liquid--dense`'s background outright -- utilities outrank the
+  // material layer, by design -- and the figure would end up read over nothing
+  // but the ambient light. `--liquid-tint` paints on top and leaves the fill,
+  // which is what holds the contrast, alone.
   const accentRing = {
     neutral: 'border-border',
-    accent: 'border-accent/30 bg-accent-soft/30',
-    warning: 'border-warning/30 bg-warning-soft/40',
+    accent: 'liquid--accent border-accent/30',
+    warning: 'liquid--warning border-warning/30',
   }[tone];
 
   return (
-    <div className={`rounded-[var(--radius-lg)] border bg-surface px-4 py-3.5 ${accentRing}`}>
+    <div
+      className={`liquid liquid--dense rounded-[var(--radius-lg)] border px-4 py-3.5 ${accentRing}`}
+    >
       <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-subtle">{label}</p>
       <p className="mt-1.5 text-2xl font-semibold tabular leading-none tracking-tight">{value}</p>
       {hint && <p className="mt-1.5 text-xs text-subtle">{hint}</p>}

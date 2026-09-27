@@ -292,25 +292,79 @@ pre {
   animation-duration: 60s;
 }
 
+/* --- the material layer ------------------------------------------------------
+   Everything from here to the end of this block is in `@layer components`,
+   which puts it *below* Tailwind's utilities in the cascade.
+
+   That is load-bearing rather than tidiness. `.liquid` sets the `border`
+   shorthand, and unlayered CSS beats a layered utility no matter what order
+   the class attribute lists them in -- so left outside a layer, `.liquid`
+   would silently swallow the `border-warning/35` that marks an unanswered
+   deviation and the `border-accent/30` on a stat that wants attention. A
+   component class losing to a utility is the behaviour anybody writing
+   `className="liquid border-warning/35"` expects; this is what makes that
+   true.
+   -------------------------------------------------------------------------- */
+@layer components {
+
 /* The panels on a working screen are a denser glass than the front door's.
    That is the whole trick for making this readable: the light is allowed to be
    bright *between* the panels, where nothing is written, and the panel itself
    blocks enough of it that the quietest text on it still clears AA. Raising the
    light and thinning the glass at the same time is what would have pushed
-   `subtle` under 4.5:1. */
-.liquid--dense {
+   `subtle` under 4.5:1.
+
+   Compound, and it has to be. `.liquid` is declared *below* this in the file,
+   and two single-class selectors of equal specificity are settled by source
+   order -- so written as `.liquid--dense` this modifier lost every property it
+   shares with the thing it is modifying, and every panel on every working
+   screen quietly rendered at the front door's 58/68% instead. The compound
+   selector says what was meant: this is `.liquid`, modified. */
+.liquid.liquid--dense {
   background:
+    /* A tone, when a panel has one to carry. Painted *over* the fill rather
+       than replacing it, because the fill is what holds the contrast: a stat
+       that swapped its glass for a wash of accent would be the one panel on
+       the screen whose figure could not be read. See `.liquid--accent`. */
+    var(--liquid-tint, linear-gradient(transparent, transparent)),
     linear-gradient(
       160deg,
       color-mix(in srgb, var(--color-surface-2) 88%, transparent),
       color-mix(in srgb, var(--color-surface) 94%, transparent)
     );
+  /* No hand-written `-webkit-` twin here or anywhere below. Lightning CSS
+     prefixes from browserslist on its own, and writing the prefixed property
+     by hand made it drop the standard one and ship only the alias -- which
+     current Chromium ignores outright, so the blur silently did nothing and
+     every "glass" panel in the product was a flat translucent fill. */
   backdrop-filter: blur(24px) saturate(150%);
-  -webkit-backdrop-filter: blur(24px) saturate(150%);
   box-shadow:
     inset 0 1px 0 0 rgb(255 255 255 / 0.12),
     inset 0 -1px 0 0 rgb(255 255 255 / 0.03),
     var(--shadow-md);
+}
+
+/* The two tones a panel can carry: "this wants your attention" and "this is
+   waiting on you". Flat washes rather than gradients, so the tint reads as the
+   panel being a different colour rather than as more weather.
+
+   6%, and the figure is measured rather than chosen. These replaced a
+   `bg-accent-soft/30` wash that sat on an opaque fill; the same strength over
+   glass lifts the ground far enough that the stat's own label and hint, both
+   `subtle`, land at 4.46:1 and 4.36:1 -- under AA on the two panels the eye is
+   being *directed* to. Stepping down until both cleared put the ceiling at
+   8%; 6% takes it with a margin and still reads as a tinted panel. */
+.liquid--accent {
+  --liquid-tint: linear-gradient(
+    color-mix(in srgb, var(--color-accent) 6%, transparent),
+    color-mix(in srgb, var(--color-accent) 6%, transparent)
+  );
+}
+.liquid--warning {
+  --liquid-tint: linear-gradient(
+    color-mix(in srgb, var(--color-warning) 6%, transparent),
+    color-mix(in srgb, var(--color-warning) 6%, transparent)
+  );
 }
 
 /* The navigation rail, in the same material family as the panels but without
@@ -340,7 +394,6 @@ pre {
 .glass {
   background: color-mix(in srgb, var(--color-surface) 72%, transparent);
   backdrop-filter: blur(16px) saturate(140%);
-  -webkit-backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
 }
 
@@ -349,20 +402,23 @@ pre {
 .glass-bar {
   background: color-mix(in srgb, var(--color-surface) 82%, transparent);
   backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
 }
 
 @supports not (backdrop-filter: blur(1px)) {
   .glass,
   .glass-bar,
   .liquid,
-  .liquid--dense {
+  /* Compound, to match the specificity of the rule it is overriding. A plain
+     `.liquid--dense` here would lose to `.liquid.liquid--dense` above and the
+     fallback would quietly serve a translucent panel on the one engine that
+     cannot blur what is behind it. */
+  .liquid.liquid--dense {
     background: var(--color-surface);
   }
 }
 
 /* --- liquid ------------------------------------------------------------------
-   The heavier glass, for the front door only.
+   The material itself, at the front door's strength.
 
    `.glass` above is the workmanlike version: it frosts a floating surface so
    content can pass under it. This is the one that is meant to be *looked at* —
@@ -370,12 +426,13 @@ pre {
    this with a client's books and there is nothing else on screen competing for
    the attention.
 
-   It is deliberately not available to the data screens. A figure read over a
-   blur is a figure somebody has to squint at, and the whole argument this
-   product makes is that every number can be checked. Glass everywhere would
-   mean glass signifies nothing, which is the reasoning `.glass` already
-   carries; this is the same rule with one loud exception rather than an
-   abandonment of it.
+   The working screens use it too, but always with `.liquid--dense` beside it.
+   The rule that used to keep it off them still holds and is what that modifier
+   exists for: a figure read over a blur is a figure somebody has to squint at,
+   and the whole argument this product makes is that every number can be
+   checked. So the *container* is glass and the ground under a figure is not —
+   a table, a stat, a list of proposals each keep a solid fill, and the light is
+   only allowed to be bright in the gaps between panels.
 
    Three layers make the material, and they have to be in this order:
 
@@ -394,7 +451,6 @@ pre {
       color-mix(in srgb, var(--color-surface) 68%, transparent)
     );
   backdrop-filter: blur(32px) saturate(180%);
-  -webkit-backdrop-filter: blur(32px) saturate(180%);
   border: 1px solid color-mix(in srgb, var(--color-border-strong) 85%, transparent);
   box-shadow:
     /* The specular edge: bright along the top, gone by the middle. */
@@ -404,6 +460,8 @@ pre {
     inset 0 24px 48px -32px rgb(91 157 255 / 0.22),
     var(--shadow-lg);
 }
+
+} /* end @layer components */
 
 /* The light behind the glass. Without something to bend, a blur is just a
    darker box — so the page carries three slow, very low-opacity washes in the

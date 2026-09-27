@@ -151,13 +151,13 @@ export function OperationHistory({
         // Reachable from a link: a dataset can exist with nothing yet run on
         // it, and a family filter can be narrowed to empty. Rendering the list
         // regardless left an empty bordered box that looked like a fault.
-        <p className="rounded-[var(--radius-lg)] border border-border bg-surface px-4 py-6 text-center text-[13px] text-subtle">
+        <p className="liquid liquid--dense rounded-[var(--radius-lg)] px-4 py-6 text-center text-[13px] text-subtle">
           {datasetId
             ? 'Nothing has been run on this dataset yet.'
             : 'No operations of this type in this workspace.'}
         </p>
       ) : (
-        <ul className="divide-y divide-border-subtle overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
+        <ul className="liquid liquid--dense divide-y divide-border-subtle overflow-hidden rounded-[var(--radius-lg)]">
           {shown.map((operation) => (
             <OperationRow
               key={operation.id}

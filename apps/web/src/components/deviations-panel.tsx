@@ -162,7 +162,11 @@ export function DeviationsPanel({
 
   return (
     <section
-      className={`overflow-hidden rounded-[var(--radius-lg)] border bg-surface shadow-[var(--shadow-sm)] ${
+      // The tone lives on the border, and it has to survive `.liquid`, which
+      // sets the `border` shorthand. It does because the material classes are
+      // in `@layer components` and a Tailwind utility outranks a layered rule;
+      // see the material layer in globals.css.
+      className={`liquid liquid--dense overflow-hidden rounded-[var(--radius-lg)] border ${
         answered ? 'border-border' : 'border-warning/35'
       }`}
     >

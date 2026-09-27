@@ -214,7 +214,7 @@ export function ReviewQueue({
 
       {reviewable.length > 0 ? (
         <>
-          <ul className="divide-y divide-border-subtle overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
+          <ul className="liquid liquid--dense divide-y divide-border-subtle overflow-hidden rounded-[var(--radius-lg)]">
             {reviewable.map((change) => (
               <ChangeRow
                 key={change.id}
@@ -257,7 +257,7 @@ export function ReviewQueue({
         <div
           className={`${
             reviewable.length > 0 || blocking.length > 0 ? 'mt-5' : ''
-          } rounded-[var(--radius-lg)] border border-border bg-surface px-5 py-4 shadow-[var(--shadow-sm)]`}
+          } liquid liquid--dense rounded-[var(--radius-lg)] px-5 py-4`}
         >
           <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
             <p className="text-sm">

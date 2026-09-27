@@ -140,7 +140,7 @@ export function WorkspaceIndex({ workspaces }: { workspaces: WorkspaceRow[] }) {
           body="No client workspace matches the filter you have applied. Clear it to see the rest of the firm."
         />
       ) : (
-        <ul className="divide-y divide-border-subtle overflow-hidden rounded-[var(--radius-lg)] border border-border bg-surface shadow-[var(--shadow-sm)]">
+        <ul className="liquid liquid--dense divide-y divide-border-subtle overflow-hidden rounded-[var(--radius-lg)]">
           {shown.map((workspace) => (
             <WorkspaceRowItem key={workspace.id} workspace={workspace} />
           ))}
